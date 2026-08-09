@@ -59,13 +59,19 @@ jobs:
           action: "upload"
           ###### Repository/Build Configurations - These values can be configured to match your app requirements. ######
           # For more information regarding Static Web App workflow configurations, please visit: https://aka.ms/swaworkflowconfig
-          app_location: "/" # App source code path
-          api_location: "" # Api source code path - optional
-          output_location: "dist" # Built app content directory - optional
           # Upload the `dist` produced by the Build step above instead of
           # letting Oryx run its own `npm run build` inside the deploy
           # container, where none of the VITE_* variables exist.
+          #
+          # With `skip_app_build`, `app_location` IS the upload root and
+          # `output_location` is ignored — so it has to point at the built
+          # output. Leaving it as "/" uploads the whole workspace, including
+          # node_modules, and the content server rejects the deploy with
+          # "The number of static files was too large."
           skip_app_build: true
+          app_location: "dist" # Pre-built app content directory
+          api_location: "" # Api source code path - optional
+          output_location: "" # Ignored when the build is skipped
           github_id_token: ${{ steps.idtoken.outputs.result }}
           ###### End of Repository/Build Configurations ######
 
