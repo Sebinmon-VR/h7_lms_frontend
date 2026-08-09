@@ -54,6 +54,21 @@ module.exports = {
           foreground: withOpacity('--info-foreground'),
           soft: withOpacity('--info-soft'),
         },
+        // Playful identity palette. Referenced by name only where a fixed
+        // hue is wanted; subject-driven colour goes through the `--tile`
+        // custom property instead, so one class works for every subject.
+        fun: {
+          1: withOpacity('--fun-1'),
+          2: withOpacity('--fun-2'),
+          3: withOpacity('--fun-3'),
+          4: withOpacity('--fun-4'),
+          5: withOpacity('--fun-5'),
+          6: withOpacity('--fun-6'),
+          7: withOpacity('--fun-7'),
+          8: withOpacity('--fun-8'),
+          9: withOpacity('--fun-9'),
+          ink: withOpacity('--fun-ink'),
+        },
       },
       spacing: {
         // Control height that sits between h-9 and h-10 — the default field size.
@@ -106,6 +121,41 @@ module.exports = {
           '70%': { boxShadow: '0 0 0 10px hsl(var(--primary) / 0)' },
           '100%': { boxShadow: '0 0 0 0 hsl(var(--primary) / 0)' },
         },
+        // Playful surfaces. `confetti-fall` reads --fall-x so each piece
+        // drifts a different way without needing its own keyframe.
+        'confetti-fall': {
+          '0%': { transform: 'translate3d(0,0,0) rotate(0deg)', opacity: '1' },
+          '100%': {
+            transform: 'translate3d(var(--fall-x, 0), 105vh, 0) rotate(var(--fall-spin, 540deg))',
+            opacity: '0',
+          },
+        },
+        'float-slow': {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-8px)' },
+        },
+        'pop-in': {
+          '0%': { transform: 'scale(0.7)', opacity: '0' },
+          '100%': { transform: 'scale(1)', opacity: '1' },
+        },
+        wiggle: {
+          '0%, 100%': { transform: 'rotate(-3deg)' },
+          '50%': { transform: 'rotate(3deg)' },
+        },
+        // Scenery. `doodle-drift` composes with the per-doodle rotation set
+        // inline, which is why the rotation is repeated in every keyframe.
+        'doodle-drift': {
+          '0%, 100%': {
+            transform: 'translate3d(0,0,0) rotate(var(--doodle-rotate, 0deg))',
+          },
+          '50%': {
+            transform: 'translate3d(6px,-16px,0) rotate(calc(var(--doodle-rotate, 0deg) + 8deg))',
+          },
+        },
+        'bloom-drift': {
+          '0%, 100%': { transform: 'translate3d(0,0,0) scale(1)' },
+          '50%': { transform: 'translate3d(4%, 6%, 0) scale(1.12)' },
+        },
       },
       animation: {
         'fade-in': 'fade-in 200ms ease-out',
@@ -114,6 +164,11 @@ module.exports = {
         shimmer: 'shimmer 1.6s infinite',
         'aurora-drift': 'aurora-drift 18s ease-in-out infinite',
         'pulse-ring': 'pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'float-slow': 'float-slow 5s ease-in-out infinite',
+        'pop-in': 'pop-in 450ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+        wiggle: 'wiggle 500ms ease-in-out 2',
+        'doodle-drift': 'doodle-drift 8s ease-in-out infinite',
+        'bloom-drift': 'bloom-drift 26s ease-in-out infinite',
       },
       transitionTimingFunction: {
         spring: 'cubic-bezier(0.22, 1, 0.36, 1)',

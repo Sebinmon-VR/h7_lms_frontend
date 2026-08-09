@@ -39,17 +39,17 @@ export default function TeacherTimetablePage() {
     <>
       <PageHeader
         title="Timetable"
-        description="Your weekly periods, and what is coming up next."
+        description="Your lessons this week, and what is coming up next."
       />
 
       <Tabs defaultValue="week">
         <TabsList>
-          <TabsTrigger value="week">Week</TabsTrigger>
-          <TabsTrigger value="day">Day</TabsTrigger>
+          <TabsTrigger value="week">Whole week</TabsTrigger>
+          <TabsTrigger value="day">One day</TabsTrigger>
         </TabsList>
 
         <TabsContent value="week">
-          <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
+          <div className="grid gap-4 xl:grid-cols-[1fr_19rem]">
             <QueryBoundary
               query={weekQuery}
               loading={<Skeleton className="h-96 rounded-xl" />}

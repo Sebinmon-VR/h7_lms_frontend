@@ -94,12 +94,12 @@ export default function TeacherDashboardPage() {
       <HeroHeader
         eyebrow="Teaching"
         title={`${greeting()}, ${user?.full_name?.split(' ').slice(-1)[0] ?? 'there'}`}
-        description="What needs doing today, and how your classes are tracking."
+        description="Here is what needs doing today."
         actions={
           <Button asChild variant="primary">
             <Link to="/teacher/attendance">
               <CalendarCheck className="size-4" />
-              Take attendance
+              Take the register
             </Link>
           </Button>
         }
@@ -120,17 +120,17 @@ export default function TeacherDashboardPage() {
           <Button asChild variant="outline" size="sm">
             <Link to="/teacher/meetings">
               <Video className="size-4" />
-              Schedule a meeting
+              Set up a live class
             </Link>
           </Button>
         </div>
       </HeroHeader>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard index={0} label="Assignments" value={mappings.length} icon={Layers} tone="primary" />
-        <StatCard index={1} label="Students" value={studentCount} icon={Users} tone="info" />
-        <StatCard index={2} label="Topics logged" value={topicsQuery.data?.length ?? 0} icon={ClipboardList} tone="accent" />
-        <StatCard index={3} label="Materials shared" value={materialsQuery.data?.length ?? 0} icon={Library} tone="success" />
+        <StatCard index={0} label="Classes you teach" value={mappings.length} icon={Layers} tone="primary" />
+        <StatCard index={1} label="Students in your care" value={studentCount} icon={Users} tone="info" />
+        <StatCard index={2} label="Topics you have logged" value={topicsQuery.data?.length ?? 0} icon={ClipboardList} tone="accent" />
+        <StatCard index={3} label="Notes you have shared" value={materialsQuery.data?.length ?? 0} icon={Library} tone="success" />
       </div>
 
       {/* -------------------------------------------------- today's nudges */}
@@ -138,7 +138,7 @@ export default function TeacherDashboardPage() {
         <Card className={pending.length > 0 ? 'mt-5 border-warning/30' : 'mt-5 border-success/30'}>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">
-              {pending.length > 0 ? 'Attendance still to take today' : 'Attendance is up to date'}
+              {pending.length > 0 ? 'Registers still to take today' : 'All registers done — nice one'}
             </CardTitle>
             <CardDescription>{formatDayLabel(today)}</CardDescription>
           </CardHeader>
@@ -147,7 +147,7 @@ export default function TeacherDashboardPage() {
               <Skeleton className="h-10 rounded-lg" />
             ) : pending.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                Every class and subject you teach has attendance recorded for today.
+                Every class you teach has its register taken for today.
               </p>
             ) : (
               <div className="flex flex-wrap gap-2">
@@ -168,8 +168,8 @@ export default function TeacherDashboardPage() {
       <div className="mt-5 grid gap-5 lg:grid-cols-3">
         <ChartCard
           className="lg:col-span-2"
-          title="Attendance rate"
-          description="Share of students marked present, over the last 14 recorded days."
+          title="How many turned up"
+          description="Students marked present, over the last 14 days you recorded."
         >
           {attendanceQuery.isPending ? (
             <Skeleton className="h-56 rounded-lg" />
@@ -237,11 +237,11 @@ export default function TeacherDashboardPage() {
           ) : [...meetings.live, ...meetings.upcoming].length === 0 ? (
             <EmptyState
               icon={<Video />}
-              title="Nothing scheduled"
-              description="Schedule a live class and it will show up here."
+              title="No live classes yet"
+              description="Set one up and it will appear here."
               action={
                 <Button asChild variant="primary" size="sm">
-                  <Link to="/teacher/meetings">Schedule a meeting</Link>
+                  <Link to="/teacher/meetings">Set up a live class</Link>
                 </Button>
               }
             />

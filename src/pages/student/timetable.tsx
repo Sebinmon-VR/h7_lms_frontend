@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DaySchedule, TimetableWeek, UpcomingPeriods } from '@/components/domain/timetable'
+import { FunPageHeader } from '@/components/fun/fun-ui'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { PageHeader } from '@/components/layout/page-header'
 import { AdminStudentNotice, NotEnrolledState, useEnrollmentStatus } from './student-guard'
@@ -37,7 +38,7 @@ export default function StudentTimetablePage() {
   if (notEnrolled) {
     return (
       <>
-        <PageHeader title="Timetable" description="Your weekly class schedule." />
+        <FunPageHeader emoji="🗓️" title="My timetable" />
         <NotEnrolledState />
       </>
     )
@@ -47,23 +48,28 @@ export default function StudentTimetablePage() {
 
   return (
     <>
-      <PageHeader title="Timetable" description="Your weekly classes, and what is coming up next." />
+      <FunPageHeader
+        emoji="🗓️"
+        tone={7}
+        title="My timetable"
+        description="When each of your classes happens."
+      />
 
       <Tabs defaultValue="week">
         <TabsList>
-          <TabsTrigger value="week">Week</TabsTrigger>
-          <TabsTrigger value="day">Day</TabsTrigger>
+          <TabsTrigger value="week">Whole week</TabsTrigger>
+          <TabsTrigger value="day">One day</TabsTrigger>
         </TabsList>
 
         <TabsContent value="week">
-          <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
+          <div className="grid gap-4 xl:grid-cols-[1fr_19rem]">
             <QueryBoundary query={weekQuery} loading={<Skeleton className="h-96 rounded-xl" />}>
               {(entries) => (
                 <TimetableWeek
                   entries={entries}
                   scope="student"
                   today={dayOfWeekFor(new Date())}
-                  emptyDescription="No classes have been added to your timetable yet."
+                  emptyDescription="Your timetable has not been set up yet. Ask your teacher!"
                 />
               )}
             </QueryBoundary>
@@ -123,7 +129,7 @@ export default function StudentTimetablePage() {
                 emptyTitle={isToday ? 'Nothing today' : 'Nothing scheduled'}
                 emptyDescription={
                   isToday
-                    ? 'You have no classes on the timetable today.'
+                    ? 'No classes today. Enjoy it!'
                     : `No classes on ${formatDayLabel(onDate)}.`
                 }
               />

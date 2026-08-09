@@ -64,6 +64,31 @@
     --chart-4: 160 84% 39%;
     --chart-5: 38 92% 50%;
     --chart-6: 330 81% 60%;
+
+    /* ----------------------------------------------------------------
+       Playful palette — student and teacher surfaces only.
+       Nine hues spread around the wheel so any two subjects a learner
+       sees side by side are obviously different. Every subject is
+       assigned one deterministically (see lib/subjects.ts), which is
+       what makes "the green one is Maths" hold across the whole app.
+       Kept separate from the chart series: these are identity colours
+       for large filled shapes, not data encodings.
+       ---------------------------------------------------------------- */
+    --fun-1: 4 88% 62%; /* coral   */
+    --fun-2: 26 95% 56%; /* orange  */
+    --fun-3: 43 96% 50%; /* amber   */
+    --fun-4: 88 62% 45%; /* lime    */
+    --fun-5: 158 72% 40%; /* green   */
+    --fun-6: 187 78% 42%; /* teal    */
+    --fun-7: 205 90% 52%; /* sky     */
+    --fun-8: 258 88% 64%; /* violet  */
+    --fun-9: 328 80% 60%; /* pink    */
+
+    /* Ink laid over a filled --fun-* shape. Dark text on these mid-tone
+       fills reads better than white at small sizes in light mode. */
+    --fun-ink: 240 30% 14%;
+    /* Tint strength for the soft/background variant of a fun colour. */
+    --fun-soft-alpha: 0.14;
   }
 
   .dark {
@@ -117,6 +142,22 @@
     --chart-4: 158 74% 46%;
     --chart-5: 41 96% 58%;
     --chart-6: 330 85% 68%;
+
+    /* Same nine hues, lifted and slightly desaturated so they glow on a
+       near-black ground instead of vibrating against it. */
+    --fun-1: 4 90% 70%;
+    --fun-2: 26 92% 64%;
+    --fun-3: 43 94% 60%;
+    --fun-4: 88 55% 58%;
+    --fun-5: 158 62% 52%;
+    --fun-6: 187 70% 54%;
+    --fun-7: 205 88% 64%;
+    --fun-8: 258 90% 74%;
+    --fun-9: 328 82% 70%;
+
+    --fun-ink: 245 40% 10%;
+    /* A tint needs more presence to register against a dark background. */
+    --fun-soft-alpha: 0.2;
   }
 
   * {
@@ -214,6 +255,111 @@
       transparent
     );
     animation: shimmer 1.6s infinite;
+  }
+
+  /* ------------------------------------------------------------------
+     Playful surfaces — student and teacher pages.
+     ------------------------------------------------------------------ */
+
+  /*
+    A card with a coloured edge and a soft lift. The chunkier border and
+    bottom shadow read as a physical sticker, which is what makes a grid
+    of these feel like objects to pick rather than rows in a table.
+    Colour comes from `--tile` set inline by the component.
+  */
+  .sticker {
+    @apply rounded-2xl border-2 transition-transform duration-200;
+    border-color: hsl(var(--tile) / 0.35);
+    background: linear-gradient(
+      160deg,
+      hsl(var(--tile) / 0.16),
+      hsl(var(--card)) 62%
+    );
+    box-shadow: 0 3px 0 0 hsl(var(--tile) / 0.28);
+  }
+  .sticker-hover:hover {
+    @apply -translate-y-0.5;
+    box-shadow: 0 6px 0 0 hsl(var(--tile) / 0.32);
+  }
+  .sticker-hover:active {
+    @apply translate-y-0;
+    box-shadow: 0 2px 0 0 hsl(var(--tile) / 0.3);
+  }
+
+  /* Solid colour chip — subject tiles, avatars, badges. */
+  .tile-solid {
+    background: hsl(var(--tile));
+    color: hsl(var(--fun-ink));
+  }
+
+  /* The tinted variant, for pills and section backgrounds. */
+  .tile-soft {
+    background: hsl(var(--tile) / var(--fun-soft-alpha));
+    color: hsl(var(--tile));
+  }
+
+  /*
+    Confetti piece. Position and colour are set inline per piece; this
+    only owns the fall. Removed from the DOM when the burst finishes, so
+    nothing keeps animating off-screen.
+  */
+  .confetti-piece {
+    @apply pointer-events-none absolute top-0 h-2.5 w-1.5 rounded-[2px];
+    animation: confetti-fall var(--fall-duration, 2.4s) cubic-bezier(0.2, 0.6, 0.5, 1)
+      var(--fall-delay, 0s) forwards;
+  }
+
+  /* Gentle idle motion for a mascot or an empty-state illustration. */
+  .float-slow {
+    animation: float-slow 5s ease-in-out infinite;
+  }
+
+  /* ------------------------------------------------------------------
+     Scenery — the illustrated backdrop on learner pages.
+     Kept in CSS rather than JS so the drift runs on the compositor and
+     costs nothing per frame on the main thread.
+     ------------------------------------------------------------------ */
+
+  .scenery-bloom {
+    @apply pointer-events-none absolute rounded-full blur-3xl;
+  }
+  .scenery-bloom-a {
+    inset-block-start: -18vh;
+    inset-inline-start: -12vw;
+    width: 62vw;
+    height: 62vh;
+    background: radial-gradient(circle, hsl(var(--fun-8) / 0.28), transparent 68%);
+    animation: bloom-drift 26s ease-in-out infinite;
+  }
+  .scenery-bloom-b {
+    inset-block-start: 10vh;
+    inset-inline-end: -16vw;
+    width: 56vw;
+    height: 58vh;
+    background: radial-gradient(circle, hsl(var(--fun-7) / 0.24), transparent 68%);
+    animation: bloom-drift 32s ease-in-out infinite reverse;
+  }
+
+  .scenery-doodle {
+    @apply pointer-events-none absolute;
+    opacity: 0.16;
+    transform: rotate(var(--doodle-rotate, 0deg));
+    animation: doodle-drift var(--doodle-duration, 8s) ease-in-out var(--doodle-delay, 0s) infinite;
+  }
+
+  /*
+    A dark page swallows a 16%-opacity doodle, so lift them there. Written
+    against `.dark` rather than a media query to match how the theme is
+    actually switched — a class on <html>, which the toggle controls.
+  */
+  .dark .scenery-doodle {
+    opacity: 0.22;
+  }
+
+  /* Wavy divider between sections, so a long page reads as chapters. */
+  .wave-divider {
+    @apply block h-6 w-full;
+    color: hsl(var(--fun-8) / 0.22);
   }
 
   /* Fine grid used behind hero sections. */

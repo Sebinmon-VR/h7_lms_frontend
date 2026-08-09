@@ -34,13 +34,21 @@ export interface BadgeProps
   dot?: boolean
 }
 
-export function Badge({ className, tone, size, dot, children, ...props }: BadgeProps) {
-  return (
-    <span className={cn(badgeVariants({ tone, size }), className)} {...props}>
+/**
+ * Forwards its ref so a badge can be a Radix `asChild` target.
+ *
+ * Several tooltips use `<TooltipTrigger asChild><Badge …>`, and without this
+ * the ref never reaches the DOM node: React warns, and the tooltip has no
+ * element to measure or anchor itself to.
+ */
+export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
+  ({ className, tone, size, dot, children, ...props }, ref) => (
+    <span ref={ref} className={cn(badgeVariants({ tone, size }), className)} {...props}>
       {dot && <span className="size-1.5 rounded-full bg-current" aria-hidden />}
       {children}
     </span>
-  )
-}
+  ),
+)
+Badge.displayName = 'Badge'
 
 export { badgeVariants }

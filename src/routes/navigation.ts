@@ -111,41 +111,41 @@ const TEACHER_NAV: NavSection[] = [
   {
     heading: 'Overview',
     items: [
-      { to: '/teacher', label: 'Dashboard', icon: LayoutDashboard, end: true, description: 'Today at a glance' },
-      { to: '/teacher/classes', label: 'My Classes', icon: Layers, description: 'Assigned classes and subjects' },
-      { to: '/teacher/timetable', label: 'Timetable', icon: CalendarRange, description: 'Your weekly periods' },
-      { to: '/teacher/insights', label: 'Insights', icon: LineChart, description: 'Attendance and grade analytics' },
+      { to: '/teacher', label: 'Dashboard', icon: LayoutDashboard, end: true, description: 'Your day at a glance' },
+      { to: '/teacher/classes', label: 'My Classes', icon: Layers, description: 'The classes and subjects you teach' },
+      { to: '/teacher/timetable', label: 'Timetable', icon: CalendarRange, description: 'Your lessons this week' },
+      { to: '/teacher/insights', label: 'Insights', icon: LineChart, description: 'How your classes are getting on' },
     ],
   },
   {
     heading: 'Classroom',
     items: [
-      { to: '/teacher/attendance', label: 'Attendance', icon: CalendarCheck, description: 'Take or edit attendance' },
-      { to: '/teacher/topics', label: 'Syllabus', icon: ClipboardList, description: 'Log topics covered' },
-      { to: '/teacher/meetings', label: 'Meetings', icon: Video, description: 'Live sessions and recordings' },
-      { to: '/teacher/materials', label: 'Materials', icon: Library, description: 'Upload study material' },
-      { to: '/teacher/gradebook', label: 'Gradebook', icon: FileText, description: 'Exam marks' },
+      { to: '/teacher/attendance', label: 'Attendance', icon: CalendarCheck, description: 'Take the register' },
+      { to: '/teacher/topics', label: 'Syllabus', icon: ClipboardList, description: 'Note down what you taught' },
+      { to: '/teacher/meetings', label: 'Live Classes', icon: Video, description: 'Set up a session or share a recording' },
+      { to: '/teacher/materials', label: 'Materials', icon: Library, description: 'Share notes and worksheets' },
+      { to: '/teacher/gradebook', label: 'Gradebook', icon: FileText, description: 'Record and review test marks' },
     ],
   },
 ]
 
 const STUDENT_NAV: NavSection[] = [
   {
-    heading: 'Overview',
+    heading: 'Your day',
     items: [
-      { to: '/student', label: 'Dashboard', icon: LayoutDashboard, end: true, description: 'Your day at a glance' },
-      { to: '/student/classes', label: 'My Classes', icon: Layers, description: 'Subjects and teachers' },
-      { to: '/student/timetable', label: 'Timetable', icon: CalendarRange, description: 'Your weekly classes' },
+      { to: '/student', label: 'Home', icon: LayoutDashboard, end: true, description: 'Your day at a glance' },
+      { to: '/student/classes', label: 'My Subjects', icon: Layers, description: 'What you learn and who teaches it' },
+      { to: '/student/timetable', label: 'Timetable', icon: CalendarRange, description: 'When each class happens' },
     ],
   },
   {
-    heading: 'Learning',
+    heading: 'Your work',
     items: [
-      { to: '/student/attendance', label: 'Attendance', icon: CalendarCheck, description: 'Your attendance record' },
-      { to: '/student/syllabus', label: 'Syllabus', icon: ClipboardList, description: 'Topics covered' },
-      { to: '/student/meetings', label: 'Meetings', icon: Video, description: 'Live classes and recordings' },
-      { to: '/student/materials', label: 'Materials', icon: Library, description: 'Notes and resources' },
-      { to: '/student/grades', label: 'Grades', icon: FileText, description: 'Exam results' },
+      { to: '/student/attendance', label: 'My Days', icon: CalendarCheck, description: 'How often you were in class' },
+      { to: '/student/syllabus', label: 'What We Learned', icon: ClipboardList, description: 'Topics your class has covered' },
+      { to: '/student/meetings', label: 'Live Classes', icon: Video, description: 'Join a class or watch it back' },
+      { to: '/student/materials', label: 'Notes & Books', icon: Library, description: 'Things your teachers shared' },
+      { to: '/student/grades', label: 'My Marks', icon: FileText, description: 'How you did in each test' },
     ],
   },
 ]

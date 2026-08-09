@@ -16,10 +16,12 @@ import {
   periodLengthMinutes,
   visibleDays,
 } from '@/lib/timetable'
+import { subjectStyle } from '@/lib/subjects'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { EmptyState } from '@/components/feedback/states'
+import { FunEmpty, SubjectTile } from '@/components/fun/fun-ui'
 
 /**
  * Shared timetable rendering for all three roles.
@@ -44,23 +46,29 @@ function PeriodCard({
 }) {
   const interactive = !!onClick
   const Wrapper = interactive ? 'button' : 'div'
+  const subject = subjectName(entry)
+  // Admins keep the plain card; learners and teachers get the subject colour,
+  // which is what makes a week's grid readable at a glance.
+  const playful = scope !== 'admin'
 
   return (
     <Wrapper
       {...(interactive ? { type: 'button' as const, onClick: () => onClick?.(entry) } : {})}
+      style={playful ? subjectStyle(subject) : undefined}
       className={cn(
-        'w-full rounded-lg border p-2.5 text-left transition-colors',
-        entry.is_active
-          ? 'border-border bg-card'
-          : // A paused period is still on the timetable; showing it faded is
-            // more honest than hiding it and letting someone re-create it.
-            'border-dashed border-border bg-surface opacity-60',
+        'w-full p-2.5 text-left transition-colors',
+        playful ? 'sticker' : 'rounded-lg border',
+        !playful && (entry.is_active ? 'border-border bg-card' : 'border-dashed border-border bg-surface'),
+        // A paused period is still on the timetable; showing it faded is more
+        // honest than hiding it and letting someone re-create it.
+        !entry.is_active && 'opacity-60',
         clashing && 'border-danger/50 bg-danger/8',
-        interactive && 'hover:border-primary/50',
+        interactive && (playful ? 'sticker-hover' : 'hover:border-primary/50'),
       )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <p className="min-w-0 truncate text-sm font-medium">{subjectName(entry)}</p>
+      <div className="flex items-start gap-2">
+        {playful && <SubjectTile subject={subject} size="sm" />}
+        <p className="min-w-0 flex-1 truncate text-sm font-bold">{subject}</p>
         {clashing && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -74,10 +82,12 @@ function PeriodCard({
         )}
       </div>
 
-      <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+      <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-muted-foreground">
         <Clock className="size-3" />
         {formatPeriodRange(entry)}
-        <span className="text-muted-foreground/60">· {periodLengthMinutes(entry)}m</span>
+        <span className="font-normal text-muted-foreground/60">
+          · {periodLengthMinutes(entry)}m
+        </span>
       </p>
 
       <div className="mt-1.5 flex flex-wrap items-center gap-1">
@@ -146,9 +156,15 @@ export function TimetableWeek({
   }, [grid, days])
 
   if (entries.length === 0) {
-    return (
+    return scope === 'admin' ? (
       <EmptyState
         icon={<CalendarOff />}
+        title="Nothing scheduled"
+        description={emptyDescription ?? 'No periods have been added to the timetable yet.'}
+      />
+    ) : (
+      <FunEmpty
+        mood="sleepy"
         title="Nothing scheduled"
         description={emptyDescription ?? 'No periods have been added to the timetable yet.'}
       />
@@ -158,8 +174,8 @@ export function TimetableWeek({
   return (
     <div className="overflow-x-auto pb-2">
       <div
-        className="grid min-w-[52rem] gap-3"
-        style={{ gridTemplateColumns: `repeat(${days.length}, minmax(9.5rem, 1fr))` }}
+        className="grid min-w-[44rem] gap-3"
+        style={{ gridTemplateColumns: `repeat(${days.length}, minmax(8.25rem, 1fr))` }}
       >
         {days.map((day) => (
           <div key={day} className="min-w-0">
@@ -209,59 +225,106 @@ export function ScheduledPeriodRow({
   period,
   scope,
   showDate,
+  compact,
 }: {
   period: ScheduledPeriod
   scope: TimetableScope
   showDate?: boolean
+  /**
+   * Drops the room and teacher badges.
+   *
+   * The full row needs roughly the page width to lay out; in a sidebar rail it
+   * wraps into an unreadable stack and truncates the subject to three letters —
+   * exactly the information the row exists to convey. Compact keeps time,
+   * subject and countdown, and lets the timetable grid carry the detail.
+   */
+  compact?: boolean
 }) {
   const { entry } = period
+  const subject = subjectName(entry)
+  const playful = scope !== 'admin'
 
   return (
     <div
+      style={playful ? subjectStyle(subject) : undefined}
       className={cn(
-        'flex items-center gap-3 rounded-lg border p-3',
-        period.is_current ? 'border-primary/50 bg-primary/8' : 'border-border bg-card',
+        'flex items-center gap-3 p-3',
+        playful ? 'sticker' : 'rounded-lg border',
+        !playful && (period.is_current ? 'border-primary/50 bg-primary/8' : 'border-border bg-card'),
+        playful && period.is_current && 'shadow-glow',
       )}
     >
-      <div className="w-16 shrink-0 text-center">
-        <p className="text-sm font-semibold tabular-nums">{formatTime(period.starts_at)}</p>
-        <p className="text-2xs text-muted-foreground tabular-nums">{formatTime(period.ends_at)}</p>
-      </div>
-
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{subjectName(entry)}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          {scope !== 'student' && (
-            <Badge tone="outline" size="sm">
-              {classNameOf(entry)}
-            </Badge>
-          )}
-          {scope !== 'teacher' && entry.teacher_id !== null && (
-            <Badge tone="neutral" size="sm">
-              {teacherName({ teacher: entry.teacher, teacher_id: entry.teacher_id })}
-            </Badge>
-          )}
-          {entry.room && (
-            <Badge tone="neutral" size="sm">
-              <MapPin />
-              {entry.room}
-            </Badge>
-          )}
-          {showDate && (
-            <span className="text-xs text-muted-foreground">{formatDayLabel(period.on_date)}</span>
-          )}
-        </div>
-      </div>
-
-      <div className="shrink-0 text-right">
-        {period.is_current ? (
-          <Badge tone="primary" className="animate-pulse">
-            Now
-          </Badge>
-        ) : (
-          <span className="text-xs text-muted-foreground">{formatStartsIn(period)}</span>
+      {/* Compact drops the end time and the fixed 4rem column: in a sidebar
+          that width is the difference between "Mathematics" and "Mathem…". */}
+      <div className={cn('shrink-0 text-center', compact ? '' : 'w-16')}>
+        <p className="text-sm font-bold tabular-nums">{formatTime(period.starts_at)}</p>
+        {!compact && (
+          <p className="text-2xs text-muted-foreground tabular-nums">
+            {formatTime(period.ends_at)}
+          </p>
         )}
       </div>
+
+      {playful && <SubjectTile subject={subject} size="sm" />}
+
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-bold">{subject}</p>
+        {compact ? (
+          // The countdown moves onto this line rather than sitting in its own
+          // right-hand column — at sidebar width that column was eating the
+          // space the subject name needed, so every subject read "Mathe…".
+          <p className="truncate text-xs text-muted-foreground">
+            {[
+              scope !== 'student' ? classNameOf(entry) : null,
+              entry.room,
+              showDate ? formatDayLabel(period.on_date) : null,
+              period.is_current ? null : formatStartsIn(period),
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </p>
+        ) : (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            {scope !== 'student' && (
+              <Badge tone="outline" size="sm">
+                {classNameOf(entry)}
+              </Badge>
+            )}
+            {scope !== 'teacher' && entry.teacher_id !== null && (
+              <Badge tone="neutral" size="sm">
+                {teacherName({ teacher: entry.teacher, teacher_id: entry.teacher_id })}
+              </Badge>
+            )}
+            {entry.room && (
+              <Badge tone="neutral" size="sm">
+                <MapPin />
+                {entry.room}
+              </Badge>
+            )}
+            {showDate && (
+              <span className="text-xs text-muted-foreground">
+                {formatDayLabel(period.on_date)}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* In compact mode the countdown has already been folded into the meta
+          line above, so only the "now" marker is worth its own column. */}
+      {(period.is_current || !compact) && (
+        <div className="shrink-0 text-right">
+          {period.is_current ? (
+            <Badge tone="primary" className="animate-pulse">
+              Now
+            </Badge>
+          ) : (
+            <span className="text-xs font-medium text-muted-foreground">
+              {formatStartsIn(period)}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -279,7 +342,11 @@ export function DaySchedule({
   emptyDescription?: string
 }) {
   if (periods.length === 0) {
-    return <EmptyState icon={<CalendarOff />} title={emptyTitle} description={emptyDescription} />
+    return scope === 'admin' ? (
+      <EmptyState icon={<CalendarOff />} title={emptyTitle} description={emptyDescription} />
+    ) : (
+      <FunEmpty mood="happy" title={emptyTitle} description={emptyDescription} />
+    )
   }
   return (
     <div className="space-y-2">
@@ -338,6 +405,7 @@ export function UpcomingPeriods({
                   key={`${period.entry.id}-${period.on_date}`}
                   period={period}
                   scope={scope}
+                  compact
                 />
               ))}
             </div>
