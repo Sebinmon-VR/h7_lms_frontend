@@ -1,0 +1,487 @@
+import { zodResolver } from '@hookform/resolvers/zod'
+import { ClipboardList, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
+import * as React from 'react'
+import { useForm } from 'react-hook-form'
+import { z } from 'zod'
+
+import type { TopicOut } from '@/api/types'
+import {
+  useCreateTopic,
+  useDeleteTopic,
+  useMyClasses,
+  useTeacherTopics,
+  useUpdateTopic,
+} from '@/queries/teacher.queries'
+import { syllabusProgress } from '@/lib/derive'
+import { formatDate, formatDayLabel, todayApiDate } from '@/lib/datetime'
+import { subjectName, className as classNameOf } from '@/lib/select'
+import { formatPercent } from '@/lib/format'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Combobox } from '@/components/ui/combobox'
+import { DatePicker } from '@/components/ui/date-picker'
+import { Input, Textarea } from '@/components/ui/input'
+import { ProgressBar, ProgressRing } from '@/components/ui/progress'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { EmptyState } from '@/components/feedback/states'
+import { QueryBoundary } from '@/components/feedback/query-boundary'
+import { ConfirmDialog } from '@/components/forms/confirm-dialog'
+import { Field } from '@/components/forms/field'
+import { PageHeader } from '@/components/layout/page-header'
+import { useClassSubjectSelection } from './class-subject-picker'
+import { AdminTeacherNotice, useIsAdminViewingTeacher } from './teacher-guard'
+
+const schema = z.object({
+  class_id: z.string().min(1, 'Choose a class'),
+  subject_id: z.string().min(1, 'Choose a subject'),
+  topic_title: z.string().min(2, 'Enter a topic title').max(200),
+  description: z.string().max(1000).optional(),
+  date_covered: z.string().min(1, 'Choose a date'),
+  completion_percentage: z.coerce.number().min(0).max(100),
+})
+type FormValues = z.infer<typeof schema>
+
+/**
+ * Logs a topic, or edits one when `editing` is set. Class and subject are
+ * fixed on edit — `TopicUpdate` does not accept them.
+ */
+function TopicFormDialog({
+  open,
+  onOpenChange,
+  editing,
+}: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  editing: TopicOut | null
+}) {
+  const mappingsQuery = useMyClasses()
+  const createTopic = useCreateTopic()
+  const updateTopic = useUpdateTopic()
+  const selection = useClassSubjectSelection(mappingsQuery.data)
+
+  const form = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: {
+      class_id: '',
+      subject_id: '',
+      topic_title: '',
+      description: '',
+      date_covered: todayApiDate(),
+      completion_percentage: 100,
+    },
+  })
+
+  React.useEffect(() => {
+    if (!open) return
+    form.reset(
+      editing
+        ? {
+            class_id: String(editing.class_id),
+            subject_id: String(editing.subject_id),
+            topic_title: editing.topic_title,
+            description: editing.description ?? '',
+            date_covered: editing.date_covered,
+            completion_percentage: editing.completion_percentage,
+          }
+        : {
+            class_id: selection.classId ? String(selection.classId) : '',
+            subject_id: selection.subjectId ? String(selection.subjectId) : '',
+            topic_title: '',
+            description: '',
+            date_covered: todayApiDate(),
+            completion_percentage: 100,
+          },
+    )
+    // Only re-seed when the dialog opens or the target changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editing])
+
+  const classId = form.watch('class_id')
+
+  const subjects = React.useMemo(() => {
+    const map = new Map<number, { id: number; name: string; code: string }>()
+    for (const m of mappingsQuery.data ?? []) {
+      if (classId && m.class_room.id !== Number(classId)) continue
+      map.set(m.subject.id, m.subject)
+    }
+    return [...map.values()]
+  }, [mappingsQuery.data, classId])
+
+  const completion = form.watch('completion_percentage')
+
+  const onSubmit = async (values: FormValues) => {
+    const description = values.description?.trim() ?? ''
+
+    try {
+      if (editing) {
+        // Only changed fields — an empty update body is a 400.
+        const patch = {
+          ...(values.topic_title !== editing.topic_title && { topic_title: values.topic_title }),
+          ...(description !== (editing.description ?? '') && { description }),
+          ...(values.date_covered !== editing.date_covered && { date_covered: values.date_covered }),
+          ...(values.completion_percentage !== editing.completion_percentage && {
+            completion_percentage: values.completion_percentage,
+          }),
+        }
+        if (Object.keys(patch).length === 0) {
+          onOpenChange(false)
+          return
+        }
+        await updateTopic.mutateAsync({ topicId: editing.id, body: patch })
+      } else {
+        await createTopic.mutateAsync({
+          class_id: Number(values.class_id),
+          subject_id: Number(values.subject_id),
+          topic_title: values.topic_title,
+          description: description || null,
+          date_covered: values.date_covered,
+          completion_percentage: values.completion_percentage,
+        })
+      }
+      onOpenChange(false)
+    } catch (error) {
+      form.setError('root', {
+        message:
+          (error as { message?: string })?.message ??
+          `Could not ${editing ? 'update' : 'log'} the topic.`,
+      })
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{editing ? 'Edit topic' : 'Log a topic'}</DialogTitle>
+          <DialogDescription>
+            {editing
+              ? 'Students see this update in their syllabus progress straight away.'
+              : 'Record what you covered so students can follow the syllabus.'}
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
+          <DialogBody className="space-y-4">
+            {form.formState.errors.root && (
+              <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
+                {form.formState.errors.root.message}
+              </p>
+            )}
+
+            {editing ? (
+              // Immutable on update, so shown as context rather than as
+              // controls that would silently do nothing.
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5">
+                <span className="text-xs text-muted-foreground">Logged against</span>
+                <Badge tone="accent" size="sm">
+                  {subjectName(editing)}
+                </Badge>
+                <Badge tone="outline" size="sm">
+                  {classNameOf(editing)}
+                </Badge>
+              </div>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field id="topic-class" label="Class" required error={form.formState.errors.class_id?.message}>
+                  <Combobox
+                    id="topic-class"
+                    value={form.watch('class_id') || null}
+                    onChange={(v) => {
+                      form.setValue('class_id', v, { shouldValidate: true })
+                      form.setValue('subject_id', '')
+                    }}
+                    placeholder="Select a class"
+                    options={selection.classes.map((c) => ({ value: String(c.id), label: c.name, hint: c.code }))}
+                  />
+                </Field>
+
+                <Field id="topic-subject" label="Subject" required error={form.formState.errors.subject_id?.message}>
+                  <Combobox
+                    id="topic-subject"
+                    value={form.watch('subject_id') || null}
+                    onChange={(v) => form.setValue('subject_id', v, { shouldValidate: true })}
+                    disabled={!classId}
+                    placeholder={classId ? 'Select a subject' : 'Choose a class first'}
+                    options={subjects.map((s) => ({ value: String(s.id), label: s.name, hint: s.code }))}
+                  />
+                </Field>
+              </div>
+            )}
+
+            <Field id="topic-title" label="Topic" required error={form.formState.errors.topic_title?.message}>
+              <Input id="topic-title" placeholder="Binary search trees" {...form.register('topic_title')} />
+            </Field>
+
+            <Field id="topic-description" label="Description" error={form.formState.errors.description?.message}>
+              <Textarea
+                id="topic-description"
+                rows={3}
+                placeholder="Tree traversal and balancing"
+                {...form.register('description')}
+              />
+            </Field>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field id="topic-date" label="Date covered" required error={form.formState.errors.date_covered?.message}>
+                <DatePicker
+                  id="topic-date"
+                  value={form.watch('date_covered')}
+                  onChange={(v) => form.setValue('date_covered', v ?? todayApiDate(), { shouldValidate: true })}
+                  maxToday
+                />
+              </Field>
+
+              <Field
+                id="topic-completion"
+                label={`Completion — ${formatPercent(completion, 0)}`}
+                error={form.formState.errors.completion_percentage?.message}
+              >
+                {/* valueAsNumber matters: without it a range input yields a
+                    string, which breaks every numeric consumer downstream. */}
+                <input
+                  id="topic-completion"
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  className="h-9.5 w-full accent-[hsl(var(--primary))]"
+                  {...form.register('completion_percentage', { valueAsNumber: true })}
+                />
+              </Field>
+            </div>
+          </DialogBody>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" loading={form.formState.isSubmitting}>
+              {editing ? 'Save changes' : 'Log topic'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function TopicTimeline({
+  topics,
+  onEdit,
+  onDelete,
+}: {
+  topics: TopicOut[]
+  onEdit: (topic: TopicOut) => void
+  onDelete: (topic: TopicOut) => void
+}) {
+  // The API returns topics newest-first, but never rely on server order.
+  const grouped = React.useMemo(() => {
+    const map = new Map<string, TopicOut[]>()
+    for (const t of topics) {
+      const list = map.get(t.date_covered)
+      if (list) list.push(t)
+      else map.set(t.date_covered, [t])
+    }
+    return [...map.entries()].sort(([a], [b]) => b.localeCompare(a))
+  }, [topics])
+
+  return (
+    <div className="space-y-6">
+      {grouped.map(([date, items]) => (
+        <div key={date} className="relative pl-6">
+          <span className="absolute left-0 top-1.5 size-2.5 rounded-full bg-primary ring-4 ring-primary/15" aria-hidden />
+          <span className="absolute bottom-0 left-[4.5px] top-6 w-px bg-border" aria-hidden />
+
+          <p className="text-sm font-semibold">{formatDayLabel(date)}</p>
+          <p className="text-xs text-muted-foreground">{formatDate(date)}</p>
+
+          <div className="mt-3 space-y-2">
+            {items.map((topic) => (
+              <Card key={topic.id} className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">{topic.topic_title}</p>
+                    {topic.description && (
+                      <p className="mt-1 text-sm text-muted-foreground">{topic.description}</p>
+                    )}
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <Badge tone="accent" size="sm">
+                        {subjectName(topic)}
+                      </Badge>
+                      <Badge tone="outline" size="sm">
+                        {classNameOf(topic)}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <ProgressRing value={topic.completion_percentage} size={48} strokeWidth={5}>
+                      <span className="text-2xs font-semibold tabular-nums">
+                        {Math.round(topic.completion_percentage)}%
+                      </span>
+                    </ProgressRing>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`Actions for ${topic.topic_title}`}
+                        >
+                          <MoreHorizontal />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => onEdit(topic)}>
+                          <Pencil />
+                          Edit topic
+                        </DropdownMenuItem>
+                        <DropdownMenuItem destructive onSelect={() => onDelete(topic)}>
+                          <Trash2 />
+                          Delete topic
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export default function TeacherTopicsPage() {
+  const isAdmin = useIsAdminViewingTeacher()
+  const topicsQuery = useTeacherTopics(!isAdmin)
+  const deleteTopic = useDeleteTopic()
+  const [dialogOpen, setDialogOpen] = React.useState(false)
+  const [editing, setEditing] = React.useState<TopicOut | null>(null)
+  const [deleting, setDeleting] = React.useState<TopicOut | null>(null)
+
+  const openCreate = () => {
+    setEditing(null)
+    setDialogOpen(true)
+  }
+
+  const openEdit = (topic: TopicOut) => {
+    setEditing(topic)
+    setDialogOpen(true)
+  }
+
+  const progress = React.useMemo(
+    () => syllabusProgress(topicsQuery.data ?? [], (t) => subjectName(t)),
+    [topicsQuery.data],
+  )
+
+  if (isAdmin) {
+    return (
+      <>
+        <PageHeader title="Syllabus" description="Topics you have covered with each class." />
+        <AdminTeacherNotice />
+      </>
+    )
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Syllabus"
+        description="A running log of what you have taught. Students see this as their syllabus progress."
+        actions={
+          <Button variant="primary" icon={<Plus />} onClick={openCreate}>
+            Log topic
+          </Button>
+        }
+      />
+
+      {progress.length > 0 && (
+        <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {progress.map((subject) => (
+            <Card key={subject.subjectId}>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">{subject.subjectName}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-2xl font-semibold tabular-nums">
+                    {formatPercent(subject.completion, 0)}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {subject.topicCount} {subject.topicCount === 1 ? 'topic' : 'topics'}
+                  </span>
+                </div>
+                <ProgressBar value={subject.completion} />
+                {subject.lastCoveredDate && (
+                  <p className="text-xs text-muted-foreground">
+                    Last covered {formatDayLabel(subject.lastCoveredDate).toLowerCase()}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <QueryBoundary
+        query={topicsQuery}
+        loading={
+          <div className="space-y-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-24 rounded-xl" />
+            ))}
+          </div>
+        }
+        isEmpty={(data) => data.length === 0}
+        empty={
+          <EmptyState
+            icon={<ClipboardList />}
+            title="No topics logged yet"
+            description="Record the first topic you covered — students see this as their syllabus progress."
+            action={
+              <Button variant="primary" icon={<Plus />} onClick={openCreate}>
+                Log topic
+              </Button>
+            }
+          />
+        }
+      >
+        {(topics) => <TopicTimeline topics={topics} onEdit={openEdit} onDelete={setDeleting} />}
+      </QueryBoundary>
+
+      <TopicFormDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} />
+
+      <ConfirmDialog
+        open={!!deleting}
+        onOpenChange={(v) => !v && setDeleting(null)}
+        title="Delete this topic?"
+        description={
+          deleting
+            ? `“${deleting.topic_title}” will be removed from the syllabus and from every student's progress for ${subjectName(deleting)}.`
+            : undefined
+        }
+        confirmLabel="Delete topic"
+        destructive
+        loading={deleteTopic.isPending}
+        onConfirm={() => {
+          if (!deleting) return
+          deleteTopic.mutate(deleting.id, { onSettled: () => setDeleting(null) })
+        }}
+      />
+    </>
+  )
+}

@@ -1,9 +1,24 @@
 <!doctype html>
-<html>
+<html lang="en" class="dark">
   <head>
-    <meta charset="utf-8" />
+    <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>H7 LMS Frontend</title>
+    <meta name="description" content="H7 Learning Management System" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>H7 LMS</title>
+    <script>
+      // Apply the persisted theme before first paint to avoid a flash.
+      ;(function () {
+        try {
+          var stored = localStorage.getItem('h7lms.theme') || 'system'
+          var dark =
+            stored === 'dark' ||
+            (stored === 'system' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.classList.toggle('dark', dark)
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

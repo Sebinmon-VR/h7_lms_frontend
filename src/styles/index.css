@@ -1,0 +1,241 @@
+@import url('https://rsms.me/inter/inter.css');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------
+   Aurora design tokens.
+   Every colour is an HSL triple so Tailwind can apply opacity to it.
+   Swapping the product theme = editing the two blocks below.
+   ------------------------------------------------------------------ */
+@layer base {
+  :root {
+    --background: 240 20% 98%; /* #FAFAFC */
+    --foreground: 240 16% 12%;
+    --surface: 240 20% 96%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 16% 12%;
+
+    --muted: 240 14% 94%;
+    --muted-foreground: 240 6% 45%;
+
+    --border: 240 12% 89%;
+    --input: 240 12% 89%;
+    --ring: 243 75% 59%;
+
+    --primary: 243 75% 59%; /* #6366F1 */
+    --primary-foreground: 0 0% 100%;
+    --primary-soft: 243 75% 96%;
+
+    --accent: 258 90% 66%; /* #8B5CF6 */
+    --accent-foreground: 0 0% 100%;
+    --accent-soft: 258 90% 96%;
+
+    --success: 160 84% 39%;
+    --success-foreground: 0 0% 100%;
+    --success-soft: 152 76% 95%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 26 60% 14%;
+    --warning-soft: 45 93% 94%;
+
+    --danger: 350 89% 60%;
+    --danger-foreground: 0 0% 100%;
+    --danger-soft: 350 100% 96%;
+
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
+    --info-soft: 200 100% 95%;
+
+    --shadow-color: 240 30% 25%;
+    --radius: 0.875rem;
+
+    /* Attendance semantics — referenced by pills and charts alike. */
+    --status-present: 160 84% 39%;
+    --status-absent: 350 89% 60%;
+    --status-late: 38 92% 50%;
+    --status-excused: 199 89% 48%;
+
+    /* Categorical series for charts. Ordered for maximum adjacent contrast. */
+    --chart-1: 243 75% 59%;
+    --chart-2: 258 90% 66%;
+    --chart-3: 199 89% 48%;
+    --chart-4: 160 84% 39%;
+    --chart-5: 38 92% 50%;
+    --chart-6: 330 81% 60%;
+  }
+
+  .dark {
+    --background: 245 30% 6%; /* #0B0B12 */
+    --foreground: 240 20% 96%;
+    --surface: 245 26% 9%;
+    --card: 245 24% 11%; /* #14141F */
+    --card-foreground: 240 20% 96%;
+
+    --muted: 245 20% 16%;
+    --muted-foreground: 240 10% 64%;
+
+    --border: 245 18% 20%;
+    --input: 245 18% 22%;
+    --ring: 253 91% 70%;
+
+    --primary: 245 82% 67%;
+    --primary-foreground: 245 40% 8%;
+    --primary-soft: 245 40% 18%;
+
+    --accent: 258 90% 72%;
+    --accent-foreground: 258 40% 10%;
+    --accent-soft: 258 40% 20%;
+
+    --success: 158 74% 46%;
+    --success-foreground: 158 60% 8%;
+    --success-soft: 158 40% 16%;
+
+    --warning: 41 96% 58%;
+    --warning-foreground: 30 60% 8%;
+    --warning-soft: 38 40% 18%;
+
+    --danger: 351 90% 66%;
+    --danger-foreground: 350 50% 8%;
+    --danger-soft: 350 40% 20%;
+
+    --info: 199 90% 58%;
+    --info-foreground: 199 60% 8%;
+    --info-soft: 199 40% 18%;
+
+    --shadow-color: 245 60% 2%;
+
+    --status-present: 158 74% 46%;
+    --status-absent: 351 90% 66%;
+    --status-late: 41 96% 58%;
+    --status-excused: 199 90% 58%;
+
+    --chart-1: 245 82% 67%;
+    --chart-2: 258 90% 72%;
+    --chart-3: 199 90% 58%;
+    --chart-4: 158 74% 46%;
+    --chart-5: 41 96% 58%;
+    --chart-6: 330 85% 68%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    text-rendering: optimizeLegibility;
+  }
+
+  /* One consistent focus treatment across every interactive element. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  ::selection {
+    @apply bg-primary/25;
+  }
+
+  /* Slim, theme-aware scrollbars. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full border-4 border-solid border-transparent bg-clip-padding;
+    background-color: hsl(var(--border));
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.5);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Frosted panel used for cards, popovers and the app chrome. */
+  .glass {
+    @apply border border-border/70 bg-card/75 backdrop-blur-xl;
+  }
+
+  /* Text that picks up the brand gradient. */
+  .text-gradient {
+    @apply bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent;
+  }
+
+  /* Aurora blob backdrop — parent must be `relative overflow-hidden`. */
+  .aurora-backdrop::before {
+    content: '';
+    @apply pointer-events-none absolute -left-24 -top-40 h-[420px] w-[420px] rounded-full opacity-60 blur-3xl;
+    background: radial-gradient(circle, hsl(var(--primary) / 0.5), transparent 65%);
+    animation: aurora-drift 18s ease-in-out infinite;
+  }
+  .aurora-backdrop::after {
+    content: '';
+    @apply pointer-events-none absolute -right-32 top-10 h-[380px] w-[380px] rounded-full opacity-50 blur-3xl;
+    background: radial-gradient(circle, hsl(var(--accent) / 0.5), transparent 65%);
+    animation: aurora-drift 22s ease-in-out infinite reverse;
+  }
+
+  /* Loading placeholder with a travelling highlight. */
+  .shimmer {
+    @apply relative overflow-hidden bg-muted;
+  }
+  .shimmer::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full;
+    background-image: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--foreground) / 0.06),
+      transparent
+    );
+    animation: shimmer 1.6s infinite;
+  }
+
+  /* Fine grid used behind hero sections. */
+  .grid-pattern {
+    background-image:
+      linear-gradient(hsl(var(--border) / 0.5) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--border) / 0.5) 1px, transparent 1px);
+    background-size: 42px 42px;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 40%, transparent 100%);
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  /* Keeps long ids/emails from blowing out table layouts. */
+  .truncate-cell {
+    @apply block max-w-full truncate;
+  }
+}
