@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { RoleBadge, ActiveBadge } from '@/components/domain/badges'
+import { ProfileSummary } from '@/components/domain/profile-summary'
 import { PageHeader } from '@/components/layout/page-header'
 
 const THEME_OPTIONS: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
@@ -96,6 +97,23 @@ export default function ProfilePage() {
                 </dd>
               </div>
             </dl>
+
+            {user && (
+              <>
+                <Separator />
+                <ProfileSummary user={user} />
+                {/*
+                  Read-only on purpose, not an oversight: profile detail and the
+                  reminder preference are written through PUT /admin/users/{id},
+                  and the API exposes no self-service equivalent. An editable
+                  form here would fail for everyone who is not an admin.
+                */}
+                <p className="text-xs text-muted-foreground">
+                  These details, including whether you receive class reminders, are maintained by an
+                  administrator — ask them to change anything that is wrong.
+                </p>
+              </>
+            )}
           </CardContent>
         </Card>
 

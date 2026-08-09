@@ -6,6 +6,7 @@ import {
   MoreHorizontal,
   Pencil,
   ShieldCheck,
+  Trash2,
   Upload,
   UserCheck,
   UserPlus,
@@ -16,12 +17,13 @@ import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { z } from 'zod'
 
-import type { CredentialsIssued, UserOut, UserRole } from '@/api/types'
+import type { CredentialsIssued, UserOut, UserProfileFields, UserRole } from '@/api/types'
 import { ApiError } from '@/api/errors'
 import {
   useCreateUser,
   useDeactivateUser,
   useGenerateCredentials,
+  usePermanentlyDeleteUser,
   useReactivateUser,
   useUpdateUser,
   useUsers,
@@ -39,6 +41,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
+  DialogForm,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -58,6 +61,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { DataTable } from '@/components/data/data-table'
 import { ActiveBadge, RoleBadge } from '@/components/domain/badges'
+import { ProfileFieldsSection } from '@/components/domain/profile-fields'
 import { UserCell } from '@/components/domain/user-cell'
 import { BatchProgress, useBatchRunner } from '@/components/feedback/batch-progress'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
@@ -127,6 +131,7 @@ function CreateUserDialog({
 }) {
   const createUser = useCreateUser()
   const [overrideEmail, setOverrideEmail] = React.useState(false)
+  const [profile, setProfile] = React.useState<UserProfileFields>({})
 
   const form = useForm<CreateValues>({
     resolver: zodResolver(createSchema),
@@ -137,6 +142,7 @@ function CreateUserDialog({
     if (!open) return
     form.reset({ full_name: '', email: '', role: 'STUDENT' })
     setOverrideEmail(false)
+    setProfile({})
   }, [open, form])
 
   const localPart = previewEmail(form.watch('full_name') ?? '')
@@ -148,6 +154,7 @@ function CreateUserDialog({
       // what tells the server to generate the address, and the admin never
       // supplies a password at all.
       const created = await createUser.mutateAsync({
+        ...profile,
         full_name: values.full_name,
         role: values.role,
         email: overrideEmail && email ? email : null,
@@ -179,10 +186,10 @@ function CreateUserDialog({
           <DialogTitle>Add a user</DialogTitle>
           <DialogDescription>
             Creates the profile and an email address. They cannot sign in until you generate
-            credentials — you will be offered that next. The role cannot be changed later.
+            credentials — you will be offered that next. Everything below the role is optional.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
+        <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
           <DialogBody className="space-y-4">
             {form.formState.errors.root && (
               <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
@@ -257,6 +264,13 @@ function CreateUserDialog({
                 </SelectContent>
               </Select>
             </Field>
+
+            <ProfileFieldsSection
+              role={form.watch('role')}
+              value={profile}
+              onChange={(patch) => setProfile((prev) => ({ ...prev, ...patch }))}
+              mode="create"
+            />
           </DialogBody>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
@@ -266,7 +280,7 @@ function CreateUserDialog({
               Create user
             </Button>
           </DialogFooter>
-        </form>
+        </DialogForm>
       </DialogContent>
     </Dialog>
   )
@@ -278,26 +292,76 @@ const editSchema = z.object({
   full_name: z.string().min(2, 'Enter a full name').max(120),
   email: z.string().min(1, 'Email is required').email('Enter a valid email address'),
   is_active: z.boolean(),
+  role: z.enum(['ADMIN', 'TEACHER', 'STUDENT']),
 })
 type EditValues = z.infer<typeof editSchema>
 
+/** Pulls just the profile fields off a user, dropping the account columns. */
+function profileOf(user: UserOut): UserProfileFields {
+  const {
+    id: _id,
+    full_name: _name,
+    email: _email,
+    role: _role,
+    is_active: _active,
+    created_at: _created,
+    updated_at: _updated,
+    firebase_uid: _uid,
+    ...profile
+  } = user
+  return profile
+}
+
 function EditUserDialog({ user, onClose }: { user: UserOut | null; onClose: () => void }) {
   const updateUser = useUpdateUser()
+  const [profile, setProfile] = React.useState<UserProfileFields>({})
+  /** Holds a pending role change until it is confirmed. */
+  const [confirmRole, setConfirmRole] = React.useState<EditValues | null>(null)
+
   const form = useForm<EditValues>({
     resolver: zodResolver(editSchema),
-    defaultValues: { full_name: '', email: '', is_active: true },
+    defaultValues: { full_name: '', email: '', is_active: true, role: 'STUDENT' },
   })
 
   React.useEffect(() => {
     if (user) {
-      form.reset({ full_name: user.full_name, email: user.email, is_active: user.is_active })
+      form.reset({
+        full_name: user.full_name,
+        email: user.email,
+        is_active: user.is_active,
+        role: user.role,
+      })
+      setProfile(profileOf(user))
+      setConfirmRole(null)
     }
   }, [user, form])
 
+  const save = async (values: EditValues) => {
+    if (!user) return
+    await updateUser.mutateAsync({
+      userId: user.id,
+      body: {
+        ...profile,
+        full_name: values.full_name,
+        email: values.email,
+        is_active: values.is_active,
+        // Only sent when it actually changed — including it unchanged would
+        // still revoke the user's tokens and sign them out for nothing.
+        ...(values.role !== user.role && { role: values.role }),
+      },
+    })
+    onClose()
+  }
+
   const onSubmit = async (values: EditValues) => {
     if (!user) return
-    await updateUser.mutateAsync({ userId: user.id, body: values })
-    onClose()
+    // A role change signs the user out everywhere, so it gets its own step
+    // rather than riding along with a rename.
+    if (values.role !== user.role) {
+      setConfirmRole(values)
+      return
+    }
+    await save(values)
   }
 
   return (
@@ -307,7 +371,7 @@ function EditUserDialog({ user, onClose }: { user: UserOut | null; onClose: () =
           <DialogTitle>Edit user</DialogTitle>
           <DialogDescription>Changes apply immediately.</DialogDescription>
         </DialogHeader>
-        <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
+        <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
           <DialogBody className="space-y-4">
             <Field id="edit_name" label="Full name" required error={form.formState.errors.full_name?.message}>
               <Input id="edit_name" {...form.register('full_name')} />
@@ -334,13 +398,37 @@ function EditUserDialog({ user, onClose }: { user: UserOut | null; onClose: () =
               />
             </div>
 
-            <div className="flex items-center justify-between rounded-lg border border-dashed border-border px-3 py-2.5">
-              <div>
-                <p className="text-sm font-medium">Role</p>
-                <p className="text-xs text-muted-foreground">Roles are fixed once an account is created.</p>
-              </div>
-              {user && <RoleBadge role={user.role} />}
-            </div>
+            <Field
+              id="edit_role"
+              label="Role"
+              required
+              hint="Changing this signs the user out of every device."
+            >
+              <Select
+                value={form.watch('role')}
+                onValueChange={(v) => form.setValue('role', v as UserRole, { shouldDirty: true })}
+              >
+                <SelectTrigger id="edit_role">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLES.map((role) => (
+                    <SelectItem key={role} value={role}>
+                      {ROLE_LABEL[role]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+
+            {user && (
+              <ProfileFieldsSection
+                role={form.watch('role')}
+                value={profile}
+                onChange={(patch) => setProfile((prev) => ({ ...prev, ...patch }))}
+                mode="edit"
+              />
+            )}
           </DialogBody>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
@@ -350,8 +438,35 @@ function EditUserDialog({ user, onClose }: { user: UserOut | null; onClose: () =
               Save changes
             </Button>
           </DialogFooter>
-        </form>
+        </DialogForm>
       </DialogContent>
+
+      {/*
+        A role change re-issues Firebase claims and revokes every token, so the
+        user is signed out wherever they are. That is the right behaviour — a
+        stale token would leave them on the wrong navigation until it expired —
+        but it is not what someone renaming an account expects to happen.
+      */}
+      <ConfirmDialog
+        open={!!confirmRole}
+        onOpenChange={(v) => !v && setConfirmRole(null)}
+        title={
+          confirmRole && user
+            ? `Change ${user.full_name} to ${ROLE_LABEL[confirmRole.role]}?`
+            : 'Change role?'
+        }
+        description={
+          user && confirmRole
+            ? `They are currently ${ROLE_LABEL[user.role]}. Changing this signs them out of every device immediately — they will need to sign in again, and will then see the ${ROLE_LABEL[confirmRole.role]} navigation and permissions.`
+            : undefined
+        }
+        confirmLabel="Change role and sign out"
+        loading={updateUser.isPending}
+        onConfirm={() => {
+          if (!confirmRole) return
+          void save(confirmRole).finally(() => setConfirmRole(null))
+        }}
+      />
     </Dialog>
   )
 }
@@ -367,6 +482,39 @@ export default function AdminUsersPage() {
   const [importOpen, setImportOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<UserOut | null>(null)
   const [deactivating, setDeactivating] = React.useState<UserOut | null>(null)
+
+  /**
+   * Permanent delete is a two-step conversation with the server, not a single
+   * confirm: without `force` the first attempt is EXPECTED to 409 with a list
+   * of what still references the user. That list is the only honest basis for
+   * asking whether to cascade, so it is fetched by trying, then shown.
+   */
+  const permanentDelete = usePermanentlyDeleteUser()
+  const [erasing, setErasing] = React.useState<UserOut | null>(null)
+  const [blockedBy, setBlockedBy] = React.useState<string | null>(null)
+
+  const onErase = React.useCallback((user: UserOut) => {
+    setBlockedBy(null)
+    setErasing(user)
+  }, [])
+
+  const runErase = async (force: boolean) => {
+    if (!erasing) return
+    try {
+      await permanentDelete.mutateAsync({ userId: erasing.id, force })
+      setErasing(null)
+      setBlockedBy(null)
+    } catch (error) {
+      // 409 without force means "referenced" — the actionable case. Anything
+      // else (own account, last admin) is terminal and closes the dialog.
+      if (!force && error instanceof ApiError && error.status === 409) {
+        setBlockedBy(error.message)
+        return
+      }
+      toast.error(error instanceof ApiError ? error.message : 'Could not delete the user.')
+      setErasing(null)
+    }
+  }
   const [viewing, setViewing] = React.useState<UserOut | null>(null)
   const [bulkDeactivate, setBulkDeactivate] = React.useState<UserOut[] | null>(null)
   const bulk = useBatchRunner<number>()
@@ -518,6 +666,12 @@ export default function AdminUsersPage() {
                       Reactivate
                     </DropdownMenuItem>
                   )}
+                  {/* Erasing is a separate, rarer decision from deactivating,
+                      so it sits below rather than replacing it. */}
+                  <DropdownMenuItem destructive onSelect={() => onErase(user)}>
+                    <Trash2 />
+                    Delete permanently
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -525,7 +679,7 @@ export default function AdminUsersPage() {
         },
       },
     ],
-    [reactivateUser],
+    [reactivateUser, onErase],
   )
 
   const counts = React.useMemo(() => {
@@ -755,6 +909,48 @@ export default function AdminUsersPage() {
           deactivateUser.mutate(deactivating.id, { onSettled: () => setDeactivating(null) })
         }}
       />
+
+      <ConfirmDialog
+        open={!!erasing}
+        onOpenChange={(v) => {
+          if (!v && !permanentDelete.isPending) {
+            setErasing(null)
+            setBlockedBy(null)
+          }
+        }}
+        title={
+          blockedBy
+            ? `${erasing?.full_name ?? 'This user'} still has records`
+            : `Permanently delete ${erasing?.full_name ?? 'this user'}?`
+        }
+        description={
+          blockedBy
+            ? undefined
+            : 'This erases the profile and the Firebase login. It cannot be undone. Deactivating instead keeps their history intact and can be reversed at any time.'
+        }
+        confirmLabel={blockedBy ? 'Delete the user and all of it' : 'Delete permanently'}
+        destructive
+        loading={permanentDelete.isPending}
+        onConfirm={() => void runErase(!!blockedBy)}
+      >
+        {blockedBy ? (
+          <div className="space-y-2.5">
+            <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2.5 text-sm text-danger">
+              {blockedBy}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Continuing deletes those records too, which will leave gaps in attendance and grade
+              reports for the classes involved. To keep the history, close this and deactivate the
+              account instead.
+            </p>
+          </div>
+        ) : (
+          <p className="rounded-lg border border-border bg-surface px-3 py-2.5 text-xs text-muted-foreground">
+            If anything still references this user, the next step will list it and ask again before
+            anything is removed.
+          </p>
+        )}
+      </ConfirmDialog>
     </>
   )
 }

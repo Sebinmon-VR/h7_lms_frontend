@@ -10,6 +10,7 @@ import {
   Pencil,
   Plus,
   Radio,
+  RefreshCw,
   Trash2,
   TriangleAlert,
   Upload,
@@ -50,6 +51,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
+  DialogForm,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -59,7 +61,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { MeetingPhaseBadge } from '@/components/domain/badges'
+import { MeetStatusBadge, MeetingPhaseBadge } from '@/components/domain/badges'
 import { EmptyState, ErrorState } from '@/components/feedback/states'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field } from '@/components/forms/field'
@@ -258,7 +260,7 @@ function MeetingFormDialog({
               : 'A Google Meet link and calendar invitations can be created automatically for the whole class.'}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
+        <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
           <DialogBody className="space-y-4">
             {form.formState.errors.root && (
               <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
@@ -454,31 +456,45 @@ function MeetingFormDialog({
               {editing ? 'Save changes' : 'Schedule meeting'}
             </Button>
           </DialogFooter>
-        </form>
+        </DialogForm>
       </DialogContent>
     </Dialog>
   )
 }
 
 /**
- * Shared with the student view, which passes no callbacks — the action menu
- * only renders for the teacher who owns the meeting.
+ * Shared with the student and admin views, which pass different callbacks —
+ * the action menu only renders for someone allowed to act on the meeting.
+ *
+ * `onRegenerate` is admin-only: retrying Meet generation is not something the
+ * teacher endpoints expose.
  */
 export function MeetingCard({
   meeting,
   now,
+  meta,
   onEdit,
   onDelete,
+  onRegenerate,
+  regenerating,
 }: {
   meeting: LiveMeetingOut
   now: Date
+  /** Extra context line — the admin view uses it to name the owning teacher. */
+  meta?: React.ReactNode
   onEdit?: (meeting: LiveMeetingOut) => void
   onDelete?: (meeting: LiveMeetingOut) => void
+  onRegenerate?: (meeting: LiveMeetingOut) => void
+  regenerating?: boolean
 }) {
   const phase = meetingPhase(meeting.scheduled_time, now)
   const { copied, copy } = useCopyToClipboard()
   const recording = resolveFileUrl(meeting.recording_url)
   const showActions = !!onEdit || !!onDelete
+
+  // Retrying is only meaningful while there is no link and the session has not
+  // already happened — the backend 400s on a meeting that already has one.
+  const canRegenerate = !!onRegenerate && !meeting.meeting_link && phase !== 'past'
 
   return (
     <Card className={phase === 'live' ? 'border-danger/40 shadow-glow' : undefined}>
@@ -505,18 +521,29 @@ export function MeetingCard({
                 </TooltipContent>
               </Tooltip>
             )}
-            {/* A missing link is a normal outcome, not an error — say so plainly. */}
+            {/* A missing link is a normal outcome, not an error — say so
+                plainly, and prefer the server's own reason when it recorded
+                one. `meet_status` is null on meetings written before the field
+                existed, which is why the old wording is still the fallback. */}
             {!meeting.meeting_link && phase !== 'past' && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Badge tone="warning" size="sm">
-                    <TriangleAlert />
-                    No link
-                  </Badge>
+                  <span>
+                    {meeting.meet_status ? (
+                      <MeetStatusBadge status={meeting.meet_status} />
+                    ) : (
+                      <Badge tone="warning" size="sm">
+                        <TriangleAlert />
+                        No link
+                      </Badge>
+                    )}
+                  </span>
                 </TooltipTrigger>
                 <TooltipContent>
-                  Google Meet could not generate a link when this was scheduled. Edit the meeting to
-                  paste one in.
+                  {meeting.meet_error ??
+                    (meeting.meet_status === 'SKIPPED'
+                      ? 'No Meet link was requested when this was scheduled. Edit the meeting to paste one in.'
+                      : 'Google Meet could not generate a link when this was scheduled. Edit the meeting to paste one in.')}
                 </TooltipContent>
               </Tooltip>
             )}
@@ -530,10 +557,22 @@ export function MeetingCard({
             <Badge tone="outline" size="sm">
               {classNameOf(meeting)}
             </Badge>
+            {meta}
           </div>
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {canRegenerate && (
+            <Button
+              variant="outline"
+              size="sm"
+              loading={regenerating}
+              onClick={() => onRegenerate?.(meeting)}
+            >
+              <RefreshCw className="size-4" />
+              Retry Meet link
+            </Button>
+          )}
           {!meeting.meeting_link && onEdit && phase !== 'past' && (
             <Button variant="outline" size="sm" onClick={() => onEdit(meeting)}>
               <LinkIcon className="size-4" />
@@ -622,7 +661,7 @@ export default function TeacherMeetingsPage() {
     return (
       <>
         <PageHeader title="Meetings" description="Live sessions and recordings for your classes." />
-        <AdminTeacherNotice />
+        <AdminTeacherNotice area="meetings" />
       </>
     )
   }

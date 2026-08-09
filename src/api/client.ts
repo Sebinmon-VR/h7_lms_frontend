@@ -123,6 +123,18 @@ export async function del(url: string, config?: AxiosRequestConfig): Promise<voi
   await apiClient.delete(url, config)
 }
 
+/**
+ * DELETE that returns a body.
+ *
+ * Most deletes here are 204, but a few report what they actually removed —
+ * a permanent user delete spans several collections and the caller needs to
+ * see the outcome, not just that it succeeded.
+ */
+export async function delWithBody<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
+  const { data } = await apiClient.delete<T>(url, config)
+  return data
+}
+
 /** Strips undefined/null so we never send `?class_id=undefined`. */
 export function cleanParams(params: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(

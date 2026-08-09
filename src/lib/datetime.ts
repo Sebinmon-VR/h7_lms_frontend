@@ -78,6 +78,20 @@ export function todayApiDate(): string {
   return toApiDate(new Date())
 }
 
+/**
+ * Moves an API date string by whole days.
+ *
+ * Built by hand rather than via `new Date(apiDate)`, which parses a bare
+ * "YYYY-MM-DD" as UTC midnight and lands on the previous day for anyone west of
+ * it — the same off-by-one `toApiDate` avoids on the way out.
+ */
+export function shiftApiDate(apiDate: string, days: number): string {
+  const [y, m, d] = apiDate.split('-').map(Number)
+  const date = new Date(y, (m ?? 1) - 1, d ?? 1)
+  date.setDate(date.getDate() + days)
+  return toApiDate(date)
+}
+
 // ---------------------------------------------------------------- formatting
 
 export function formatDate(value: string | Date | null | undefined, pattern = 'd MMM yyyy') {

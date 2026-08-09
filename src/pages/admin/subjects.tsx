@@ -32,6 +32,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
+  DialogForm,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -133,7 +134,7 @@ function SubjectFormDialog({
               : 'Subjects are the catalogue you assign to classes and teachers.'}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
+        <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
           <DialogBody className="space-y-4">
             {form.formState.errors.root && (
               <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
@@ -169,7 +170,7 @@ function SubjectFormDialog({
               {editing ? 'Save changes' : 'Create subject'}
             </Button>
           </DialogFooter>
-        </form>
+        </DialogForm>
       </DialogContent>
     </Dialog>
   )

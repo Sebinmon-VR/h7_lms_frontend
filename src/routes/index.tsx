@@ -23,6 +23,11 @@ const AdminSubjects = lazy(() => import('@/pages/admin/subjects'))
 const AdminMappings = lazy(() => import('@/pages/admin/assignments'))
 const AdminEnrollments = lazy(() => import('@/pages/admin/enrollments'))
 const AdminReports = lazy(() => import('@/pages/admin/reports'))
+const AdminMeetings = lazy(() => import('@/pages/admin/meetings'))
+const AdminMaterials = lazy(() => import('@/pages/admin/materials'))
+const AdminIntegrations = lazy(() => import('@/pages/admin/integrations'))
+const AdminTimetable = lazy(() => import('@/pages/admin/timetable'))
+const AdminReminders = lazy(() => import('@/pages/admin/reminders'))
 
 const TeacherDashboard = lazy(() => import('@/pages/teacher/dashboard'))
 const TeacherClasses = lazy(() => import('@/pages/teacher/classes'))
@@ -32,6 +37,7 @@ const TeacherMeetings = lazy(() => import('@/pages/teacher/meetings'))
 const TeacherMaterials = lazy(() => import('@/pages/teacher/materials'))
 const TeacherGradebook = lazy(() => import('@/pages/teacher/gradebook'))
 const TeacherInsights = lazy(() => import('@/pages/teacher/insights'))
+const TeacherTimetable = lazy(() => import('@/pages/teacher/timetable'))
 
 const StudentDashboard = lazy(() => import('@/pages/student/dashboard'))
 const StudentClasses = lazy(() => import('@/pages/student/classes'))
@@ -40,6 +46,7 @@ const StudentSyllabus = lazy(() => import('@/pages/student/syllabus'))
 const StudentMeetings = lazy(() => import('@/pages/student/meetings'))
 const StudentMaterials = lazy(() => import('@/pages/student/materials'))
 const StudentGrades = lazy(() => import('@/pages/student/grades'))
+const StudentTimetable = lazy(() => import('@/pages/student/timetable'))
 
 export function AppRoutes() {
   return (
@@ -77,9 +84,15 @@ export function AppRoutes() {
               <Route path="/admin/assignments" element={<Navigate to="/admin/mappings" replace />} />
               <Route path="/admin/enrollments" element={<AdminEnrollments />} />
               <Route path="/admin/reports" element={<AdminReports />} />
+              <Route path="/admin/meetings" element={<AdminMeetings />} />
+              <Route path="/admin/materials" element={<AdminMaterials />} />
+              <Route path="/admin/integrations" element={<AdminIntegrations />} />
+              <Route path="/admin/timetable" element={<AdminTimetable />} />
+              <Route path="/admin/reminders" element={<AdminReminders />} />
             </Route>
 
-            {/* Admins may open teacher pages; those views explain the scoping. */}
+            {/* Admins may open teacher pages; those views explain the scoping
+                and point at the system-wide equivalents above. */}
             <Route element={<RequireRole allow={['TEACHER', 'ADMIN']} />}>
               <Route path="/teacher" element={<TeacherDashboard />} />
               <Route path="/teacher/classes" element={<TeacherClasses />} />
@@ -89,6 +102,7 @@ export function AppRoutes() {
               <Route path="/teacher/materials" element={<TeacherMaterials />} />
               <Route path="/teacher/gradebook" element={<TeacherGradebook />} />
               <Route path="/teacher/insights" element={<TeacherInsights />} />
+              <Route path="/teacher/timetable" element={<TeacherTimetable />} />
             </Route>
 
             <Route element={<RequireRole allow={['STUDENT', 'ADMIN']} />}>
@@ -99,6 +113,7 @@ export function AppRoutes() {
               <Route path="/student/meetings" element={<StudentMeetings />} />
               <Route path="/student/materials" element={<StudentMaterials />} />
               <Route path="/student/grades" element={<StudentGrades />} />
+              <Route path="/student/timetable" element={<StudentTimetable />} />
             </Route>
 
             <Route path="*" element={<NotFoundPage />} />

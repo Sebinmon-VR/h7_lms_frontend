@@ -112,7 +112,9 @@ export default function LoginPage() {
     <AuthLayout>
       <div className="mb-7">
         <h2 className="text-2xl font-semibold tracking-tight">Welcome back</h2>
-        <p className="mt-1.5 text-sm text-muted-foreground">Sign in to continue to your workspace.</p>
+        <p className="mt-1.5 text-sm text-muted-foreground">
+          Sign in to pick up where your learning left off.
+        </p>
       </div>
 
       {formError && (

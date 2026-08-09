@@ -21,6 +21,7 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { ActiveBadge, RoleBadge } from '@/components/domain/badges'
+import { ProfileNotes, ProfileSummary } from '@/components/domain/profile-summary'
 
 /**
  * Everything the API knows about one person, assembled from the lists already
@@ -81,7 +82,18 @@ export function UserDetailSheet({
                   <dt className="text-muted-foreground">Created</dt>
                   <dd>{formatDateTime(user.created_at)}</dd>
                 </div>
+                {user.updated_at && (
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-muted-foreground">Last updated</dt>
+                    <dd>{formatDateTime(user.updated_at)}</dd>
+                  </div>
+                )}
               </dl>
+
+              <ProfileSummary user={user} />
+              <ProfileNotes notes={user.notes} />
+
+              <Separator />
 
               {user.role === 'TEACHER' && (
                 <section>

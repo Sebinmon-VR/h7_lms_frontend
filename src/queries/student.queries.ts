@@ -56,3 +56,37 @@ export function useStudentGrades(enabled = true) {
     enabled,
   })
 }
+
+/** The weekly grid — recurring rules, which barely change. */
+export function useStudentTimetable(enabled = true) {
+  return useQuery({
+    queryKey: qk.student.timetable(),
+    queryFn: studentApi.timetable,
+    staleTime: STALE.reference,
+    enabled,
+  })
+}
+
+/** One date's classes, with the countdown the server computed. */
+export function useStudentDaySchedule(onDate?: string, enabled = true) {
+  return useQuery({
+    queryKey: qk.student.timetableDay(onDate),
+    queryFn: () => studentApi.timetableDay(onDate),
+    staleTime: STALE.schedule,
+    enabled,
+  })
+}
+
+/**
+ * "What's next", across days — the next lesson in a subject may not be until
+ * next week. Refetched on an interval so the countdown stays true.
+ */
+export function useStudentUpcoming(enabled = true) {
+  return useQuery({
+    queryKey: qk.student.timetableUpcoming(),
+    queryFn: () => studentApi.timetableUpcoming(),
+    staleTime: STALE.schedule,
+    refetchInterval: 5 * 60_000,
+    enabled,
+  })
+}

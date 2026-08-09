@@ -30,6 +30,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
+  DialogForm,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -175,7 +176,7 @@ function TopicFormDialog({
               : 'Record what you covered so students can follow the syllabus.'}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
+        <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
           <DialogBody className="space-y-4">
             {form.formState.errors.root && (
               <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
@@ -273,7 +274,7 @@ function TopicFormDialog({
               {editing ? 'Save changes' : 'Log topic'}
             </Button>
           </DialogFooter>
-        </form>
+        </DialogForm>
       </DialogContent>
     </Dialog>
   )

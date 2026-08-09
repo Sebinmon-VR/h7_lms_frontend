@@ -27,10 +27,27 @@ export const qk = {
     monitoring: () => ['admin', 'reports', 'monitoring'] as const,
     jobs: () => ['admin', 'jobs'] as const,
     job: (jobId: string) => ['admin', 'jobs', jobId] as const,
+    /** System-wide lists — distinct from the teacher-scoped ones below. */
+    meetings: () => ['admin', 'meetings'] as const,
+    materials: () => ['admin', 'materials'] as const,
+    /** Keyed by `probe` because the two views return genuinely different data. */
+    integrations: (probe: boolean) => ['admin', 'integrations', probe] as const,
+    integrationsRoot: () => ['admin', 'integrations'] as const,
+    /**
+     * `includeInactive` is a real server-side difference, unlike the other
+     * timetable filters, so it belongs in the key.
+     */
+    timetable: (includeInactive: boolean) => ['admin', 'timetable', includeInactive] as const,
+    timetableRoot: () => ['admin', 'timetable'] as const,
+    reminderStatus: () => ['admin', 'reminders', 'status'] as const,
+    reminderPreview: () => ['admin', 'reminders', 'preview'] as const,
+    reminderLog: (limit: number) => ['admin', 'reminders', 'log', limit] as const,
+    remindersRoot: () => ['admin', 'reminders'] as const,
   },
   health: {
     root: ['health'] as const,
     cache: () => ['health', 'cache'] as const,
+    storage: () => ['health', 'storage'] as const,
   },
   teacher: {
     root: ['teacher'] as const,
@@ -42,6 +59,10 @@ export const qk = {
     meetings: () => ['teacher', 'meetings'] as const,
     materials: () => ['teacher', 'materials'] as const,
     grades: () => ['teacher', 'grades'] as const,
+    timetable: () => ['teacher', 'timetable'] as const,
+    /** Keyed by date; undefined means "today per the school timezone". */
+    timetableDay: (onDate?: string) => ['teacher', 'timetable', 'day', onDate ?? 'today'] as const,
+    timetableUpcoming: () => ['teacher', 'timetable', 'upcoming'] as const,
   },
   student: {
     root: ['student'] as const,
@@ -51,6 +72,9 @@ export const qk = {
     meetings: () => ['student', 'meetings'] as const,
     materials: () => ['student', 'materials'] as const,
     grades: () => ['student', 'grades'] as const,
+    timetable: () => ['student', 'timetable'] as const,
+    timetableDay: (onDate?: string) => ['student', 'timetable', 'day', onDate ?? 'today'] as const,
+    timetableUpcoming: () => ['student', 'timetable', 'upcoming'] as const,
   },
 } as const
 
@@ -73,4 +97,13 @@ export const STALE = {
   expensive: 5 * 60_000,
   /** Background job state, polled while a job is in flight. */
   live: 0,
+  /**
+   * Resolved schedules — "today" and "what's next".
+   *
+   * Short, because these carry a countdown the server computed: a cached copy
+   * keeps saying "in 12 minutes" long after it has become five. The underlying
+   * timetable barely changes, so this is about the derived instants, not the
+   * rules behind them.
+   */
+  schedule: 60_000,
 } as const

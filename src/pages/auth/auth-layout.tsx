@@ -1,14 +1,35 @@
 import { motion } from 'framer-motion'
-import { BarChart3, CalendarCheck, GraduationCap, Video } from 'lucide-react'
+import { BookOpen, Compass, Lightbulb, Users } from 'lucide-react'
 import * as React from 'react'
 
 import { Wordmark } from '@/components/layout/logo'
 
-const HIGHLIGHTS = [
-  { icon: CalendarCheck, title: 'Attendance in seconds', body: 'Mark a whole class from the keyboard, then edit any past date.' },
-  { icon: BarChart3, title: 'Insight without spreadsheets', body: 'Attendance trends, grade distributions and at-risk students, computed live.' },
-  { icon: Video, title: 'Live classes and recordings', body: 'Schedule sessions, share links and attach recordings in one place.' },
-  { icon: GraduationCap, title: 'One place per role', body: 'Administrators, teachers and students each get a workspace built for them.' },
+/**
+ * The brand panel speaks about learning rather than about the software. Anyone
+ * reading this screen already has an account here; what they want reflected
+ * back is the work — teaching and studying — not a feature list.
+ */
+const PILLARS = [
+  {
+    icon: BookOpen,
+    title: 'Learning is a habit',
+    body: 'Progress comes from turning up to the ordinary lesson, not from the exceptional one.',
+  },
+  {
+    icon: Users,
+    title: 'Nobody learns alone',
+    body: 'A good class is a room where questions are cheap and curiosity is contagious.',
+  },
+  {
+    icon: Lightbulb,
+    title: 'Understanding over marks',
+    body: 'A grade records a moment. What you understood outlasts the paper it was written on.',
+  },
+  {
+    icon: Compass,
+    title: 'Teachers point the way',
+    body: 'The best teaching hands a student the map and trusts them to walk the road.',
+  },
 ]
 
 export function AuthLayout({ children }: { children: React.ReactNode }) {
@@ -30,17 +51,27 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
             transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
             className="text-4xl font-semibold leading-tight tracking-tight"
           >
-            Everything your institution runs on,{' '}
-            <span className="text-gradient">in one workspace.</span>
+            Education is not filling a bucket,{' '}
+            <span className="text-gradient">but lighting a fire.</span>
           </motion.h1>
 
+          <motion.p
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.08, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+            className="mt-4 text-sm leading-relaxed text-muted-foreground"
+          >
+            Every lesson taught, every question asked and every mark earned is a step a student takes
+            toward thinking for themselves.
+          </motion.p>
+
           <div className="mt-10 grid gap-5 sm:grid-cols-2">
-            {HIGHLIGHTS.map((item, i) => (
+            {PILLARS.map((item, i) => (
               <motion.div
                 key={item.title}
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1 + i * 0.08, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                transition={{ delay: 0.16 + i * 0.08, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
                 className="flex gap-3"
               >
                 <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-primary">
@@ -56,7 +87,7 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
         </div>
 
         <p className="relative text-xs text-muted-foreground">
-          H7 Learning Management System
+          Teaching, learning and everything in between.
         </p>
       </div>
 

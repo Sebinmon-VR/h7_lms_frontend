@@ -1,7 +1,9 @@
 import {
   BarChart3,
+  Bell,
   BookOpen,
   CalendarCheck,
+  CalendarRange,
   ClipboardList,
   FileText,
   GraduationCap,
@@ -10,6 +12,7 @@ import {
   Library,
   LineChart,
   Link2,
+  Plug,
   Users,
   Video,
 } from 'lucide-react'
@@ -60,6 +63,46 @@ const ADMIN_NAV: NavSection[] = [
         icon: GraduationCap,
         description: 'Enroll students into classes',
       },
+      {
+        to: '/admin/timetable',
+        label: 'Timetable',
+        icon: CalendarRange,
+        description: 'Weekly periods for every class',
+      },
+    ],
+  },
+  {
+    heading: 'Content',
+    items: [
+      {
+        to: '/admin/meetings',
+        label: 'Meetings',
+        icon: Video,
+        description: 'Live sessions across every teacher',
+      },
+      {
+        to: '/admin/materials',
+        label: 'Materials',
+        icon: Library,
+        description: 'Every uploaded file, and where it is stored',
+      },
+    ],
+  },
+  {
+    heading: 'System',
+    items: [
+      {
+        to: '/admin/integrations',
+        label: 'Integrations',
+        icon: Plug,
+        description: 'Drive, Storage, Meet and email health',
+      },
+      {
+        to: '/admin/reminders',
+        label: 'Reminders',
+        icon: Bell,
+        description: 'Class reminder emails and delivery log',
+      },
     ],
   },
 ]
@@ -70,6 +113,7 @@ const TEACHER_NAV: NavSection[] = [
     items: [
       { to: '/teacher', label: 'Dashboard', icon: LayoutDashboard, end: true, description: 'Today at a glance' },
       { to: '/teacher/classes', label: 'My Classes', icon: Layers, description: 'Assigned classes and subjects' },
+      { to: '/teacher/timetable', label: 'Timetable', icon: CalendarRange, description: 'Your weekly periods' },
       { to: '/teacher/insights', label: 'Insights', icon: LineChart, description: 'Attendance and grade analytics' },
     ],
   },
@@ -91,6 +135,7 @@ const STUDENT_NAV: NavSection[] = [
     items: [
       { to: '/student', label: 'Dashboard', icon: LayoutDashboard, end: true, description: 'Your day at a glance' },
       { to: '/student/classes', label: 'My Classes', icon: Layers, description: 'Subjects and teachers' },
+      { to: '/student/timetable', label: 'Timetable', icon: CalendarRange, description: 'Your weekly classes' },
     ],
   },
   {

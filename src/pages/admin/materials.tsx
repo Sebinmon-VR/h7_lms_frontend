@@ -1,40 +1,24 @@
-import {
-  ExternalLink,
-  Grid3x3,
-  Info,
-  LayoutList,
-  Library,
-  MoreHorizontal,
-  Pencil,
-  Trash2,
-  TriangleAlert,
-  Upload,
-  UploadCloud,
-} from 'lucide-react'
+import { Grid3x3, HardDrive, LayoutList, Library, Upload, UploadCloud } from 'lucide-react'
 import * as React from 'react'
+import { Link } from 'react-router-dom'
 
 import type { StudyMaterialOut } from '@/api/types'
 import {
-  useDeleteMaterial,
-  useMyClasses,
-  useTeacherMaterials,
-  useUpdateMaterial,
-  useUploadMaterial,
-} from '@/queries/teacher.queries'
+  useAdminDeleteMaterial,
+  useAdminMaterials,
+  useAdminUpdateMaterial,
+  useAdminUploadMaterial,
+  useMappings,
+  useStorageStatus,
+  useUsers,
+} from '@/queries/admin.queries'
 import { cn } from '@/lib/cn'
 import { MATERIAL_TYPE_PRESETS } from '@/lib/constants'
-import { formatDateTime, formatRelative } from '@/lib/datetime'
-import {
-  MAX_UPLOAD_BYTES,
-  fileNameFromUrl,
-  formatFileSize,
-  resolveFileUrl,
-  storageLabel,
-} from '@/lib/files'
-import { subjectName, className as classNameOf } from '@/lib/select'
+import { MAX_UPLOAD_BYTES, fileNameFromUrl, formatFileSize, storageLabel } from '@/lib/files'
+import { buildDirectory, subjectName, teacherName } from '@/lib/select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Combobox } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
 import { ProgressBar } from '@/components/ui/progress'
@@ -49,82 +33,88 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { FreeformBadge } from '@/components/domain/badges'
 import { FileTypeIcon } from '@/components/domain/file-type-icon'
 import { EmptyState } from '@/components/feedback/states'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field } from '@/components/forms/field'
 import { PageHeader } from '@/components/layout/page-header'
-import { useClassSubjectSelection } from './class-subject-picker'
-import { AdminTeacherNotice, useIsAdminViewingTeacher } from './teacher-guard'
+import { MaterialCard } from '@/pages/teacher/materials'
 
-function UploadDialog({
+/**
+ * Filing the upload under the acting admin.
+ *
+ * The API expresses this as an omitted `teacher_id`, but a picker with no
+ * selection is indistinguishable from one not yet touched — and the Combobox
+ * offers no way to clear a choice — so "yourself" is a real option here and
+ * translated back to null on submit.
+ */
+const SELF = '__self'
+
+/**
+ * Uploads on behalf of any teacher.
+ *
+ * Unlike meetings, `teacher_id` here is pure attribution — nothing external is
+ * created under that account — so it is genuinely optional.
+ */
+function AdminUploadDialog({
   open,
   onOpenChange,
-  existing,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
-  existing: StudyMaterialOut[]
 }) {
-  const mappingsQuery = useMyClasses()
-  const selection = useClassSubjectSelection(mappingsQuery.data)
+  const teachersQuery = useUsers('TEACHER')
+  const mappingsQuery = useMappings()
   const [percent, setPercent] = React.useState(0)
-  const uploadMaterial = useUploadMaterial(setPercent)
+  const uploadMaterial = useAdminUploadMaterial(setPercent)
 
-  const [classId, setClassId] = React.useState<string>('')
-  const [subjectId, setSubjectId] = React.useState<string>('')
+  const [teacherId, setTeacherId] = React.useState(SELF)
+  const [classId, setClassId] = React.useState('')
+  const [subjectId, setSubjectId] = React.useState('')
   const [title, setTitle] = React.useState('')
-  const [materialType, setMaterialType] = React.useState<string>('NOTES')
+  const [materialType, setMaterialType] = React.useState('NOTES')
   const [customType, setCustomType] = React.useState('')
   const [file, setFile] = React.useState<File | null>(null)
   const [dragging, setDragging] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
-    if (open) {
-      setClassId(selection.classId ? String(selection.classId) : '')
-      setSubjectId(selection.subjectId ? String(selection.subjectId) : '')
-      setTitle('')
-      setMaterialType('NOTES')
-      setCustomType('')
-      setFile(null)
-      setError(null)
-      setPercent(0)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!open) return
+    setTeacherId(SELF)
+    setClassId('')
+    setSubjectId('')
+    setTitle('')
+    setMaterialType('NOTES')
+    setCustomType('')
+    setFile(null)
+    setError(null)
+    setPercent(0)
   }, [open])
 
-  const subjects = React.useMemo(() => {
+  /**
+   * With no teacher chosen the material is filed under the admin, so every
+   * class is fair game; once one is chosen, follow their assignments.
+   */
+  const scopedMappings = React.useMemo(() => {
+    const all = mappingsQuery.data ?? []
+    return teacherId === SELF ? all : all.filter((m) => String(m.teacher.id) === teacherId)
+  }, [mappingsQuery.data, teacherId])
+
+  const classOptions = React.useMemo(() => {
     const map = new Map<number, { id: number; name: string; code: string }>()
-    for (const m of mappingsQuery.data ?? []) {
+    for (const m of scopedMappings) map.set(m.class_room.id, m.class_room)
+    return [...map.values()]
+  }, [scopedMappings])
+
+  const subjectOptions = React.useMemo(() => {
+    const map = new Map<number, { id: number; name: string; code: string }>()
+    for (const m of scopedMappings) {
       if (classId && m.class_room.id !== Number(classId)) continue
       map.set(m.subject.id, m.subject)
     }
     return [...map.values()]
-  }, [mappingsQuery.data, classId])
-
-  /**
-   * Uploads no longer clobber each other — the backend prefixes every stored
-   * object with a unique token, so two teachers can both upload `notes.pdf`.
-   * A same-named file is now only a housekeeping question, not data loss, so
-   * this is a note rather than a warning.
-   */
-  const duplicateName = React.useMemo(() => {
-    if (!file || !classId) return null
-    return existing.find(
-      (m) => m.class_id === Number(classId) && fileNameFromUrl(m.file_url) === file.name,
-    )
-  }, [file, classId, existing])
+  }, [scopedMappings, classId])
 
   const chooseFile = (next: File | null) => {
     if (!next) return
@@ -145,6 +135,7 @@ function UploadDialog({
     setError(null)
     try {
       await uploadMaterial.mutateAsync({
+        teacher_id: teacherId === SELF ? null : Number(teacherId),
         class_id: Number(classId),
         subject_id: Number(subjectId),
         title: title.trim(),
@@ -157,19 +148,29 @@ function UploadDialog({
     }
   }
 
+  const teacherOptions = [
+    { value: SELF, label: 'Yourself (administrator)', hint: 'Filed under your own account' },
+    ...(teachersQuery.data ?? [])
+      .filter((t) => t.is_active)
+      .map((t) => ({ value: String(t.id), label: t.full_name, hint: t.email })),
+  ]
+
   return (
     <Dialog open={open} onOpenChange={(v) => !uploadMaterial.isPending && onOpenChange(v)}>
       <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>Upload study material</DialogTitle>
-          <DialogDescription>Shared with every student in the selected class.</DialogDescription>
+          <DialogDescription>
+            Shared with every student in the selected class, whoever it is filed under.
+          </DialogDescription>
         </DialogHeader>
         <DialogBody className="space-y-4">
           {error && (
-            <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">{error}</p>
+            <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
+              {error}
+            </p>
           )}
 
-          {/* ------------------------------------------------- dropzone */}
           <div
             onDragOver={(e) => {
               e.preventDefault()
@@ -193,7 +194,12 @@ function UploadDialog({
                   <p className="truncate text-sm font-medium">{file.name}</p>
                   <p className="text-xs text-muted-foreground">{formatFileSize(file.size)}</p>
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => setFile(null)} disabled={uploadMaterial.isPending}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setFile(null)}
+                  disabled={uploadMaterial.isPending}
+                >
                   Change
                 </Button>
               </div>
@@ -214,56 +220,65 @@ function UploadDialog({
                     />
                   </label>
                 </p>
-                <p className="mt-1 text-xs text-muted-foreground">Up to {formatFileSize(MAX_UPLOAD_BYTES)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Up to {formatFileSize(MAX_UPLOAD_BYTES)}
+                </p>
               </>
             )}
           </div>
 
-          {duplicateName && (
-            <div className="flex items-start gap-2.5 rounded-lg border border-border bg-surface px-3 py-2.5 text-xs">
-              <Info className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-              <span className="text-muted-foreground">
-                “{duplicateName.title}” in this class was uploaded from a file with the same name. Both
-                are kept — stored files get a unique name — so students will see two entries.
-              </span>
-            </div>
-          )}
+          <Field
+            id="admin-material-teacher"
+            label="Attribute to"
+            hint="Who this material is listed under. It is visible to the whole class either way."
+          >
+            <Combobox
+              id="admin-material-teacher"
+              value={teacherId}
+              onChange={(v) => {
+                setTeacherId(v)
+                setClassId('')
+                setSubjectId('')
+              }}
+              options={teacherOptions}
+            />
+          </Field>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field id="material-class" label="Class" required>
+            <Field id="admin-material-class" label="Class" required>
               <Combobox
-                id="material-class"
+                id="admin-material-class"
                 value={classId || null}
                 onChange={(v) => {
                   setClassId(v)
                   setSubjectId('')
                 }}
                 placeholder="Select a class"
-                options={selection.classes.map((c) => ({ value: String(c.id), label: c.name, hint: c.code }))}
+                options={classOptions.map((c) => ({ value: String(c.id), label: c.name, hint: c.code }))}
               />
             </Field>
-            <Field id="material-subject" label="Subject" required>
+            <Field id="admin-material-subject" label="Subject" required>
               <Combobox
-                id="material-subject"
+                id="admin-material-subject"
                 value={subjectId || null}
                 onChange={setSubjectId}
                 disabled={!classId}
                 placeholder={classId ? 'Select a subject' : 'Choose a class first'}
-                options={subjects.map((s) => ({ value: String(s.id), label: s.name, hint: s.code }))}
+                options={subjectOptions.map((s) => ({ value: String(s.id), label: s.name, hint: s.code }))}
               />
             </Field>
           </div>
 
-          <Field id="material-title" label="Title" required>
+          <Field id="admin-material-title" label="Title" required>
             <Input
-              id="material-title"
+              id="admin-material-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Chapter 4 — Trees"
             />
           </Field>
 
-          <Field id="material-type" label="Type" hint="Any label works; these are the common ones.">
+          <Field id="admin-material-type" label="Type" hint="Any label works; these are the common ones.">
             <div className="flex flex-wrap gap-2">
               {MATERIAL_TYPE_PRESETS.map((preset) => (
                 <button
@@ -317,7 +332,13 @@ function UploadDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={uploadMaterial.isPending}>
             Cancel
           </Button>
-          <Button variant="primary" icon={<Upload />} disabled={!ready} loading={uploadMaterial.isPending} onClick={submit}>
+          <Button
+            variant="primary"
+            icon={<Upload />}
+            disabled={!ready}
+            loading={uploadMaterial.isPending}
+            onClick={submit}
+          >
             Upload
           </Button>
         </DialogFooter>
@@ -326,122 +347,6 @@ function UploadDialog({
   )
 }
 
-export function MaterialCard({
-  material,
-  isNew,
-  meta,
-  onEdit,
-  onDelete,
-}: {
-  material: StudyMaterialOut
-  isNew?: boolean
-  /** Extra badge — the admin view uses it to name the owning teacher. */
-  meta?: React.ReactNode
-  onEdit?: (material: StudyMaterialOut) => void
-  onDelete?: (material: StudyMaterialOut) => void
-}) {
-  const url = resolveFileUrl(material.file_url)
-  const provider = material.storage_provider
-  const showActions = !!onEdit || !!onDelete
-
-  return (
-    <Card className="flex flex-col p-4">
-      <div className="flex items-start gap-3">
-        <FileTypeIcon url={material.file_url} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-2">
-            <p className="truncate text-sm font-medium">{material.title}</p>
-            <div className="flex shrink-0 items-center gap-1">
-              {isNew && (
-                <Badge tone="primary" size="sm">
-                  New
-                </Badge>
-              )}
-              {showActions && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={`Actions for ${material.title}`}
-                    >
-                      <MoreHorizontal />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {onEdit && (
-                      <DropdownMenuItem onSelect={() => onEdit(material)}>
-                        <Pencil />
-                        Rename or retype
-                      </DropdownMenuItem>
-                    )}
-                    {onDelete && (
-                      <DropdownMenuItem destructive onSelect={() => onDelete(material)}>
-                        <Trash2 />
-                        Delete material
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-            </div>
-          </div>
-          <p className="truncate text-xs text-muted-foreground">{fileNameFromUrl(material.file_url)}</p>
-        </div>
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        <FreeformBadge value={material.material_type} />
-        <Badge tone="accent" size="sm">
-          {subjectName(material)}
-        </Badge>
-        <Badge tone="outline" size="sm">
-          {classNameOf(material)}
-        </Badge>
-        {meta}
-        {provider && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              {/* A warning means the file did NOT land where it was meant to,
-                  so the badge changes tone rather than reporting the fallback
-                  as though it were the configured destination. */}
-              <Badge tone={material.storage_warning ? 'warning' : 'neutral'} size="sm">
-                {material.storage_warning && <TriangleAlert />}
-                {storageLabel(provider)}
-              </Badge>
-            </TooltipTrigger>
-            <TooltipContent>
-              {material.storage_warning ??
-                `Stored in ${storageLabel(provider)}. Deleting this material removes the file from there too.`}
-            </TooltipContent>
-          </Tooltip>
-        )}
-      </div>
-
-      <div className="mt-auto flex items-center justify-between gap-2 pt-3">
-        <span className="text-xs text-muted-foreground" title={formatDateTime(material.uploaded_at)}>
-          {formatRelative(material.uploaded_at)}
-        </span>
-        {url && (
-          <Button asChild variant="outline" size="sm">
-            {/* Cross-origin storage ignores the download attribute, so this
-                honestly opens in a new tab rather than faking a download. */}
-            <a href={url} target="_blank" rel="noopener noreferrer">
-              Open
-              <ExternalLink className="size-3" />
-            </a>
-          </Button>
-        )}
-      </div>
-    </Card>
-  )
-}
-
-/**
- * Metadata-only edit. The stored file cannot be swapped through the API — to
- * replace it you delete the material and upload again — so this deliberately
- * offers no file picker.
- */
 function EditMaterialDialog({
   material,
   onClose,
@@ -449,7 +354,7 @@ function EditMaterialDialog({
   material: StudyMaterialOut | null
   onClose: () => void
 }) {
-  const updateMaterial = useUpdateMaterial()
+  const updateMaterial = useAdminUpdateMaterial()
   const [title, setTitle] = React.useState('')
   const [type, setType] = React.useState('')
   const [error, setError] = React.useState<string | null>(null)
@@ -508,15 +413,15 @@ function EditMaterialDialog({
             </p>
           </div>
 
-          <Field id="edit-material-title" label="Title" required>
+          <Field id="admin-edit-material-title" label="Title" required>
             <Input
-              id="edit-material-title"
+              id="admin-edit-material-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
             />
           </Field>
 
-          <Field id="edit-material-type" label="Type" hint="Any label works; these are the common ones.">
+          <Field id="admin-edit-material-type" label="Type" hint="Any label works; these are the common ones.">
             <div className="flex flex-wrap gap-2">
               {MATERIAL_TYPE_PRESETS.map((preset) => (
                 <button
@@ -535,7 +440,7 @@ function EditMaterialDialog({
               ))}
             </div>
             <Input
-              id="edit-material-type"
+              id="admin-edit-material-type"
               className="mt-2"
               value={type}
               onChange={(e) => setType(e.target.value)}
@@ -547,12 +452,7 @@ function EditMaterialDialog({
           <Button variant="outline" onClick={onClose} disabled={updateMaterial.isPending}>
             Cancel
           </Button>
-          <Button
-            variant="primary"
-            disabled={!ready}
-            loading={updateMaterial.isPending}
-            onClick={submit}
-          >
+          <Button variant="primary" disabled={!ready} loading={updateMaterial.isPending} onClick={submit}>
             Save changes
           </Button>
         </DialogFooter>
@@ -561,22 +461,24 @@ function EditMaterialDialog({
   )
 }
 
-export default function TeacherMaterialsPage() {
-  const isAdmin = useIsAdminViewingTeacher()
-  const materialsQuery = useTeacherMaterials(!isAdmin)
-  const deleteMaterial = useDeleteMaterial()
+export default function AdminMaterialsPage() {
+  const materialsQuery = useAdminMaterials()
+  const usersQuery = useUsers()
+  const storageQuery = useStorageStatus()
+  const deleteMaterial = useAdminDeleteMaterial()
+
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<StudyMaterialOut | null>(null)
   const [deleting, setDeleting] = React.useState<StudyMaterialOut | null>(null)
   const [keepFile, setKeepFile] = React.useState(false)
   const [view, setView] = React.useState<'grid' | 'list'>('grid')
-  const [subjectFilter, setSubjectFilter] = React.useState<string | null>(null)
+  const [teacherFilter, setTeacherFilter] = React.useState<string | null>(null)
 
-  // Default back to a full delete every time the dialog opens; leaving an
-  // orphaned file behind should always be a deliberate choice.
   React.useEffect(() => {
     if (deleting) setKeepFile(false)
   }, [deleting])
+
+  const userDir = React.useMemo(() => buildDirectory(usersQuery.data ?? []), [usersQuery.data])
 
   const materials = React.useMemo(
     () =>
@@ -584,35 +486,39 @@ export default function TeacherMaterialsPage() {
     [materialsQuery.data],
   )
 
-  const subjectOptions = React.useMemo(() => {
+  const teacherOptions = React.useMemo(() => {
     const map = new Map<string, string>()
-    for (const m of materials) map.set(String(m.subject_id), subjectName(m))
-    return [...map.entries()].map(([value, label]) => ({ value, label }))
-  }, [materials])
+    for (const m of materials) map.set(String(m.teacher_id), teacherName(m, userDir))
+    return [...map.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [materials, userDir])
 
   const filtered = React.useMemo(
-    () => (subjectFilter ? materials.filter((m) => String(m.subject_id) === subjectFilter) : materials),
-    [materials, subjectFilter],
+    () => (teacherFilter ? materials.filter((m) => String(m.teacher_id) === teacherFilter) : materials),
+    [materials, teacherFilter],
   )
 
-  if (isAdmin) {
-    return (
-      <>
-        <PageHeader title="Materials" description="Notes and resources you have shared." />
-        <AdminTeacherNotice area="materials" />
-      </>
-    )
-  }
+  /**
+   * Files that fell back to local disk while a cloud provider was configured.
+   * Students can usually still reach them, but they live outside the backup and
+   * sharing story the cloud provider was chosen for, so they are worth naming.
+   */
+  const strandedLocally = React.useMemo(() => {
+    const configured = storageQuery.data?.provider
+    if (!configured || configured === 'LOCAL') return []
+    return materials.filter((m) => m.storage_provider === 'LOCAL')
+  }, [materials, storageQuery.data])
 
   return (
     <>
       <PageHeader
         title="Materials"
-        description="Notes, books and worksheets shared with your classes."
+        description="Every file uploaded across all teachers, and where each one is actually stored."
         actions={
           <>
             <Segmented
-              layoutId="materials-view"
+              layoutId="admin-materials-view"
               value={view}
               onChange={setView}
               size="sm"
@@ -628,28 +534,28 @@ export default function TeacherMaterialsPage() {
           </>
         }
       >
-        {subjectOptions.length > 1 && (
+        {teacherOptions.length > 1 && (
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setSubjectFilter(null)}
+              onClick={() => setTeacherFilter(null)}
               className={cn(
                 'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-                subjectFilter === null
+                teacherFilter === null
                   ? 'border-primary bg-primary/12 text-primary'
                   : 'border-border text-muted-foreground hover:border-primary/40',
               )}
             >
-              All subjects
+              All teachers
             </button>
-            {subjectOptions.map((option) => (
+            {teacherOptions.map((option) => (
               <button
                 key={option.value}
                 type="button"
-                onClick={() => setSubjectFilter(option.value)}
+                onClick={() => setTeacherFilter(option.value)}
                 className={cn(
                   'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-                  subjectFilter === option.value
+                  teacherFilter === option.value
                     ? 'border-primary bg-primary/12 text-primary'
                     : 'border-border text-muted-foreground hover:border-primary/40',
                 )}
@@ -660,6 +566,27 @@ export default function TeacherMaterialsPage() {
           </div>
         )}
       </PageHeader>
+
+      {strandedLocally.length > 0 && (
+        <div className="mb-5 flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/8 p-4 text-sm">
+          <HardDrive className="mt-0.5 size-4 shrink-0 text-warning" />
+          <div>
+            <p className="font-medium">
+              {strandedLocally.length}{' '}
+              {strandedLocally.length === 1 ? 'file is' : 'files are'} on the server disk, not{' '}
+              {storageLabel(storageQuery.data?.provider)}
+            </p>
+            <p className="mt-0.5 text-muted-foreground">
+              These uploads fell back to local storage because the cloud provider was unreachable at
+              the time. Check{' '}
+              <Link to="/admin/integrations" className="font-medium text-primary hover:underline">
+                Integrations
+              </Link>
+              , then re-upload them to move the files.
+            </p>
+          </div>
+        </div>
+      )}
 
       <QueryBoundary
         query={materialsQuery}
@@ -675,7 +602,7 @@ export default function TeacherMaterialsPage() {
           <EmptyState
             icon={<Library />}
             title="No materials yet"
-            description="Upload notes, a book chapter or a worksheet, and every student in the class will see it."
+            description="Nobody has uploaded anything. You can upload on a teacher's behalf to get started."
             action={
               <Button variant="primary" icon={<Upload />} onClick={() => setDialogOpen(true)}>
                 Upload material
@@ -694,6 +621,11 @@ export default function TeacherMaterialsPage() {
               <MaterialCard
                 key={material.id}
                 material={material}
+                meta={
+                  <Badge tone="info" size="sm">
+                    {teacherName(material, userDir)}
+                  </Badge>
+                }
                 onEdit={setEditing}
                 onDelete={setDeleting}
               />
@@ -702,7 +634,7 @@ export default function TeacherMaterialsPage() {
         )}
       </QueryBoundary>
 
-      <UploadDialog open={dialogOpen} onOpenChange={setDialogOpen} existing={materials} />
+      <AdminUploadDialog open={dialogOpen} onOpenChange={setDialogOpen} />
       <EditMaterialDialog material={editing} onClose={() => setEditing(null)} />
 
       <ConfirmDialog
@@ -711,7 +643,7 @@ export default function TeacherMaterialsPage() {
         title="Delete this material?"
         description={
           deleting
-            ? `“${deleting.title}” will disappear from every student's materials list for ${subjectName(deleting)}.`
+            ? `“${deleting.title}” will disappear from every student's materials list for ${subjectName(deleting)}, and from ${teacherName(deleting, userDir)}'s own materials page.`
             : undefined
         }
         confirmLabel="Delete material"

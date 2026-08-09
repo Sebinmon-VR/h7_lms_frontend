@@ -1,4 +1,16 @@
-import { CalendarClock, CheckCircle2, CircleSlash, Clock, GraduationCap, Radio, ShieldCheck, UserRound, XCircle } from 'lucide-react'
+import {
+  CalendarClock,
+  CheckCircle2,
+  CircleSlash,
+  Clock,
+  GraduationCap,
+  Link as LinkIcon,
+  Radio,
+  ShieldCheck,
+  TriangleAlert,
+  UserRound,
+  XCircle,
+} from 'lucide-react'
 
 import type { AttendanceStatus, UserRole } from '@/api/types'
 import { cn } from '@/lib/cn'
@@ -83,6 +95,43 @@ export function MeetingPhaseBadge({ phase }: { phase: 'live' | 'upcoming' | 'pas
     )
   }
   return <Badge tone="neutral">Ended</Badge>
+}
+
+/**
+ * Why a meeting does or does not have a Meet link.
+ *
+ * Only rendered when the link is genuinely missing or genuinely failed —
+ * `CREATED` needs no badge (the join button says it), and `MANUAL` is the
+ * ordinary case of someone pasting a Zoom URL. Records written before the
+ * field existed report null, which is unknown rather than broken, so callers
+ * fall back to their previous "No link" wording there.
+ */
+export function MeetStatusBadge({ status }: { status: string }) {
+  if (status === 'FAILED') {
+    return (
+      <Badge tone="danger" size="sm">
+        <TriangleAlert />
+        Meet link failed
+      </Badge>
+    )
+  }
+  if (status === 'SKIPPED') {
+    return (
+      <Badge tone="neutral" size="sm">
+        <CircleSlash />
+        No link requested
+      </Badge>
+    )
+  }
+  if (status === 'MANUAL') {
+    return (
+      <Badge tone="neutral" size="sm">
+        <LinkIcon />
+        Manual link
+      </Badge>
+    )
+  }
+  return null
 }
 
 /** `material_type` and meeting `status` are free-form strings from the API. */

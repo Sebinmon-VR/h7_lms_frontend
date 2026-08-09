@@ -1,8 +1,11 @@
 import { cleanParams, del, get, post, put } from './client'
 import type {
+  ApiDate,
   AttendanceOut,
   AttendanceUpdate,
   BatchAttendanceCreate,
+  ScheduledPeriod,
+  TimetableEntryOut,
   ExamGradeOut,
   GradeEntryCreate,
   GradeEntryUpdate,
@@ -34,6 +37,28 @@ export const teacherApi = {
 
   /** Active students only. The backend does not check class ownership. */
   classStudents: (classId: number) => get<UserOut[]>(`/teachers/classes/${classId}/students`),
+
+  /**
+   * The periods this teacher takes, for the whole week, ordered weekday then
+   * start time. Recurring rules, not calendar days — see `TimetableEntryOut`.
+   */
+  timetable: () => get<TimetableEntryOut[]>('/teachers/timetable'),
+
+  /**
+   * One date's periods with absolute instants resolved server-side, so the
+   * client never redoes weekday or school-timezone arithmetic.
+   */
+  timetableDay: (onDate?: ApiDate) =>
+    get<ScheduledPeriod[]>('/teachers/timetable/day', { params: cleanParams({ on_date: onDate }) }),
+
+  /**
+   * The next periods coming up, looking ACROSS days — which is the point: the
+   * next lesson in a subject may not be until next week.
+   */
+  timetableUpcoming: (daysAhead = 7, limit = 10) =>
+    get<ScheduledPeriod[]>('/teachers/timetable/upcoming', {
+      params: cleanParams({ days_ahead: daysAhead, limit }),
+    }),
 
   listAttendance: () => get<AttendanceOut[]>('/teachers/attendance'),
 

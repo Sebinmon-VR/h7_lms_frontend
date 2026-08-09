@@ -1,10 +1,13 @@
-import { get } from './client'
+import { cleanParams, get } from './client'
 import type {
+  ApiDate,
   AttendanceOut,
   ExamGradeOut,
   LiveMeetingOut,
+  ScheduledPeriod,
   StudyMaterialOut,
   TeacherMappingOut,
+  TimetableEntryOut,
   TopicOut,
 } from './types'
 
@@ -24,4 +27,20 @@ export const studentApi = {
   meetings: () => get<LiveMeetingOut[]>('/students/meetings'),
   materials: () => get<StudyMaterialOut[]>('/students/materials'),
   grades: () => get<ExamGradeOut[]>('/students/grades'),
+
+  /**
+   * The weekly timetable across every class the student is enrolled in — one
+   * of the few student endpoints that is NOT limited to the first enrollment.
+   */
+  timetable: () => get<TimetableEntryOut[]>('/students/timetable'),
+
+  /** One date's classes, with absolute instants resolved server-side. */
+  timetableDay: (onDate?: ApiDate) =>
+    get<ScheduledPeriod[]>('/students/timetable/day', { params: cleanParams({ on_date: onDate }) }),
+
+  /** The next classes coming up, looking across days rather than within one. */
+  timetableUpcoming: (daysAhead = 7, limit = 10) =>
+    get<ScheduledPeriod[]>('/students/timetable/upcoming', {
+      params: cleanParams({ days_ahead: daysAhead, limit }),
+    }),
 }

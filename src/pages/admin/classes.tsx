@@ -33,6 +33,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
+  DialogForm,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -147,7 +148,7 @@ function ClassFormDialog({
               : 'Class sections group the students you enroll and the teachers you assign.'}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
+        <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
           <DialogBody className="space-y-4">
             {form.formState.errors.root && (
               <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
@@ -178,7 +179,7 @@ function ClassFormDialog({
               {editing ? 'Save changes' : 'Create class'}
             </Button>
           </DialogFooter>
-        </form>
+        </DialogForm>
       </DialogContent>
     </Dialog>
   )

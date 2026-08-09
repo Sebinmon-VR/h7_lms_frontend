@@ -116,3 +116,15 @@ export function formatFileSize(bytes: number): string {
 
 /** Client-side upload guard. The backend enforces no limit at all. */
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+/** Human name for a `storage_provider` value. */
+export const STORAGE_LABEL: Record<string, string> = {
+  GCS: 'Cloud Storage',
+  DRIVE: 'Google Drive',
+  LOCAL: 'Server disk',
+}
+
+export function storageLabel(provider: string | null | undefined): string {
+  if (!provider) return 'storage'
+  return STORAGE_LABEL[provider] ?? provider
+}

@@ -105,6 +105,43 @@ export function useTeacherGrades(enabled = true) {
   })
 }
 
+/** The weekly grid — recurring rules, which barely change. */
+export function useTeacherTimetable(enabled = true) {
+  return useQuery({
+    queryKey: qk.teacher.timetable(),
+    queryFn: teacherApi.timetable,
+    staleTime: STALE.reference,
+    enabled,
+  })
+}
+
+/** One date's periods, with the countdown the server computed. */
+export function useTeacherDaySchedule(onDate?: string, enabled = true) {
+  return useQuery({
+    queryKey: qk.teacher.timetableDay(onDate),
+    queryFn: () => teacherApi.timetableDay(onDate),
+    staleTime: STALE.schedule,
+    enabled,
+  })
+}
+
+/**
+ * "What's next", across days.
+ *
+ * Refetched on an interval because its whole value is the countdown: a panel
+ * frozen at "in 12 minutes" through a lesson that has already started is worse
+ * than no panel.
+ */
+export function useTeacherUpcoming(enabled = true) {
+  return useQuery({
+    queryKey: qk.teacher.timetableUpcoming(),
+    queryFn: () => teacherApi.timetableUpcoming(),
+    staleTime: STALE.schedule,
+    refetchInterval: 5 * 60_000,
+    enabled,
+  })
+}
+
 // -------------------------------------------------------------- mutations
 
 const upsertKey = (r: { student_id: number; class_id: number; subject_id: number; date: string }) =>
@@ -268,9 +305,12 @@ export function useCreateMeeting() {
 
       const wantedMeetLink = submitted.auto_create_meet !== false && !submitted.meeting_link
       if (wantedMeetLink && !created.meeting_link) {
+        // The server now records WHY, which beats the generic guess this used
+        // to make. It stays a fallback for meetings created before that landed.
         toast.warning('Meeting scheduled without a Meet link', {
           description:
-            'Google Meet could not generate a link for this session. The meeting is saved — add a link manually, or try again once Workspace delegation is in place.',
+            created.meet_error ??
+            'Google Meet could not generate a link for this session. The meeting is saved — add a link manually, or ask an administrator to retry it once Workspace delegation is in place.',
           duration: 10_000,
         })
       } else if (created.google_event_id) {
@@ -341,7 +381,18 @@ export function useUploadMaterial(onProgress?: (percent: number) => void) {
       )
       void qc.invalidateQueries({ queryKey: qk.teacher.materials() })
       markMonitoringStale()
-      toast.success(`“${created.title}” uploaded`)
+
+      // The upload succeeded either way, but a file that quietly landed on the
+      // server's disk instead of Drive is something the uploader should know:
+      // it is the difference between "students can open this" and "maybe not".
+      if (created.storage_warning) {
+        toast.warning(`“${created.title}” was stored on the server disk`, {
+          description: created.storage_warning,
+          duration: 10_000,
+        })
+      } else {
+        toast.success(`“${created.title}” uploaded`)
+      }
     },
   })
 }
