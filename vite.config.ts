@@ -10,14 +10,44 @@ export default defineConfig(({ command, mode }) => {
   // because only this file runs in Node at build time — a throw in app code
   // would not fail the build, it would just white-screen the browser.
   const env = loadEnv(mode, process.cwd(), 'VITE_')
-  if (command === 'build' && !(env.VITE_API_BASE ?? '').trim()) {
-    throw new Error(
-      'VITE_API_BASE is empty. A production build must point at the absolute\n' +
-        'origin of the API (e.g. https://my-api.azurewebsites.net) — the dev\n' +
-        'server proxy that makes an empty value work locally does not exist in\n' +
-        'a build, so requests would fall back to the site\'s own origin.\n' +
-        'Set it in the build environment (GitHub repo Settings > Variables).',
-    )
+  if (command === 'build') {
+    const apiBase = (env.VITE_API_BASE ?? '').trim()
+    const hint =
+      'Set it in the build environment (GitHub repo Settings > Secrets and\n' +
+      'variables > Actions > Variables), e.g.\n' +
+      '  VITE_API_BASE=https://my-api.azurewebsites.net'
+
+    if (!apiBase) {
+      throw new Error(
+        'VITE_API_BASE is empty. A production build must point at the absolute\n' +
+          'origin of the API — the dev server proxy that makes an empty value\n' +
+          'work locally does not exist in a build, so every request would fall\n' +
+          `back to the site's own origin.\n${hint}`,
+      )
+    }
+    // Without a scheme this is a *relative* URL, so requests resolve against
+    // the static site instead: https://<site>/my-api.azurewebsites.net/api/v1.
+    // That fails as 404s rather than anything that names the real problem.
+    if (!/^https?:\/\//i.test(apiBase)) {
+      throw new Error(
+        `VITE_API_BASE is missing its scheme: "${apiBase}".\n` +
+          'A bare hostname is treated as a relative path, so requests would go\n' +
+          `to https://<this-site>/${apiBase}/api/v1/... and 404.\n${hint}`,
+      )
+    }
+    try {
+      const url = new URL(apiBase)
+      if (url.pathname !== '/' || url.search || url.hash) {
+        throw new Error(
+          `VITE_API_BASE must be an origin only: "${apiBase}".\n` +
+            'src/lib/env.ts appends /api/v1 itself, so any path, query or\n' +
+            `fragment here produces a malformed URL.\n${hint}`,
+        )
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('VITE_API_BASE')) throw error
+      throw new Error(`VITE_API_BASE is not a valid URL: "${apiBase}".\n${hint}`)
+    }
   }
 
   return {
