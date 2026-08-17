@@ -15,6 +15,7 @@ import {
   useMappings,
   useRegenerateMeetingLink,
   useSubjects,
+  useTeachingStaff,
   useUsers,
 } from '@/queries/admin.queries'
 import { splitMeetings } from '@/lib/derive'
@@ -91,7 +92,7 @@ function AdminMeetingDialog({
   onOpenChange: (v: boolean) => void
   editing: LiveMeetingOut | null
 }) {
-  const teachersQuery = useUsers('TEACHER')
+  const teachersQuery = useTeachingStaff()
   const classesQuery = useClasses()
   const subjectsQuery = useSubjects()
   const mappingsQuery = useMappings()

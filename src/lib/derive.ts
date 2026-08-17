@@ -22,7 +22,7 @@ import type {
   TopicOut,
   UserOut,
 } from '@/api/types'
-import { ATTENDANCE_STATUSES, AT_RISK_ATTENDANCE, AT_RISK_GRADE } from './constants'
+import { ATTENDANCE_STATUSES, AT_RISK_ATTENDANCE, AT_RISK_GRADE, isTeachingRole } from './constants'
 import { parseApiDate, parseApiDateTime, meetingPhase } from './datetime'
 import { gradePercentage } from './format'
 
@@ -406,8 +406,11 @@ export function provisioningAlerts(
     studentsWithoutEnrollment: users.filter(
       (u) => u.role === 'STUDENT' && u.is_active && !enrolledStudentIds.has(u.id),
     ),
+    // Both teaching roles. A class teacher with no subject mapping still
+    // cannot take a register, and dropping them from this alert would hide
+    // exactly the gap an admin most needs to see.
     teachersWithoutAssignment: users.filter(
-      (u) => u.role === 'TEACHER' && u.is_active && !assignedTeacherIds.has(u.id),
+      (u) => isTeachingRole(u.role) && u.is_active && !assignedTeacherIds.has(u.id),
     ),
     classesWithoutSubject: classes.filter((c) => !classesWithSubject.has(c.id)),
     subjectsWithoutTeacher: subjects.filter((s) => !subjectsWithTeacher.has(s.id)),

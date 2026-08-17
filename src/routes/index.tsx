@@ -21,6 +21,8 @@ const AdminUsers = lazy(() => import('@/pages/admin/users'))
 const AdminClasses = lazy(() => import('@/pages/admin/classes'))
 const AdminSubjects = lazy(() => import('@/pages/admin/subjects'))
 const AdminMappings = lazy(() => import('@/pages/admin/assignments'))
+const AdminMappingNew = lazy(() => import('@/pages/admin/mapping-new'))
+const AdminClassTeacherNew = lazy(() => import('@/pages/admin/class-teacher-new'))
 const AdminEnrollments = lazy(() => import('@/pages/admin/enrollments'))
 const AdminReports = lazy(() => import('@/pages/admin/reports'))
 const AdminMeetings = lazy(() => import('@/pages/admin/meetings'))
@@ -80,6 +82,14 @@ export function AppRoutes() {
               <Route path="/admin/classes" element={<AdminClasses />} />
               <Route path="/admin/subjects" element={<AdminSubjects />} />
               <Route path="/admin/mappings" element={<AdminMappings />} />
+              {/* Both mapping forms own a route rather than a dialog: they
+                  explain what an assignment grants and preview it before it is
+                  made, which needs more room than a modal has. */}
+              <Route path="/admin/mappings/new" element={<AdminMappingNew />} />
+              <Route
+                path="/admin/mappings/class-teacher/new"
+                element={<AdminClassTeacherNew />}
+              />
               {/* Older label; keep the URL working. */}
               <Route path="/admin/assignments" element={<Navigate to="/admin/mappings" replace />} />
               <Route path="/admin/enrollments" element={<AdminEnrollments />} />
@@ -92,8 +102,10 @@ export function AppRoutes() {
             </Route>
 
             {/* Admins may open teacher pages; those views explain the scoping
-                and point at the system-wide equivalents above. */}
-            <Route element={<RequireRole allow={['TEACHER', 'ADMIN']} />}>
+                and point at the system-wide equivalents above. A class teacher
+                is an ordinary teacher here — their extra reach is per class,
+                which a route guard cannot express. */}
+            <Route element={<RequireRole allow={['TEACHER', 'CLASS_TEACHER', 'ADMIN']} />}>
               <Route path="/teacher" element={<TeacherDashboard />} />
               <Route path="/teacher/classes" element={<TeacherClasses />} />
               <Route path="/teacher/attendance" element={<TeacherAttendance />} />

@@ -11,6 +11,7 @@ import type {
   ClassRoomCreate,
   ClassRoomOut,
   ClassRoomUpdate,
+  ClassTeacherMappingCreate,
   GenerateCredentialsRequest,
   JobStatus,
   LiveMeetingOut,
@@ -32,7 +33,7 @@ import type {
   UserRole,
   UserUpdate,
 } from '@/api/types'
-import { ROLE_LABEL } from '@/lib/constants'
+import { ROLE_LABEL, isTeachingRole } from '@/lib/constants'
 import { STALE, qk } from './keys'
 import { markMonitoringStale } from './query-client'
 
@@ -43,6 +44,29 @@ export function useUsers(role?: UserRole) {
     queryKey: qk.admin.users(role),
     queryFn: () => adminApi.listUsers(role),
     staleTime: STALE.reference,
+  })
+}
+
+/**
+ * Everyone who may own a teaching record — both `TEACHER` and `CLASS_TEACHER`.
+ *
+ * This exists because `/admin/users?role=` is a real Firestore `==` query, so
+ * asking for `TEACHER` returns only the plain ones. Every teacher picker in the
+ * app used to do exactly that, which meant promoting someone to class teacher
+ * silently removed them from the subject-mapping, timetable, meeting and
+ * material forms — they would appear to have been deleted. Fetching the
+ * directory once and filtering here also shares a cache entry with the users
+ * page and the dashboard rather than adding a second round trip.
+ */
+export function useTeachingStaff(enabled = true) {
+  return useQuery({
+    queryKey: qk.admin.users(),
+    queryFn: () => adminApi.listUsers(),
+    staleTime: STALE.reference,
+    enabled,
+    // `select` rather than a filtered fetch, so this shares the one unfiltered
+    // cache entry with the users page and the dashboard.
+    select: (users: UserOut[]) => users.filter((u) => isTeachingRole(u.role)),
   })
 }
 
@@ -749,6 +773,55 @@ export function useDeleteMapping() {
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.admin.mappings() })
+    },
+  })
+}
+
+// ------------------------------------------------------- class teachers
+
+export function useClassTeachers(enabled = true) {
+  return useQuery({
+    queryKey: qk.admin.classTeachers(),
+    queryFn: () => adminApi.listClassTeachers(),
+    staleTime: STALE.reference,
+    enabled,
+  })
+}
+
+/**
+ * Assigning promotes the teacher to `CLASS_TEACHER` server-side, so the users
+ * cache is invalidated alongside the chart — otherwise the directory keeps
+ * showing the old role until it goes stale, and every teacher picker built on
+ * it disagrees with the badge on this page.
+ */
+export function useAssignClassTeacher() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: ClassTeacherMappingCreate) => adminApi.assignClassTeacher(body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.admin.classTeachers() })
+      void qc.invalidateQueries({ queryKey: qk.admin.usersRoot() })
+      void qc.invalidateQueries({ queryKey: qk.teacher.myLedClasses() })
+      markMonitoringStale()
+    },
+  })
+}
+
+/**
+ * Not optimistic, unlike `useDeleteMapping`. Removing the teacher's LAST
+ * assignment also demotes them back to `TEACHER`, and whether this was the last
+ * one is something only the server knows — showing the row gone before that
+ * resolves would leave the role badge elsewhere on the page contradicting it.
+ */
+export function useDeleteClassTeacher() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (mappingId: number) => adminApi.deleteClassTeacher(mappingId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.admin.classTeachers() })
+      void qc.invalidateQueries({ queryKey: qk.admin.usersRoot() })
+      void qc.invalidateQueries({ queryKey: qk.teacher.myLedClasses() })
+      markMonitoringStale()
     },
   })
 }

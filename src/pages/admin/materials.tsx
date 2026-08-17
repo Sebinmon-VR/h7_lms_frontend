@@ -10,6 +10,7 @@ import {
   useAdminUploadMaterial,
   useMappings,
   useStorageStatus,
+  useTeachingStaff,
   useUsers,
 } from '@/queries/admin.queries'
 import { cn } from '@/lib/cn'
@@ -64,7 +65,7 @@ function AdminUploadDialog({
   open: boolean
   onOpenChange: (v: boolean) => void
 }) {
-  const teachersQuery = useUsers('TEACHER')
+  const teachersQuery = useTeachingStaff()
   const mappingsQuery = useMappings()
   const [percent, setPercent] = React.useState(0)
   const uploadMaterial = useAdminUploadMaterial(setPercent)

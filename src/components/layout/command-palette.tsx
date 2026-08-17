@@ -26,6 +26,7 @@ import type {
   TopicOut,
   UserOut,
 } from '@/api/types'
+import { isTeachingRole } from '@/lib/constants'
 import { useAuth } from '@/providers/auth-provider'
 import { useTheme } from '@/providers/theme-provider'
 import { qk } from '@/queries/keys'
@@ -93,7 +94,9 @@ export function CommandPalette({
 
   /** Where each record type's list lives, per role. */
   const routes = React.useMemo(() => {
-    const teacher = role === 'TEACHER'
+    // Both teaching roles — an equality test would send a class teacher to the
+    // student pages, which their role guard then bounces them straight out of.
+    const teacher = isTeachingRole(role)
     return {
       materials: teacher ? '/teacher/materials' : '/student/materials',
       meetings: teacher ? '/teacher/meetings' : '/student/meetings',

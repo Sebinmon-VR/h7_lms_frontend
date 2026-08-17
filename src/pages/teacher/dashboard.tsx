@@ -5,6 +5,7 @@ import {
   Layers,
   Library,
   Upload,
+  UserRoundCog,
   Users,
   Video,
 } from 'lucide-react'
@@ -15,6 +16,7 @@ import { useAuth } from '@/providers/auth-provider'
 import {
   useClassRosters,
   useMyClasses,
+  useMyLedClasses,
   useTeacherAttendance,
   useTeacherMaterials,
   useTeacherMeetings,
@@ -48,9 +50,25 @@ export default function TeacherDashboardPage() {
   const meetingsQuery = useTeacherMeetings(!isAdmin)
   const materialsQuery = useTeacherMaterials(!isAdmin)
 
+  const ledQuery = useMyLedClasses(!isAdmin)
+
   const mappings = React.useMemo(() => mappingsQuery.data ?? [], [mappingsQuery.data])
   const classIds = React.useMemo(() => [...new Set(mappings.map((m) => m.class_room.id))], [mappings])
   const rosters = useClassRosters(isAdmin ? [] : classIds)
+
+  /**
+   * Own records only for the tiles below. These lists also carry what other
+   * teachers filed against a class this teacher leads, and a tile reading
+   * "topics you have logged" must not count a colleague's work as theirs.
+   */
+  const myTopicCount = React.useMemo(
+    () => (topicsQuery.data ?? []).filter((t) => t.teacher_id === user?.id).length,
+    [topicsQuery.data, user?.id],
+  )
+  const myMaterialCount = React.useMemo(
+    () => (materialsQuery.data ?? []).filter((m) => m.teacher_id === user?.id).length,
+    [materialsQuery.data, user?.id],
+  )
 
   const today = todayApiDate()
 
@@ -104,6 +122,30 @@ export default function TeacherDashboardPage() {
           </Button>
         }
       >
+        {/* Stated up front rather than left to be discovered: it changes what
+            the record pages below are showing them. */}
+        {(ledQuery.data ?? []).length > 0 && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+            <Badge tone="warning">
+              <UserRoundCog />
+              Class teacher
+            </Badge>
+            <span className="text-muted-foreground">
+              You lead{' '}
+              {(ledQuery.data ?? []).map((m, i) => (
+                <React.Fragment key={m.id}>
+                  {i > 0 && ', '}
+                  <strong className="text-foreground">{m.class_room.name}</strong>
+                </React.Fragment>
+              ))}
+              , so you also see what other teachers record there.
+            </span>
+            <Link to="/teacher/classes" className="font-medium text-primary hover:underline">
+              View
+            </Link>
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-2">
           <Button asChild variant="outline" size="sm">
             <Link to="/teacher/topics">
@@ -129,8 +171,8 @@ export default function TeacherDashboardPage() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard index={0} label="Classes you teach" value={mappings.length} icon={Layers} tone="primary" />
         <StatCard index={1} label="Students in your care" value={studentCount} icon={Users} tone="info" />
-        <StatCard index={2} label="Topics you have logged" value={topicsQuery.data?.length ?? 0} icon={ClipboardList} tone="accent" />
-        <StatCard index={3} label="Notes you have shared" value={materialsQuery.data?.length ?? 0} icon={Library} tone="success" />
+        <StatCard index={2} label="Topics you have logged" value={myTopicCount} icon={ClipboardList} tone="accent" />
+        <StatCard index={3} label="Notes you have shared" value={myMaterialCount} icon={Library} tone="success" />
       </div>
 
       {/* -------------------------------------------------- today's nudges */}

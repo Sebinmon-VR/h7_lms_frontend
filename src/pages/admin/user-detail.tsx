@@ -7,12 +7,19 @@ import {
   Mail,
   Pencil,
   UserCheck,
+  UserRoundCog,
   UserX,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import type { UserOut } from '@/api/types'
-import { useEnrollments, useMappings, useReactivateUser } from '@/queries/admin.queries'
+import {
+  useClassTeachers,
+  useEnrollments,
+  useMappings,
+  useReactivateUser,
+} from '@/queries/admin.queries'
+import { isTeachingRole } from '@/lib/constants'
 import { formatDateTime } from '@/lib/datetime'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -43,12 +50,15 @@ export function UserDetailSheet({
 }) {
   const mappingsQuery = useMappings(!!user)
   const enrollmentsQuery = useEnrollments(!!user)
+  const classTeachersQuery = useClassTeachers(!!user)
   const reactivateUser = useReactivateUser()
 
   const teaching = (mappingsQuery.data ?? []).filter((m) => m.teacher.id === user?.id)
+  const leading = (classTeachersQuery.data ?? []).filter((m) => m.teacher.id === user?.id)
   const enrollments = (enrollmentsQuery.data ?? []).filter((e) => e.student.id === user?.id)
 
-  const loading = mappingsQuery.isPending || enrollmentsQuery.isPending
+  const loading =
+    mappingsQuery.isPending || enrollmentsQuery.isPending || classTeachersQuery.isPending
 
   return (
     <Sheet open={!!user} onOpenChange={(v) => !v && onClose()}>
@@ -95,7 +105,37 @@ export function UserDetailSheet({
 
               <Separator />
 
-              {user.role === 'TEACHER' && (
+              {isTeachingRole(user.role) && leading.length > 0 && (
+                <section>
+                  <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    <UserRoundCog className="size-3.5" />
+                    Class teacher of ({leading.length})
+                  </h3>
+                  <ul className="space-y-2">
+                    {leading.map((m) => (
+                      <li
+                        key={m.id}
+                        className="rounded-lg border border-warning/30 bg-warning/8 px-3 py-2.5"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Layers className="size-3.5 shrink-0 text-warning" />
+                          <span className="text-sm font-medium">{m.class_room.name}</span>
+                          <Badge tone="outline" size="sm" className="ml-auto">
+                            {m.class_room.code}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Sees and can correct every teacher&rsquo;s records for this class.
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {/* isTeachingRole, not `=== 'TEACHER'` — a promoted teacher still
+                  holds these mappings and hiding them would read as having none. */}
+              {isTeachingRole(user.role) && (
                 <section>
                   <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     <Link2 className="size-3.5" />

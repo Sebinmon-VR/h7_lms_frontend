@@ -28,7 +28,7 @@ import {
   useUpdateUser,
   useUsers,
 } from '@/queries/admin.queries'
-import { ROLES, ROLE_LABEL } from '@/lib/constants'
+import { ALL_ROLES, ROLES, ROLE_LABEL, isTeachingRole } from '@/lib/constants'
 import { formatDateTime, formatRelative } from '@/lib/datetime'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -250,7 +250,12 @@ function CreateUserDialog({
             <Field id="role" label="Role" required error={form.formState.errors.role?.message}>
               <Select
                 value={form.watch('role')}
-                onValueChange={(v) => form.setValue('role', v as UserRole, { shouldValidate: true })}
+                // Narrower than UserRole: a new account cannot be created as a
+                // CLASS_TEACHER, because the backend derives that role from
+                // class assignments rather than accepting it as a choice.
+                onValueChange={(v) =>
+                  form.setValue('role', v as CreateValues['role'], { shouldValidate: true })
+                }
               >
                 <SelectTrigger id="role">
                   <SelectValue />
@@ -292,7 +297,11 @@ const editSchema = z.object({
   full_name: z.string().min(2, 'Enter a full name').max(120),
   email: z.string().min(1, 'Email is required').email('Enter a valid email address'),
   is_active: z.boolean(),
-  role: z.enum(['ADMIN', 'TEACHER', 'STUDENT']),
+  // CLASS_TEACHER is accepted here but never offered in the select below: the
+  // form has to be able to HOLD a class teacher's existing role, or opening
+  // their row and pressing Save would silently demote them. It is granted and
+  // revoked by assigning classes on Teacher Mappings, not by picking it here.
+  role: z.enum(['ADMIN', 'CLASS_TEACHER', 'TEACHER', 'STUDENT']),
 })
 type EditValues = z.infer<typeof editSchema>
 
@@ -402,7 +411,11 @@ function EditUserDialog({ user, onClose }: { user: UserOut | null; onClose: () =
               id="edit_role"
               label="Role"
               required
-              hint="Changing this signs the user out of every device."
+              hint={
+                user?.role === 'CLASS_TEACHER'
+                  ? 'Changing this signs the user out of every device. “Class teacher” is set by assigning them a class, not chosen here — moving them off it will be undone the next time their assignments change.'
+                  : 'Changing this signs the user out of every device.'
+              }
             >
               <Select
                 value={form.watch('role')}
@@ -412,14 +425,27 @@ function EditUserDialog({ user, onClose }: { user: UserOut | null; onClose: () =
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {ROLES.map((role) => (
-                    <SelectItem key={role} value={role}>
-                      {ROLE_LABEL[role]}
-                    </SelectItem>
-                  ))}
+                  {/* A class teacher's own role is listed so the form can show
+                      what they actually are. Without it the trigger renders
+                      blank and saving would quietly demote them. */}
+                  {(user?.role === 'CLASS_TEACHER' ? ['CLASS_TEACHER' as const, ...ROLES] : ROLES).map(
+                    (role) => (
+                      <SelectItem key={role} value={role}>
+                        {ROLE_LABEL[role]}
+                      </SelectItem>
+                    ),
+                  )}
                 </SelectContent>
               </Select>
             </Field>
+
+            {user?.role === 'CLASS_TEACHER' && (
+              <p className="rounded-lg border border-warning/30 bg-warning/8 px-3 py-2 text-xs text-muted-foreground">
+                This teacher leads at least one class. To stop that, remove their assignment under{' '}
+                <strong>Teacher Mappings → Class teachers</strong> — the backend then drops them back
+                to Teacher on its own.
+              </p>
+            )}
 
             {user && (
               <ProfileFieldsSection
@@ -687,7 +713,10 @@ export default function AdminUsersPage() {
     return {
       total: users.length,
       admins: users.filter((u) => u.role === 'ADMIN').length,
-      teachers: users.filter((u) => u.role === 'TEACHER').length,
+      // Both teaching roles: a class teacher is a teacher, and counting only
+      // the plain ones would make the headcount drop every time one is promoted.
+      teachers: users.filter((u) => isTeachingRole(u.role)).length,
+      classTeachers: users.filter((u) => u.role === 'CLASS_TEACHER').length,
       students: users.filter((u) => u.role === 'STUDENT').length,
       inactive: users.filter((u) => !u.is_active).length,
     }
@@ -716,6 +745,9 @@ export default function AdminUsersPage() {
             {counts.admins} admins
           </Badge>
           <Badge tone="info">{counts.teachers} teachers</Badge>
+          {counts.classTeachers > 0 && (
+            <Badge tone="warning">{counts.classTeachers} lead a class</Badge>
+          )}
           <Badge tone="accent">{counts.students} students</Badge>
           {counts.inactive > 0 && <Badge tone="warning">{counts.inactive} inactive</Badge>}
         </div>
@@ -752,7 +784,9 @@ export default function AdminUsersPage() {
           {
             columnId: 'role',
             label: 'Role',
-            options: ROLES.map((role) => ({ value: role, label: ROLE_LABEL[role] })),
+            // ALL_ROLES, not ROLES — a filter has to offer the roles that
+            // exist, including the one only the backend assigns.
+            options: ALL_ROLES.map((role) => ({ value: role, label: ROLE_LABEL[role] })),
           },
           {
             columnId: 'status',

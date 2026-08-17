@@ -59,6 +59,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { FreeformBadge } from '@/components/domain/badges'
 import { FileTypeIcon } from '@/components/domain/file-type-icon'
+import { FiledBy } from '@/components/domain/filed-by'
 import { EmptyState } from '@/components/feedback/states'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
@@ -398,6 +399,7 @@ export function MaterialCard({
         <Badge tone="outline" size="sm">
           {classNameOf(material)}
         </Badge>
+        <FiledBy teacherId={material.teacher_id} teacher={material.teacher} />
         {meta}
         {provider && (
           <Tooltip>

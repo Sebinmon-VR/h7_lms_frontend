@@ -13,6 +13,7 @@ import {
   type User,
 } from 'firebase/auth'
 
+import type { UserRole } from '@/api/types'
 import { FIREBASE_CONFIG, GOOGLE_WORKSPACE_DOMAIN, HAS_FIREBASE } from './env'
 
 /**
@@ -71,17 +72,24 @@ export function isFirebaseReady(): boolean {
  * so these are used to render the shell early, never to grant access.
  */
 export interface FirebaseLmsClaims {
-  role?: 'ADMIN' | 'TEACHER' | 'STUDENT'
+  role?: UserRole
   lms_user_id?: number
 }
 
+const CLAIM_ROLES: readonly UserRole[] = ['ADMIN', 'CLASS_TEACHER', 'TEACHER', 'STUDENT']
+
+/**
+ * The backend re-issues these claims and revokes the account's tokens whenever
+ * a teacher is promoted to or demoted from `CLASS_TEACHER`, so the shell picks
+ * up the change on the next token rather than at the end of the session.
+ */
 export async function readLmsClaims(user: User): Promise<FirebaseLmsClaims> {
   try {
     const result = await user.getIdTokenResult()
-    const role = result.claims.role
+    const role = result.claims.role as UserRole | undefined
     const id = result.claims.lms_user_id
     return {
-      role: role === 'ADMIN' || role === 'TEACHER' || role === 'STUDENT' ? role : undefined,
+      role: role && CLAIM_ROLES.includes(role) ? role : undefined,
       lms_user_id: typeof id === 'number' ? id : Number(id) || undefined,
     }
   } catch {

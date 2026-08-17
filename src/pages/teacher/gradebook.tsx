@@ -1,4 +1,4 @@
-import { FileText, Plus, Trash2, TriangleAlert } from 'lucide-react'
+import { FileText, Plus, Trash2, TriangleAlert, UserRoundCog } from 'lucide-react'
 import * as React from 'react'
 import { toast } from 'sonner'
 
@@ -12,6 +12,7 @@ import {
   useUpdateGrade,
 } from '@/queries/teacher.queries'
 import { cn } from '@/lib/cn'
+import { useAuth } from '@/providers/auth-provider'
 import { buildGradebook, gradeDistribution } from '@/lib/derive'
 import { formatPercent, performanceTone } from '@/lib/format'
 import { Badge } from '@/components/ui/badge'
@@ -386,6 +387,7 @@ function EditGradeDialog({
 
 export default function TeacherGradebookPage() {
   const isAdmin = useIsAdminViewingTeacher()
+  const myId = useAuth().user?.id
   const mappingsQuery = useMyClasses(!isAdmin)
   const gradesQuery = useTeacherGrades(!isAdmin)
   const selection = useClassSubjectSelection(mappingsQuery.data)
@@ -418,6 +420,24 @@ export default function TeacherGradebookPage() {
     () => [...new Set((gradesQuery.data ?? []).map((g) => g.exam_name))],
     [gradesQuery.data],
   )
+
+  /**
+   * Marks in this view that somebody else entered.
+   *
+   * Only possible for a class teacher, and only for a class they lead. It is
+   * said once above the matrix rather than per cell: a grid of names in every
+   * column would drown out the marks, and what the reader needs to know is
+   * simply that this table is not exclusively their own work.
+   */
+  const foreignAuthors = React.useMemo(() => {
+    const names = new Map<number, string>()
+    for (const g of scopedGrades) {
+      if (myId != null && g.teacher_id !== myId) {
+        names.set(g.teacher_id, g.teacher?.full_name ?? 'another teacher')
+      }
+    }
+    return [...names.values()]
+  }, [scopedGrades, myId])
 
   if (isAdmin) {
     return (
@@ -489,6 +509,16 @@ export default function TeacherGradebookPage() {
         />
       ) : (
         <div className="space-y-5">
+          {foreignAuthors.length > 0 && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2.5 text-xs">
+              <UserRoundCog className="mt-0.5 size-3.5 shrink-0 text-warning" />
+              <span className="text-muted-foreground">
+                Some of these marks were entered by {foreignAuthors.join(', ')}. You can see and
+                correct them because you are the class teacher of this class.
+              </span>
+            </div>
+          )}
+
           <Card className="overflow-hidden">
             <Table containerClassName="max-h-[60vh]">
               <TableHeader sticky>

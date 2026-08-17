@@ -32,6 +32,23 @@ export function useMyClasses(enabled = true) {
   })
 }
 
+/**
+ * The classes this teacher LEADS, which is not the same question as
+ * `useMyClasses` — that one lists the subject periods they teach.
+ *
+ * An empty array is the ordinary case for a subject teacher, and the signal
+ * that the class-teacher views stay hidden. Non-empty, it also explains why the
+ * record lists below contain rows this teacher did not file.
+ */
+export function useMyLedClasses(enabled = true) {
+  return useQuery({
+    queryKey: qk.teacher.myLedClasses(),
+    queryFn: teacherApi.myLedClasses,
+    staleTime: STALE.reference,
+    enabled,
+  })
+}
+
 export function useClassStudents(classId: number | null) {
   return useQuery({
     queryKey: qk.teacher.classStudents(classId ?? 0),

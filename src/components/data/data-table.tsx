@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   type ColumnDef,
   type ColumnFiltersState,
+  type PaginationState,
   type RowSelectionState,
   type SortingState,
   type Table as TanstackTable,
@@ -122,6 +123,20 @@ export function DataTable<T>({
   const [sorting, setSorting] = React.useState<SortingState>(initialSorting)
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({})
+  /**
+   * Pagination is CONTROLLED here rather than left to the table's own state.
+   *
+   * Uncontrolled, `autoResetPageIndex` snaps back to page 1 every time the
+   * `data` array changes identity — and it does that on any parent re-render
+   * while a search is active, and on every background refetch, because a
+   * refetch hands back a fresh array even when nothing about it differs. The
+   * effect was that paging past the first page of a long list simply did not
+   * stick. Owning the state lets us reset deliberately (below) instead.
+   */
+  const [pagination, setPagination] = React.useState<PaginationState>(() => ({
+    pageIndex: 0,
+    pageSize,
+  }))
   const [searchParams, setSearchParams] = useSearchParams()
 
   // Seed from the URL so a deep link arrives pre-filtered.
@@ -216,20 +231,23 @@ export function DataTable<T>({
     data: filteredBySearch,
     columns: resolvedColumns,
     getRowId: getRowId ? (row) => getRowId(row) : undefined,
-    state: { sorting, columnFilters, rowSelection },
+    state: { sorting, columnFilters, rowSelection, pagination },
     onRowSelectionChange: setRowSelection,
     enableRowSelection: bulkActions
       ? (row) => bulkActions.isSelectable?.(row.original) ?? true
       : false,
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
+    onPaginationChange: setPagination,
+    // See the `pagination` state above — the automatic reset fires on data
+    // identity, which is not the same thing as the data having changed.
+    autoResetPageIndex: false,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getFacetedRowModel: getFacetedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
-    initialState: { pagination: { pageSize } },
   })
 
   const hasFilters = debouncedSearch.length > 0 || columnFilters.length > 0
@@ -263,6 +281,27 @@ export function DataTable<T>({
 
   const visibleRows = table.getRowModel().rows
   const totalFiltered = table.getFilteredRowModel().rows.length
+
+  /**
+   * The two resets the automatic one was standing in for, now that they are
+   * driven by what actually changed rather than by array identity.
+   */
+
+  // Narrowing the result set starts you at the top of it, not part-way down a
+  // list you have never seen.
+  React.useEffect(() => {
+    setPagination((prev) => (prev.pageIndex === 0 ? prev : { ...prev, pageIndex: 0 }))
+  }, [debouncedSearch, columnFilters])
+
+  // Rows disappearing under you — a delete, or a refetch that returns fewer —
+  // can leave the current page past the end. Fall back to the last real page
+  // rather than showing an empty one.
+  const lastPageIndex = Math.max(0, Math.ceil(totalFiltered / pagination.pageSize) - 1)
+  React.useEffect(() => {
+    setPagination((prev) =>
+      prev.pageIndex <= lastPageIndex ? prev : { ...prev, pageIndex: lastPageIndex },
+    )
+  }, [lastPageIndex])
 
   if (error && !data) {
     return <ErrorState error={error} onRetry={onRetry} className={className} />

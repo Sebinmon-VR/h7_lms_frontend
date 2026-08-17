@@ -360,8 +360,8 @@ export default function AdminEnrollmentsPage() {
           <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
             <Info className="mt-0.5 size-3.5 shrink-0" />
             <span>
-              A student sees only one class — the first they were enrolled in. Enrollments cannot be removed
-              through the API.
+              A student sees only one class — the first they were enrolled in. Un-enrolling removes them
+              from the roster but keeps their attendance and grade history.
             </span>
           </div>
         </div>

@@ -70,9 +70,18 @@ export function lmsUserId(token: string): number | null {
   return Number.isFinite(fromSub) ? fromSub : null
 }
 
+const KNOWN_ROLES: readonly UserRole[] = ['ADMIN', 'CLASS_TEACHER', 'TEACHER', 'STUDENT']
+
+/**
+ * The role claim, or null when it is absent or unrecognised.
+ *
+ * A role missing from this list is treated as no role at all, which fails the
+ * sign-in fallback outright — so a role added on the backend must be added here
+ * too, or every user holding it is locked out the moment `/auth/me` is slow.
+ */
 export function lmsRole(token: string): UserRole | null {
   const role = decodeJwt(token)?.role
-  return role === 'ADMIN' || role === 'TEACHER' || role === 'STUDENT' ? role : null
+  return role && KNOWN_ROLES.includes(role) ? role : null
 }
 
 /** Milliseconds until expiry; negative once expired. */

@@ -9,6 +9,7 @@ import {
   RotateCcw,
   Save,
   Trash2,
+  UserRoundCog,
   Users,
   XCircle,
 } from 'lucide-react'
@@ -24,6 +25,7 @@ import {
   useTeacherAttendance,
 } from '@/queries/teacher.queries'
 import { cn } from '@/lib/cn'
+import { useAuth } from '@/providers/auth-provider'
 import { ATTENDANCE_HOTKEY, ATTENDANCE_LABEL, ATTENDANCE_STATUSES } from '@/lib/constants'
 import { formatDayLabel, todayApiDate } from '@/lib/datetime'
 import { Badge } from '@/components/ui/badge'
@@ -82,6 +84,7 @@ const CHUNK_SIZE = 10
 
 export default function TeacherAttendancePage() {
   const isAdmin = useIsAdminViewingTeacher()
+  const myId = useAuth().user?.id
   const mappingsQuery = useMyClasses(!isAdmin)
   const attendanceQuery = useTeacherAttendance(!isAdmin)
   const markAttendance = useMarkAttendance()
@@ -109,6 +112,16 @@ export default function TeacherAttendancePage() {
   }, [attendanceQuery.data, selection.classId, selection.subjectId, selection.isComplete, date])
 
   const isEditing = existing.length > 0
+
+  /**
+   * The saved register belongs to someone else — only possible when this
+   * teacher is the class teacher of the class, since a subject teacher never
+   * receives another teacher's records.
+   */
+  const markedByOthers = React.useMemo(
+    () => myId != null && existing.some((r) => r.teacher_id !== myId),
+    [existing, myId],
+  )
 
   // Prefill from saved records. POST is an upsert on
   // (student, class, subject, date), so re-saving genuinely edits.
@@ -352,6 +365,21 @@ export default function TeacherAttendancePage() {
         />
       ) : (
         <>
+          {/* A register somebody else took. Only reachable as the class teacher
+              of this class, and worth saying before they overwrite it: the save
+              below replaces every mark for the day, not just the ones they
+              touched. */}
+          {markedByOthers && (
+            <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-warning/30 bg-warning/8 px-4 py-3 text-sm">
+              <UserRoundCog className="mt-0.5 size-4 shrink-0 text-warning" />
+              <span>
+                This register was taken by another teacher. You can see and correct it because you
+                are the class teacher of {selection.selectedClass?.name ?? 'this class'} — saving
+                will overwrite their marks for this date.
+              </span>
+            </div>
+          )}
+
           {isEditing && (
             <div className="mb-4 flex flex-wrap items-start gap-2.5 rounded-xl border border-info/30 bg-info/8 px-4 py-3 text-sm">
               <Info className="mt-0.5 size-4 shrink-0 text-info" />

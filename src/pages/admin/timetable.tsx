@@ -12,7 +12,7 @@ import {
   useSubjects,
   useTimetable,
   useUpdateTimetableEntry,
-  useUsers,
+  useTeachingStaff,
 } from '@/queries/admin.queries'
 import { cn } from '@/lib/cn'
 import {
@@ -94,7 +94,7 @@ function EntryDialog({
 }) {
   const classesQuery = useClasses()
   const subjectsQuery = useSubjects()
-  const teachersQuery = useUsers('TEACHER')
+  const teachersQuery = useTeachingStaff()
   const mappingsQuery = useMappings()
   const createEntry = useCreateTimetableEntry()
   const updateEntry = useUpdateTimetableEntry()
@@ -362,7 +362,7 @@ const SAMPLE = `class,subject,teacher,day,start,end,room,label
 function BulkDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const classesQuery = useClasses()
   const subjectsQuery = useSubjects()
-  const teachersQuery = useUsers('TEACHER')
+  const teachersQuery = useTeachingStaff()
   const bulkCreate = useBulkCreateTimetable()
 
   const [text, setText] = React.useState('')

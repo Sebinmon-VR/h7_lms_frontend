@@ -4,6 +4,7 @@ import type {
   AttendanceOut,
   AttendanceUpdate,
   BatchAttendanceCreate,
+  ClassTeacherMappingOut,
   ScheduledPeriod,
   TimetableEntryOut,
   ExamGradeOut,
@@ -30,10 +31,29 @@ import type {
  *
  * Every update and delete below is ownership-scoped server-side: a teacher may
  * only touch records they created, and a violation comes back as a 403 that
- * `ApiError.isOwnershipViolation` recognises. Admins bypass the check.
+ * `ApiError.isOwnershipViolation` recognises. Admins bypass the check, and so
+ * does the CLASS TEACHER of the class a record belongs to — correcting what
+ * the subject teachers filed is the point of that role.
+ *
+ * The same widening applies to reads: `listAttendance`, `listTopics`,
+ * `listMeetings`, `listMaterials` and `listGrades` return this teacher's own
+ * records PLUS everything filed against the classes they lead, whoever entered
+ * it. Callers must not describe those lists as "what you recorded" without
+ * checking `teacher_id` against the signed-in user.
  */
 export const teacherApi = {
   myClasses: () => get<TeacherMappingOut[]>('/teachers/my-classes'),
+
+  /**
+   * The classes this teacher is the CLASS TEACHER of — distinct from
+   * `myClasses`, which lists the subject-and-class periods they teach.
+   *
+   * These are the classes they answer for as a whole, and the reason the five
+   * listing endpoints below can return records filed by other teachers. An
+   * empty array is the normal case for a subject teacher, and the signal that
+   * the class-teacher views should stay hidden for them.
+   */
+  myLedClasses: () => get<ClassTeacherMappingOut[]>('/teachers/my-led-classes'),
 
   /** Active students only. The backend does not check class ownership. */
   classStudents: (classId: number) => get<UserOut[]>(`/teachers/classes/${classId}/students`),

@@ -62,6 +62,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { MeetStatusBadge, MeetingPhaseBadge } from '@/components/domain/badges'
+import { FiledBy } from '@/components/domain/filed-by'
 import { EmptyState, ErrorState } from '@/components/feedback/states'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field } from '@/components/forms/field'
@@ -557,6 +558,7 @@ export function MeetingCard({
             <Badge tone="outline" size="sm">
               {classNameOf(meeting)}
             </Badge>
+            <FiledBy teacherId={meeting.teacher_id} teacher={meeting.teacher} />
             {meta}
           </div>
         </div>

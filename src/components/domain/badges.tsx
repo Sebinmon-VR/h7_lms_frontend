@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   TriangleAlert,
   UserRound,
+  UserRoundCog,
   XCircle,
 } from 'lucide-react'
 
@@ -20,12 +21,14 @@ import { Badge } from '@/components/ui/badge'
 
 const ROLE_TONE = {
   ADMIN: 'primary',
+  CLASS_TEACHER: 'warning',
   TEACHER: 'info',
   STUDENT: 'accent',
 } as const
 
 const ROLE_ICON = {
   ADMIN: ShieldCheck,
+  CLASS_TEACHER: UserRoundCog,
   TEACHER: GraduationCap,
   STUDENT: UserRound,
 } as const

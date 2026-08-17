@@ -55,7 +55,7 @@ const ADMIN_NAV: NavSection[] = [
         to: '/admin/mappings',
         label: 'Teacher Mappings',
         icon: Link2,
-        description: 'Map a teacher to a subject and class',
+        description: 'Subject mappings and class teachers',
       },
       {
         to: '/admin/enrollments',
@@ -154,6 +154,10 @@ export function navigationFor(role: UserRole | null): NavSection[] {
   switch (role) {
     case 'ADMIN':
       return ADMIN_NAV
+    // Same navigation for both teaching roles. What a class teacher may
+    // additionally reach is decided per class inside these pages, and the
+    // classes they lead appear under "My Classes" rather than as a new section.
+    case 'CLASS_TEACHER':
     case 'TEACHER':
       return TEACHER_NAV
     case 'STUDENT':
@@ -169,6 +173,7 @@ export function allNavItems(role: UserRole | null): NavItem[] {
 
 export const PORTAL_LABEL: Record<UserRole, string> = {
   ADMIN: 'Administration',
+  CLASS_TEACHER: 'Teaching',
   TEACHER: 'Teaching',
   STUDENT: 'Learning',
 }

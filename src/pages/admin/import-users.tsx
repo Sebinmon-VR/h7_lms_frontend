@@ -68,11 +68,17 @@ function judgeRow(
   if (!full_name || full_name.length < 2) {
     return { ...base, role: 'STUDENT', error: 'Missing or too-short name', warning: null }
   }
+  // CLASS_TEACHER is deliberately not importable: the backend derives it from
+  // class-teacher assignments, so a row claiming it would be overwritten by the
+  // first assign or unassign. Import them as TEACHER and assign the class after.
   if (!ROLES.includes(roleRaw as UserRole)) {
     return {
       ...base,
       role: 'STUDENT',
-      error: `Unknown role “${roleRaw}” — use ADMIN, TEACHER or STUDENT`,
+      error:
+        roleRaw === 'CLASS_TEACHER'
+          ? 'Import as TEACHER — “class teacher” is granted by assigning a class under Teacher Mappings'
+          : `Unknown role “${roleRaw}” — use ADMIN, TEACHER or STUDENT`,
       warning: null,
     }
   }

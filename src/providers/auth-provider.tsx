@@ -460,6 +460,9 @@ export function roleHome(role: UserRole | null): string {
   switch (role) {
     case 'ADMIN':
       return '/admin'
+    // A class teacher lands on the teacher portal like any other teacher. The
+    // extra reach is inside those pages, not a separate section of the app.
+    case 'CLASS_TEACHER':
     case 'TEACHER':
       return '/teacher'
     case 'STUDENT':

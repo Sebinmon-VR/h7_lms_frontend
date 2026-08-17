@@ -1,11 +1,12 @@
 import type { ColumnDef } from '@tanstack/react-table'
-import { Info, LineChart, TriangleAlert } from 'lucide-react'
+import { Info, LineChart, TriangleAlert, UserRoundCog } from 'lucide-react'
 import * as React from 'react'
 
 import type { AttendanceOut } from '@/api/types'
 import {
   useClassRosters,
   useMyClasses,
+  useMyLedClasses,
   useTeacherAttendance,
   useTeacherGrades,
   useTeacherTopics,
@@ -37,11 +38,18 @@ import { EmptyState, ErrorState } from '@/components/feedback/states'
 import { PageHeader } from '@/components/layout/page-header'
 import { AdminTeacherNotice, useIsAdminViewingTeacher } from './teacher-guard'
 
+/**
+ * Said the same way in every branch of this page. The scope is the honest part:
+ * for a class teacher these figures are NOT only their own periods.
+ */
+const DESCRIPTION = 'Analytics across the classes you teach, and the whole of any class you lead.'
+
 export default function TeacherInsightsPage() {
   const isAdmin = useIsAdminViewingTeacher()
   const palette = useChartPalette()
 
   const mappingsQuery = useMyClasses(!isAdmin)
+  const ledQuery = useMyLedClasses(!isAdmin)
   const attendanceQuery = useTeacherAttendance(!isAdmin)
   const gradesQuery = useTeacherGrades(!isAdmin)
   const topicsQuery = useTeacherTopics(!isAdmin)
@@ -52,6 +60,7 @@ export default function TeacherInsightsPage() {
 
   const attendance = React.useMemo(() => attendanceQuery.data ?? [], [attendanceQuery.data])
   const grades = React.useMemo(() => gradesQuery.data ?? [], [gradesQuery.data])
+  const led = React.useMemo(() => ledQuery.data ?? [], [ledQuery.data])
 
   /** id -> name, assembled from rosters plus names embedded in records. */
   const nameFor = React.useCallback(
@@ -197,7 +206,7 @@ export default function TeacherInsightsPage() {
   if (isAdmin) {
     return (
       <>
-        <PageHeader title="Insights" description="Analytics across the classes you teach." />
+        <PageHeader title="Insights" description={DESCRIPTION} />
         <AdminTeacherNotice />
       </>
     )
@@ -206,7 +215,7 @@ export default function TeacherInsightsPage() {
   if (attendanceQuery.isError || gradesQuery.isError) {
     return (
       <>
-        <PageHeader title="Insights" description="Analytics across the classes you teach." />
+        <PageHeader title="Insights" description={DESCRIPTION} />
         <ErrorState
           error={attendanceQuery.error ?? gradesQuery.error}
           onRetry={() => {
@@ -222,16 +231,37 @@ export default function TeacherInsightsPage() {
 
   return (
     <>
-      <PageHeader
-        title="Insights"
-        description="Computed in your browser from records already loaded — no extra requests, and no waiting on the server."
-      >
-        <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
-          <Info className="mt-0.5 size-3.5 shrink-0" />
-          <span>
-            Attendance counts records marked <strong>Present</strong>. Grade averages use each exam's own
-            maximum — the same formula the administrator report uses, so the two always agree.
-          </span>
+      <PageHeader title="Insights" description={DESCRIPTION}>
+        <div className="space-y-2.5">
+          <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
+            <Info className="mt-0.5 size-3.5 shrink-0" />
+            <span>
+              Attendance counts records marked <strong>Present</strong>. Grade averages use each exam's own
+              maximum — the same formula the administrator report uses, so the two always agree. Everything
+              here is computed in your browser from records already loaded.
+            </span>
+          </div>
+
+          {/* Every other teacher page marks the individual records somebody else
+              filed. This page only ever shows totals, so there is no row to mark
+              — the scope has to be stated up front instead, or a class teacher
+              reads whole-class figures as a report on their own teaching. */}
+          {led.length > 0 && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2.5 text-xs text-muted-foreground">
+              <UserRoundCog className="mt-0.5 size-3.5 shrink-0 text-warning" />
+              <span>
+                You are the class teacher of{' '}
+                {led.map((m, i) => (
+                  <React.Fragment key={m.id}>
+                    {i > 0 && (i === led.length - 1 ? ' and ' : ', ')}
+                    <strong className="text-foreground">{m.class_room.name}</strong>
+                  </React.Fragment>
+                ))}
+                , so these figures cover <strong>every</strong> teacher's records there, not only your own
+                periods.
+              </span>
+            </div>
+          )}
         </div>
       </PageHeader>
 
@@ -287,7 +317,7 @@ export default function TeacherInsightsPage() {
               )}
             </ChartCard>
 
-            <ChartCard title="How marks break down" description="Every attendance record you have entered.">
+            <ChartCard title="How marks break down" description="Every attendance record visible to you.">
               {statusDonut.length === 0 ? (
                 <p className="py-16 text-center text-sm text-muted-foreground">No attendance recorded yet.</p>
               ) : (

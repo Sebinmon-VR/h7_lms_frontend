@@ -40,6 +40,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { FiledBy } from '@/components/domain/filed-by'
 import { EmptyState } from '@/components/feedback/states'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
@@ -326,6 +327,9 @@ function TopicTimeline({
                       <Badge tone="outline" size="sm">
                         {classNameOf(topic)}
                       </Badge>
+                      {/* Renders only when someone else logged it, which can
+                          only happen in a class this teacher leads. */}
+                      <FiledBy teacherId={topic.teacher_id} teacher={topic.teacher} />
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
@@ -402,7 +406,7 @@ export default function TeacherTopicsPage() {
     <>
       <PageHeader
         title="Syllabus"
-        description="A running log of what you have taught. Students see this as their syllabus progress."
+        description="A running log of what you have taught. Students see this as their syllabus progress. If you are a class teacher, the topics other teachers logged for your class appear here too, marked with their name."
         actions={
           <Button variant="primary" icon={<Plus />} onClick={openCreate}>
             Log topic

@@ -6,6 +6,8 @@ import type {
   ClassRoomCreate,
   ClassRoomOut,
   ClassRoomUpdate,
+  ClassTeacherMappingCreate,
+  ClassTeacherMappingOut,
   CredentialsIssued,
   GenerateCredentialsRequest,
   IntegrationsHealth,
@@ -128,6 +130,45 @@ export const adminApi = {
   /** Unguarded — records the teacher already logged are left intact. */
   deleteMapping: (mappingId: number) =>
     del(`/admin/mappings/teacher-subject-class/${mappingId}`),
+
+  // -------------------------------------------------------- class teachers
+  //
+  // Broader than a subject mapping and deliberately carrying no subject: a
+  // class teacher answers for the class as a whole, so they read and correct
+  // the attendance, topics, grades, meetings and materials that EVERY teacher
+  // files against it. Authority is per class — leading 9-A grants nothing over
+  // 10-B — and a class may have several (joint or relief arrangements).
+
+  /**
+   * Both filters are real server-side queries here, unlike the teacher routes.
+   * Passing neither returns the whole class-teacher chart.
+   */
+  listClassTeachers: (filters: { classId?: number; teacherId?: number } = {}) =>
+    get<ClassTeacherMappingOut[]>('/admin/mappings/class-teacher', {
+      params: cleanParams({ class_id: filters.classId, teacher_id: filters.teacherId }),
+    }),
+
+  /**
+   * SIGNS THE TEACHER OUT. Promotes them to `CLASS_TEACHER` and re-issues their
+   * Firebase claims, which revokes their existing tokens so the class-teacher
+   * screens appear at once rather than whenever the old token happened to
+   * expire. Their subject mappings, periods and records are untouched.
+   *
+   * 400 on an administrator (they already reach every class) or on a user who
+   * is not a teacher. As with subject mappings, re-posting an assignment that
+   * exists returns the EXISTING row, still with status 201.
+   */
+  assignClassTeacher: (body: ClassTeacherMappingCreate) =>
+    post<ClassTeacherMappingOut>('/admin/mappings/class-teacher', body),
+
+  /**
+   * The teacher keeps their subject mappings, periods and everything they
+   * logged — they simply stop answering for the class and lose the
+   * cross-teacher visibility. If this was their last class they are demoted to
+   * `TEACHER`, which likewise signs them out.
+   */
+  deleteClassTeacher: (mappingId: number) =>
+    del(`/admin/mappings/class-teacher/${mappingId}`),
 
   listEnrollments: () => get<StudentEnrollmentOut[]>('/admin/enrollments'),
   /** Duplicates return the EXISTING row, still with status 201. */

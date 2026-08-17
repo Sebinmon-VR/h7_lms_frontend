@@ -18,7 +18,14 @@
  *    null through an update — only overwritten with a new value.
  */
 
-export type UserRole = 'ADMIN' | 'TEACHER' | 'STUDENT'
+/**
+ * `CLASS_TEACHER` is a TEACHER with extra reach, not a separate kind of user.
+ * They take periods, own subject mappings and appear on the timetable exactly
+ * like a TEACHER, so anything asking "may this user own a teaching record?"
+ * must accept both — see `TEACHING_ROLES` in `lib/constants`. Testing
+ * `role === 'TEACHER'` is the bug this role introduces.
+ */
+export type UserRole = 'ADMIN' | 'CLASS_TEACHER' | 'TEACHER' | 'STUDENT'
 
 export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED'
 
@@ -267,6 +274,38 @@ export interface TeacherMappingOut {
 export interface TeacherMappingCreate {
   teacher_id: number
   subject_id: number
+  class_id: number
+}
+
+/**
+ * Names the teacher answerable for a class as a whole.
+ *
+ * Deliberately has NO `subject` — that is the entire difference from
+ * `TeacherMappingOut`. A subject mapping grants one period; this grants sight
+ * of, and power to correct, everything every teacher files against the class.
+ *
+ * Authority is per class, never global: leading 9-A confers nothing over 10-B.
+ * A class may have several (joint or relief arrangements), and re-posting an
+ * assignment that exists returns it unchanged rather than duplicating it.
+ */
+export interface ClassTeacherMappingOut {
+  id: number
+  teacher: UserOut
+  class_room: ClassRoomOut
+  /** Null on rows written before the field existed. */
+  assigned_at: ApiDateTime | null
+}
+
+/**
+ * POST /admin/mappings/class-teacher.
+ *
+ * SIGNS THE TEACHER OUT. Assigning promotes them to `CLASS_TEACHER` and
+ * re-issues their Firebase claims, which revokes every existing token so the
+ * new navigation appears immediately instead of after the old one expires.
+ * Removing their last assignment demotes them back to `TEACHER` the same way.
+ */
+export interface ClassTeacherMappingCreate {
+  teacher_id: number
   class_id: number
 }
 

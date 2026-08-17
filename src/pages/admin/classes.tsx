@@ -1,14 +1,26 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { BookOpen, Layers, MoreHorizontal, Pencil, Plus, Trash2, Users } from 'lucide-react'
+import {
+  BookOpen,
+  Layers,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Trash2,
+  UserMinus,
+  Users,
+  X,
+} from 'lucide-react'
 import * as React from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 
-import type { ClassRoomOut } from '@/api/types'
+import type { ClassRoomOut, StudentEnrollmentOut, TeacherMappingOut } from '@/api/types'
 import {
   useClasses,
   useCreateClass,
   useDeleteClass,
+  useDeleteEnrollment,
+  useDeleteMapping,
   useEnrollments,
   useMappings,
   useUpdateClass,
@@ -26,6 +38,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { DeleteResourceDialog } from '@/components/forms/delete-resource-dialog'
 import {
   Dialog,
@@ -188,77 +201,171 @@ function ClassFormDialog({
 function ClassDetailSheet({ klass, onClose }: { klass: ClassRoomOut | null; onClose: () => void }) {
   const enrollmentsQuery = useEnrollments(!!klass)
   const mappingsQuery = useMappings(!!klass)
+  const deleteMapping = useDeleteMapping()
+  const deleteEnrollment = useDeleteEnrollment()
+
+  /** Both removals are confirmed, so each holds the row it is asking about. */
+  const [removingSubject, setRemovingSubject] = React.useState<TeacherMappingOut | null>(null)
+  const [removingStudent, setRemovingStudent] = React.useState<StudentEnrollmentOut | null>(null)
+
+  // Anything held open about the previous class is meaningless for this one.
+  React.useEffect(() => {
+    setRemovingSubject(null)
+    setRemovingStudent(null)
+  }, [klass?.id])
 
   const roster = (enrollmentsQuery.data ?? []).filter((e) => e.class_room.id === klass?.id)
   const teaching = (mappingsQuery.data ?? []).filter((m) => m.class_room.id === klass?.id)
 
   return (
-    <Sheet open={!!klass} onOpenChange={(v) => !v && onClose()}>
-      <SheetContent side="right">
-        <SheetHeader>
-          <SheetTitle className="text-lg font-semibold">{klass?.name}</SheetTitle>
-          <p className="text-sm text-muted-foreground">{klass?.code}</p>
-        </SheetHeader>
-        <SheetBody className="space-y-6">
-          {klass?.description && <p className="text-sm text-muted-foreground">{klass.description}</p>}
-
-          <section>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Subjects &amp; teachers ({teaching.length})
-            </h3>
-            {mappingsQuery.isPending ? (
-              <Skeleton className="h-20 rounded-lg" />
-            ) : teaching.length === 0 ? (
-              <p className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                No subjects assigned yet.
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {teaching.map((m) => (
-                  <li key={m.id} className="rounded-lg border border-border p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium">{m.subject.name}</span>
-                      <Badge tone="outline" size="sm">
-                        {m.subject.code}
-                      </Badge>
-                    </div>
-                    <div className="mt-2">
-                      <UserCell name={m.teacher.full_name} email={m.teacher.email} size="xs" inactive={!m.teacher.is_active} />
-                    </div>
-                  </li>
-                ))}
-              </ul>
+    <>
+      <Sheet open={!!klass} onOpenChange={(v) => !v && onClose()}>
+        <SheetContent side="right">
+          <SheetHeader>
+            <SheetTitle className="text-lg font-semibold">{klass?.name}</SheetTitle>
+            <p className="text-sm text-muted-foreground">{klass?.code}</p>
+          </SheetHeader>
+          <SheetBody className="space-y-6">
+            {klass?.description && (
+              <p className="text-sm text-muted-foreground">{klass.description}</p>
             )}
-          </section>
 
-          <section>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Enrolled students ({roster.length})
-            </h3>
-            {enrollmentsQuery.isPending ? (
-              <Skeleton className="h-20 rounded-lg" />
-            ) : roster.length === 0 ? (
-              <p className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                No students enrolled yet.
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {roster.map((e) => (
-                  <li key={e.id} className="rounded-lg border border-border p-2.5">
-                    <UserCell
-                      name={e.student.full_name}
-                      email={e.student.email}
-                      size="xs"
-                      inactive={!e.student.is_active}
-                    />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </SheetBody>
-      </SheetContent>
-    </Sheet>
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Subjects &amp; teachers ({teaching.length})
+              </h3>
+              {mappingsQuery.isPending ? (
+                <Skeleton className="h-20 rounded-lg" />
+              ) : teaching.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                  No subjects assigned yet.
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {teaching.map((m) => (
+                    <li key={m.id} className="rounded-lg border border-border p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium">{m.subject.name}</span>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <Badge tone="outline" size="sm">
+                            {m.subject.code}
+                          </Badge>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`Remove ${m.subject.name} from ${klass?.name ?? 'this class'}`}
+                            onClick={() => setRemovingSubject(m)}
+                          >
+                            <X />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="mt-2">
+                        <UserCell
+                          name={m.teacher.full_name}
+                          email={m.teacher.email}
+                          size="xs"
+                          inactive={!m.teacher.is_active}
+                        />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Enrolled students ({roster.length})
+              </h3>
+              {enrollmentsQuery.isPending ? (
+                <Skeleton className="h-20 rounded-lg" />
+              ) : roster.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                  No students enrolled yet.
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {roster.map((e) => (
+                    <li
+                      key={e.id}
+                      className="flex items-center gap-2 rounded-lg border border-border p-2.5"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <UserCell
+                          name={e.student.full_name}
+                          email={e.student.email}
+                          size="xs"
+                          inactive={!e.student.is_active}
+                        />
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="shrink-0"
+                        aria-label={`Un-enroll ${e.student.full_name} from ${klass?.name ?? 'this class'}`}
+                        onClick={() => setRemovingStudent(e)}
+                      >
+                        <UserMinus />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </SheetBody>
+        </SheetContent>
+      </Sheet>
+
+      {/*
+        Removing the mapping unlinks the teacher from the subject in this class.
+        It is unguarded on the backend by design — attendance, topics, grades and
+        anything else they already filed stays exactly where it is.
+      */}
+      <ConfirmDialog
+        open={!!removingSubject}
+        onOpenChange={(v) => !v && setRemovingSubject(null)}
+        title={
+          removingSubject
+            ? `Remove ${removingSubject.subject.name} from ${klass?.name ?? 'this class'}?`
+            : 'Remove subject?'
+        }
+        description={
+          removingSubject
+            ? `${removingSubject.teacher.full_name} will stop teaching ${removingSubject.subject.name} to this class and it will disappear from their timetable and dashboards. Attendance, topics, materials and grades they already recorded are kept, and the subject can be assigned again at any time.`
+            : undefined
+        }
+        confirmLabel="Remove subject"
+        destructive
+        loading={deleteMapping.isPending}
+        onConfirm={() => {
+          if (!removingSubject) return
+          deleteMapping.mutate(removingSubject.id, { onSettled: () => setRemovingSubject(null) })
+        }}
+      />
+
+      <ConfirmDialog
+        open={!!removingStudent}
+        onOpenChange={(v) => !v && setRemovingStudent(null)}
+        title={
+          removingStudent
+            ? `Un-enroll ${removingStudent.student.full_name}?`
+            : 'Un-enroll this student?'
+        }
+        description={
+          removingStudent
+            ? `They will lose access to ${klass?.name ?? 'this class'} and drop off its roster. Their attendance and grade history is preserved, and they can be enrolled again at any time.`
+            : undefined
+        }
+        confirmLabel="Un-enroll"
+        destructive
+        loading={deleteEnrollment.isPending}
+        onConfirm={() => {
+          if (!removingStudent) return
+          deleteEnrollment.mutate(removingStudent.id, { onSettled: () => setRemovingStudent(null) })
+        }}
+      />
+    </>
   )
 }
 

@@ -23,6 +23,7 @@ import {
   useSubjects,
   useUsers,
 } from '@/queries/admin.queries'
+import { isTeachingRole } from '@/lib/constants'
 import { provisioningAlerts, signupsOverTime } from '@/lib/derive'
 import { formatRelative } from '@/lib/datetime'
 import { greeting } from '@/lib/format'
@@ -63,7 +64,10 @@ export default function AdminDashboardPage() {
   // tiles stay useful when the (slow) report endpoint is still loading.
   const tiles = React.useMemo(() => {
     const students = stats?.total_students ?? users.filter((u) => u.role === 'STUDENT' && u.is_active).length
-    const teachers = stats?.total_teachers ?? users.filter((u) => u.role === 'TEACHER' && u.is_active).length
+    // Both teaching roles — the backend's own report counts them together, and
+    // splitting here would make the tile disagree with /admin/reports.
+    const teachers =
+      stats?.total_teachers ?? users.filter((u) => isTeachingRole(u.role) && u.is_active).length
     return [
       { label: 'Students', value: students, icon: GraduationCap, tone: 'primary' as const },
       { label: 'Teachers', value: teachers, icon: Users, tone: 'info' as const },
@@ -91,7 +95,7 @@ export default function AdminDashboardPage() {
   const roleBreakdown = React.useMemo(
     () => [
       { name: 'Students', value: users.filter((u) => u.role === 'STUDENT').length, color: palette.series[0] },
-      { name: 'Teachers', value: users.filter((u) => u.role === 'TEACHER').length, color: palette.series[2] },
+      { name: 'Teachers', value: users.filter((u) => isTeachingRole(u.role)).length, color: palette.series[2] },
       { name: 'Administrators', value: users.filter((u) => u.role === 'ADMIN').length, color: palette.series[1] },
     ],
     [users, palette],

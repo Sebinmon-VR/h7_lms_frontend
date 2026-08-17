@@ -23,6 +23,12 @@ export const qk = {
     classes: () => ['admin', 'classes'] as const,
     subjects: () => ['admin', 'subjects'] as const,
     mappings: () => ['admin', 'mappings'] as const,
+    /**
+     * The full class-teacher chart. Unfiltered for the same reason as the
+     * lists above — it is small, and one entry filters instantly on the client
+     * — even though `class_id` / `teacher_id` ARE real server-side queries here.
+     */
+    classTeachers: () => ['admin', 'class-teachers'] as const,
     enrollments: () => ['admin', 'enrollments'] as const,
     monitoring: () => ['admin', 'reports', 'monitoring'] as const,
     jobs: () => ['admin', 'jobs'] as const,
@@ -52,6 +58,8 @@ export const qk = {
   teacher: {
     root: ['teacher'] as const,
     myClasses: () => ['teacher', 'my-classes'] as const,
+    /** Classes led as class teacher — NOT the subject periods in `myClasses`. */
+    myLedClasses: () => ['teacher', 'my-led-classes'] as const,
     classStudents: (classId: number) => ['teacher', 'class-students', classId] as const,
     classStudentsRoot: () => ['teacher', 'class-students'] as const,
     attendance: () => ['teacher', 'attendance'] as const,
