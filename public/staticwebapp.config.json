@@ -2,7 +2,11 @@
   "$schema": "https://json.schemastore.org/staticwebapp.config.json",
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/assets/*", "/*.{css,js,map,svg,png,jpg,jpeg,ico,webp,woff,woff2}"]
+    "exclude": [
+      "/assets/*",
+      "/*.{css,js,map,svg,png,jpg,jpeg,ico,webp,woff,woff2}",
+      "/legal/*"
+    ]
   },
   "mimeTypes": {
     ".json": "application/json",
