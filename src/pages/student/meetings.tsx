@@ -7,6 +7,7 @@ import { splitMeetings } from '@/lib/derive'
 import { cn } from '@/lib/cn'
 import { formatCountdown, formatDateTime, meetingPhase } from '@/lib/datetime'
 import { resolveFileUrl } from '@/lib/files'
+import { recordingIsPending } from '@/lib/recordings'
 import { subjectName } from '@/lib/select'
 import { subjectLook, toneStyle } from '@/lib/subjects'
 import { useCopyToClipboard, useNow } from '@/lib/hooks'
@@ -94,6 +95,14 @@ function StudentMeetingCard({ meeting, now }: { meeting: LiveMeetingOut; now: Da
                 <ExternalLink className="size-3" />
               </a>
             </Button>
+          )}
+          {/* A recorded class takes a few minutes to arrive. Saying so beats an
+              empty space that reads as "your teacher forgot". */}
+          {!recording && phase === 'past' && recordingIsPending(meeting) && (
+            <span className="inline-flex items-center gap-1.5 rounded-lg border-2 border-dashed border-border px-2.5 py-1.5 text-xs text-muted-foreground">
+              <Hourglass className="size-3.5" />
+              Recording on its way
+            </span>
           )}
         </div>
       </div>
@@ -192,7 +201,7 @@ export default function StudentMeetingsPage() {
           {renderList(
             groups.recordings,
             'Nothing to watch yet',
-            'If your teacher records a class, you can watch it here any time.',
+            'Recorded classes turn up here a few minutes after they finish, and you can watch them any time.',
           )}
         </TabsContent>
         <TabsContent value="past">

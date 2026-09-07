@@ -121,6 +121,23 @@ export const teacherApi = {
   /** Also deletes the Calendar event, which notifies invited students. */
   deleteMeeting: (meetingId: number) => del(`/teachers/meetings/${meetingId}`),
 
+  /**
+   * Files this session's recording now rather than waiting for the sweep.
+   *
+   * Recordings are collected automatically a few minutes after each class ends,
+   * so this is for the impatient case — a teacher who has just finished and
+   * wants the video in front of the class. Calling it again later is free: an
+   * already-filed video is never filed twice, and a recording Meet is still
+   * processing comes back as `recording_status: 'WAITING'`.
+   *
+   * 400 when the meeting has no Meet conference behind it, i.e. its link was
+   * pasted in by hand.
+   */
+  syncMeetingRecording: (meetingId: number) =>
+    post<LiveMeetingOut>(`/teachers/meetings/${meetingId}/recording/sync`, undefined, {
+      timeout: 120_000,
+    }),
+
   listMaterials: () => get<StudyMaterialOut[]>('/teachers/materials'),
 
   /** multipart/form-data; the file field must be named exactly `file`. */

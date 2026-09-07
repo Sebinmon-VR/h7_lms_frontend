@@ -30,6 +30,7 @@ const AdminMaterials = lazy(() => import('@/pages/admin/materials'))
 const AdminIntegrations = lazy(() => import('@/pages/admin/integrations'))
 const AdminTimetable = lazy(() => import('@/pages/admin/timetable'))
 const AdminReminders = lazy(() => import('@/pages/admin/reminders'))
+const AdminRecordings = lazy(() => import('@/pages/admin/recordings'))
 
 const TeacherDashboard = lazy(() => import('@/pages/teacher/dashboard'))
 const TeacherClasses = lazy(() => import('@/pages/teacher/classes'))
@@ -49,6 +50,39 @@ const StudentMeetings = lazy(() => import('@/pages/student/meetings'))
 const StudentMaterials = lazy(() => import('@/pages/student/materials'))
 const StudentGrades = lazy(() => import('@/pages/student/grades'))
 const StudentTimetable = lazy(() => import('@/pages/student/timetable'))
+const StudentExams = lazy(() => import('@/pages/student/exams'))
+const StudentExamTake = lazy(() => import('@/pages/student/exam-take'))
+const StudentReportCards = lazy(() => import('@/pages/student/report-cards'))
+const StudentReportCardDetail = lazy(() =>
+  import('@/pages/student/report-cards').then((m) => ({ default: m.StudentReportCardDetailPage })),
+)
+
+// The exam module is one set of screens served to both teachers and admins:
+// the backend answers the same endpoints for either, deciding per request how
+// much each may see, so the pages are mounted under both prefixes and read
+// their own base path from the signed-in role.
+const ExamList = lazy(() => import('@/pages/exams/exam-list'))
+const ExamForm = lazy(() => import('@/pages/exams/exam-form'))
+const ExamDetail = lazy(() => import('@/pages/exams/exam-detail'))
+const ExamGrading = lazy(() => import('@/pages/exams/grading'))
+const ReportCards = lazy(() => import('@/pages/exams/report-cards'))
+const ReportCardDetail = lazy(() =>
+  import('@/pages/exams/report-cards').then((m) => ({ default: m.ReportCardDetailPage })),
+)
+
+function examRoutes(prefix: '/admin' | '/teacher') {
+  return (
+    <>
+      <Route path={`${prefix}/exams`} element={<ExamList />} />
+      <Route path={`${prefix}/exams/new`} element={<ExamForm />} />
+      <Route path={`${prefix}/exams/:examId`} element={<ExamDetail />} />
+      <Route path={`${prefix}/exams/:examId/edit`} element={<ExamForm />} />
+      <Route path={`${prefix}/exams/:examId/grade/:studentId`} element={<ExamGrading />} />
+      <Route path={`${prefix}/report-cards`} element={<ReportCards />} />
+      <Route path={`${prefix}/report-cards/:cardId`} element={<ReportCardDetail />} />
+    </>
+  )
+}
 
 export function AppRoutes() {
   return (
@@ -99,6 +133,8 @@ export function AppRoutes() {
               <Route path="/admin/integrations" element={<AdminIntegrations />} />
               <Route path="/admin/timetable" element={<AdminTimetable />} />
               <Route path="/admin/reminders" element={<AdminReminders />} />
+              <Route path="/admin/recordings" element={<AdminRecordings />} />
+              {examRoutes('/admin')}
             </Route>
 
             {/* Admins may open teacher pages; those views explain the scoping
@@ -115,6 +151,7 @@ export function AppRoutes() {
               <Route path="/teacher/gradebook" element={<TeacherGradebook />} />
               <Route path="/teacher/insights" element={<TeacherInsights />} />
               <Route path="/teacher/timetable" element={<TeacherTimetable />} />
+              {examRoutes('/teacher')}
             </Route>
 
             <Route element={<RequireRole allow={['STUDENT', 'ADMIN']} />}>
@@ -126,6 +163,10 @@ export function AppRoutes() {
               <Route path="/student/materials" element={<StudentMaterials />} />
               <Route path="/student/grades" element={<StudentGrades />} />
               <Route path="/student/timetable" element={<StudentTimetable />} />
+              <Route path="/student/exams" element={<StudentExams />} />
+              <Route path="/student/exams/:examId" element={<StudentExamTake />} />
+              <Route path="/student/report-cards" element={<StudentReportCards />} />
+              <Route path="/student/report-cards/:cardId" element={<StudentReportCardDetail />} />
             </Route>
 
             <Route path="*" element={<NotFoundPage />} />

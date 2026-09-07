@@ -15,6 +15,9 @@ import type {
   JobOut,
   LiveMeetingOut,
   LiveMeetingUpdate,
+  RecordingLogEntry,
+  RecordingSchedulerStatus,
+  RecordingSweepSummary,
   ReminderLogEntry,
   ReminderStatus,
   ReminderSweepSummary,
@@ -330,6 +333,53 @@ export const adminApi = {
   reminderLog: (limit = 50, userId?: number) =>
     get<ReminderLogEntry[]>('/admin/reminders/log', {
       params: cleanParams({ limit, user_id: userId }),
+    }),
+
+  // ----------------------------------------------------------- recordings
+
+  /**
+   * Whether class recordings are being collected, and what the last sweep did.
+   *
+   * The first thing to open when a finished class has no video: `meet_problems`
+   * names the missing piece of the Meet setup, and `last_result.details` shows
+   * what the sweep decided about each session it looked at.
+   */
+  recordingStatus: () => get<RecordingSchedulerStatus>('/admin/recordings/status'),
+
+  /**
+   * What the next sweep WOULD file. Claims nothing, moves nothing, shares
+   * nothing — so it answers "is recording actually working?" without
+   * committing to the answer.
+   */
+  previewRecordings: () =>
+    get<RecordingSweepSummary>('/admin/recordings/pending', { timeout: 60_000 }),
+
+  /**
+   * Collects finished recordings now instead of waiting for the next tick.
+   * Returns a job to poll at `job()`.
+   *
+   * Cannot duplicate a video: every recording is claimed by an atomic Firestore
+   * create keyed on (meeting, Meet recording name), so an already-filed one is
+   * skipped whoever triggers the sweep.
+   */
+  runRecordings: () => post<JobAccepted>('/admin/recordings/run'),
+
+  recordingLog: (limit = 50, meetingId?: number) =>
+    get<RecordingLogEntry[]>('/admin/recordings/log', {
+      params: cleanParams({ limit, meeting_id: meetingId }),
+    }),
+
+  /**
+   * Fetches and files ONE session's recording immediately.
+   *
+   * 400 when the meeting has no Meet conference behind it — a hand-entered link
+   * is not something Meet can be asked about. A session Meet is still
+   * processing comes back as `recording_status: 'WAITING'`, which is a normal
+   * outcome rather than an error.
+   */
+  syncMeetingRecording: (meetingId: number) =>
+    post<LiveMeetingOut>(`/admin/meetings/${meetingId}/recording/sync`, undefined, {
+      timeout: 120_000,
     }),
 
   // --------------------------------------------------------- integrations

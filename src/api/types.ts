@@ -435,6 +435,27 @@ export interface LiveMeetingOut {
   meet_status?: MeetStatus | string | null
   /** Why generation failed. Only meaningful alongside `meet_status: 'FAILED'`. */
   meet_error?: string | null
+
+  /**
+   * Whether this session was asked to record itself. Null on rows written
+   * before automatic recording landed, and always false-ish for a hand-entered
+   * `meeting_link` — that conference is not one the LMS owns.
+   */
+  auto_record?: boolean | null
+  /**
+   * Where the recording is in its lifecycle. Null means "unknown", i.e. a row
+   * written before the field existed — not a failure.
+   */
+  recording_status?: RecordingStatus | string | null
+  /** Why the status is anything other than STORED. */
+  recording_error?: string | null
+  recording_drive_file_id?: string | null
+  recording_stored_at?: ApiDateTime | null
+  /**
+   * Every segment filed for this session. `recording_url` points at the first
+   * of them; a class recorded in several parts keeps the rest here.
+   */
+  recording_files?: RecordingFile[] | null
 }
 
 /**
@@ -443,6 +464,37 @@ export interface LiveMeetingOut {
  * did not work, and `meet_error` says why.
  */
 export type MeetStatus = 'CREATED' | 'FAILED' | 'MANUAL' | 'SKIPPED'
+
+/**
+ * Lifecycle of a session's recording.
+ *
+ * NOT_REQUESTED — recording was switched off, or the link was pasted in by
+ * hand; ARMED — Meet will record the conference on its own; ARM_FAILED —
+ * arming did not work, but the session is still swept in case the teacher
+ * records it manually; WAITING — the class is over and Meet has not published
+ * the file yet; STORED — the video is in the school Drive and `recording_url`
+ * points at it; UNAVAILABLE — nothing was ever published and the backend has
+ * stopped looking; FAILED — a recording exists but could not be filed, and
+ * `recording_error` says why.
+ */
+export type RecordingStatus =
+  | 'NOT_REQUESTED'
+  | 'ARMED'
+  | 'ARM_FAILED'
+  | 'WAITING'
+  | 'STORED'
+  | 'UNAVAILABLE'
+  | 'FAILED'
+
+/** One filed segment of a session's recording. */
+export interface RecordingFile {
+  drive_file_id: string | null
+  web_view_link: string | null
+  name: string | null
+  size_bytes: number | null
+  started_at: ApiDateTime | null
+  ended_at: ApiDateTime | null
+}
 
 export interface LiveMeetingCreate {
   class_id: number
@@ -459,6 +511,14 @@ export interface LiveMeetingCreate {
   duration_minutes?: number
   /** Add enrolled students as attendees so they get invitations. Default: true. */
   invite_students?: boolean
+  /**
+   * Arm the generated Meet conference to record itself, and file the video into
+   * the school Drive once the class is over. Backend default: true.
+   *
+   * Ignored when `meeting_link` is supplied: a hand-entered link belongs to a
+   * conference the LMS cannot configure.
+   */
+  auto_record?: boolean
 }
 
 /**
@@ -856,6 +916,88 @@ export interface ReminderLogEntry {
   status: 'SENDING' | 'SENT' | 'FAILED' | string
 }
 
+// ------------------------------------------------------------ recordings
+
+/**
+ * GET /admin/recordings/status.
+ *
+ * `meet_problems` is the first thing to read when a finished class has no
+ * video: it names the missing piece of the Meet setup without touching the
+ * network. Recording rides on its own delegation grant, so Meet links can work
+ * perfectly while this is broken.
+ */
+export interface RecordingSchedulerStatus {
+  enabled: boolean
+  running: boolean
+  /** MOVE into the Shared Drive, COPY there, or LINK the teacher's original. */
+  transfer_mode: 'MOVE' | 'COPY' | 'LINK' | string
+  destination_folder: string
+  share_with_students: boolean
+  /** Meet needs minutes to publish a file, so the sweep waits this long. */
+  harvest_delay_minutes: number
+  scan_interval_seconds: number
+  /** A session with no recording after this is marked UNAVAILABLE. */
+  give_up_after_hours: number
+  drive_configured: boolean
+  meet_problems: string[]
+  started_at: ApiDateTime | null
+  last_run_at: ApiDateTime | null
+  run_count: number
+  last_error: string | null
+  last_result: RecordingSweepSummary | null
+}
+
+/** Result of a sweep, real or dry-run. */
+export interface RecordingSweepSummary {
+  due_meetings: number
+  /** Recordings filed — or, on a dry run, that would be filed. */
+  stored: number
+  waiting: number
+  unavailable: number
+  failed: number
+  dry_run: boolean
+  transfer_mode: string
+  reference: ApiDateTime
+  details: RecordingSweepDetail[]
+  detail: string
+}
+
+/**
+ * One session's outcome inside a sweep. `status` is a `RecordingStatus` except
+ * on a dry run, which reports `WOULD_STORE` for anything ready to file.
+ */
+export interface RecordingSweepDetail {
+  meeting_id: number
+  title: string
+  status: RecordingStatus | 'WOULD_STORE' | string | null
+  detail: string
+  recording_url?: string | null
+  /** Segments filed for this session by this sweep. */
+  transferred: number
+}
+
+/**
+ * A row of GET /admin/recordings/log — one claimed (meeting, Meet recording)
+ * pair. The claim is written BEFORE the transfer, so a row with no
+ * `finished_at` is a move that never completed rather than one that never ran.
+ */
+export interface RecordingLogEntry {
+  meeting_id: number
+  /** Meet's own resource name for the recording — the deduplication key. */
+  recording_name: string
+  claimed_at: ApiDateTime
+  finished_at?: ApiDateTime | null
+  status: 'CLAIMED' | 'STORED' | 'FAILED' | string
+  mode?: string | null
+  drive_file_id?: string | null
+  web_view_link?: string | null
+  /** How many students were granted read access. */
+  shared_with?: number | null
+  /** Filed, but not the way that was asked for — e.g. copied instead of moved. */
+  warning?: string | null
+  error?: string | null
+}
+
 // ----------------------------------------------------------- integrations
 
 /**
@@ -911,6 +1053,31 @@ export interface MeetHealth extends HealthProbe {
   calendar_summary?: string | null
 }
 
+/**
+ * The `meet_recording` section of `GET /admin/integrations`.
+ *
+ * Reported separately from `google_meet` because it depends on its own API and
+ * its own delegation scopes: a school can create perfectly good Meet links and
+ * still be unable to record a single class.
+ */
+export interface MeetRecordingHealth extends HealthProbe {
+  enabled: boolean
+  transfer_mode: string
+  destination_folder: string
+  share_with_students: boolean
+  harvest_delay_minutes: number
+  scan_interval_seconds: number
+  give_up_after_hours: number
+  credentials_file: string | null
+  /** Email and numeric client ID — the value the delegation form asks for. */
+  service_account?: { client_email?: string | null; client_id?: string | null } | null
+  required_scopes: string[]
+  /** Which scope set actually authenticated, per purpose. Live probe only. */
+  granted_scopes?: Record<string, string[]> | null
+  /** Set only by the live probe. */
+  acting_as?: string | null
+}
+
 /** SMTP is reported from settings only — there is no live probe for it. */
 export interface EmailHealth {
   enabled: boolean
@@ -928,6 +1095,14 @@ export interface IntegrationsHealth {
   storage_config_conflict: string | null
   drive: DriveHealth
   google_meet: MeetHealth
+  /**
+   * Automatic class recording — its own API and its own delegation grant.
+   *
+   * Optional because a backend older than the recording feature omits the
+   * section entirely, and a diagnostics page that white-screens against a
+   * lagging deployment is worse than one that shows a card less.
+   */
+  meet_recording?: MeetRecordingHealth
   email: EmailHealth
   /** False when `?probe=false` asked for a settings-only view. */
   probed: boolean
@@ -944,4 +1119,490 @@ export interface StorageProbeResult {
   /** Null when `cleanup=false`; false when the probe file could not be removed. */
   cleaned_up: boolean | null
   detail: string
+}
+
+// ------------------------------------------------------------------- exams
+
+/**
+ * The exam module. Mirrors `app/schemas/exam.py` and
+ * `app/schemas/report_card.py`.
+ *
+ * Three audiences read an exam and they are NOT served the same document:
+ * staff get `ExamOut` (answer key included), a student sitting the paper gets
+ * `StudentExamOut` with the key blanked, and a student reading a published
+ * result gets the same type with `correct_answer` / `answer_explanation`
+ * filled in. Never render an `ExamOut` on a student screen.
+ */
+
+/** Fixed at creation — it decides what a submission even is. */
+export type ExamMode = 'ONLINE' | 'OFFLINE'
+
+/** The lifecycle a teacher controls by hand. Separate from the clock. */
+export type ExamStatus = 'DRAFT' | 'PUBLISHED' | 'CANCELLED'
+
+/** Where the clock sits. Computed server-side, never stored. */
+export type ExamWindowState = 'NOT_OPEN' | 'OPEN' | 'GRACE' | 'CLOSED'
+
+export type QuestionType =
+  | 'MCQ'
+  | 'MULTI_SELECT'
+  | 'TRUE_FALSE'
+  | 'SHORT_ANSWER'
+  | 'LONG_ANSWER'
+  | 'NUMERIC'
+  | 'FILE_UPLOAD'
+
+export type GradingScheme = 'MARKS' | 'GRADE'
+
+export type SubmissionStatus = 'IN_PROGRESS' | 'SUBMITTED' | 'EVALUATED' | 'MISSED'
+
+/** One letter grade and the percentage at which it starts. Only the floor is stored. */
+export interface GradeBand {
+  grade: string
+  min_percentage: number
+  description?: string | null
+}
+
+export interface QuestionOption {
+  /** "A", "B", ... or "TRUE"/"FALSE". Compared case-insensitively server-side. */
+  key: string
+  text: string
+}
+
+/**
+ * The answer key value, shaped by question type: an option key (or a list of
+ * keys for MULTI_SELECT) for choice questions, a string or list of accepted
+ * wordings for SHORT_ANSWER, a number for NUMERIC, null where no key applies.
+ */
+export type AnswerValue = string | number | string[] | null
+
+/** A question as the setter writes it. Send `id` back to keep an existing question. */
+export interface ExamQuestionIn {
+  id?: number | null
+  order?: number | null
+  question_type: QuestionType
+  text: string
+  marks: number
+  options?: QuestionOption[]
+  correct_answer?: AnswerValue
+  tolerance?: number | null
+  answer_explanation?: string | null
+  required?: boolean
+  allow_attachments?: boolean
+}
+
+/** A question as staff see it: the key included. */
+export interface ExamQuestionOut {
+  id: number
+  order: number
+  question_type: QuestionType
+  text: string
+  marks: number
+  options: QuestionOption[]
+  correct_answer: AnswerValue
+  tolerance: number | null
+  answer_explanation: string | null
+  required: boolean
+  allow_attachments: boolean
+}
+
+/** A question as a student sees it. Key fields are null until results are published. */
+export interface StudentQuestionOut {
+  id: number
+  order: number
+  question_type: QuestionType
+  text: string
+  marks: number
+  options: QuestionOption[]
+  required: boolean
+  allow_attachments: boolean
+  correct_answer: AnswerValue
+  answer_explanation: string | null
+}
+
+interface ExamRules {
+  grading_scheme?: GradingScheme
+  max_marks?: number | null
+  pass_marks?: number | null
+  grade_bands?: GradeBand[]
+  duration_minutes?: number | null
+  /** Minutes past the deadline a hand-in is still accepted, flagged late. */
+  upload_grace_minutes?: number
+  late_submission_allowed?: boolean
+  shuffle_questions?: boolean
+  auto_grade_objective?: boolean
+  max_upload_files?: number
+}
+
+/** POST /exams. `teacher_id` is for an admin filing on a teacher's behalf. */
+export interface ExamCreate extends ExamRules {
+  class_id: number
+  subject_id: number
+  title: string
+  mode: ExamMode
+  starts_at: ApiDateTime
+  ends_at: ApiDateTime
+  description?: string | null
+  instructions?: string | null
+  status?: ExamStatus
+  teacher_id?: number | null
+  questions?: ExamQuestionIn[]
+}
+
+/**
+ * PUT /exams/{id} — partial. `mode` cannot change; questions go through their
+ * own endpoint. `grading_scheme`, `max_marks` and `pass_marks` are refused
+ * with 409 once any script has been handed in.
+ */
+export interface ExamUpdate {
+  title?: string
+  description?: string | null
+  instructions?: string | null
+  status?: ExamStatus
+  teacher_id?: number
+  starts_at?: ApiDateTime
+  ends_at?: ApiDateTime
+  duration_minutes?: number
+  upload_grace_minutes?: number
+  late_submission_allowed?: boolean
+  grading_scheme?: GradingScheme
+  max_marks?: number
+  pass_marks?: number
+  grade_bands?: GradeBand[]
+  shuffle_questions?: boolean
+  auto_grade_objective?: boolean
+  max_upload_files?: number
+}
+
+/** PUT /exams/{id}/questions — replaces the whole form. Refused once scripts are in. */
+export interface QuestionFormUpdate {
+  questions: ExamQuestionIn[]
+}
+
+export interface AnswerKeyItem {
+  question_id: number
+  correct_answer?: AnswerValue
+  tolerance?: number | null
+  answer_explanation?: string | null
+}
+
+/** PUT /exams/{id}/answer-key. `regrade` re-marks every handed-in script. */
+export interface AnswerKeyUpdate {
+  answers: AnswerKeyItem[]
+  regrade?: boolean
+}
+
+/** POST /exams/{id}/concessions. Zero minutes withdraws a concession. */
+export interface TimeConcessionGrant {
+  student_id: number
+  extra_minutes: number
+  reason?: string | null
+}
+
+/** The staff view. Carries the answer key. */
+export interface ExamOut {
+  id: number
+  class_id: number
+  class_room: ClassRoomOut | null
+  subject_id: number
+  subject: SubjectOut | null
+  teacher_id: number
+  teacher: UserOut | null
+  created_by: number | null
+  title: string
+  description: string | null
+  instructions: string | null
+  mode: ExamMode
+  status: ExamStatus
+  window_state: ExamWindowState
+  grading_scheme: GradingScheme
+  max_marks: number
+  pass_marks: number | null
+  grade_bands: GradeBand[]
+  starts_at: ApiDateTime
+  ends_at: ApiDateTime
+  duration_minutes: number | null
+  upload_grace_minutes: number
+  late_submission_allowed: boolean
+  /** student id (as a string key) -> extra minutes. */
+  time_concessions: Record<string, number>
+  questions: ExamQuestionOut[]
+  question_count: number
+  /** What the form adds up to — shown beside `max_marks` so a mismatch is visible. */
+  questions_total_marks: number
+  answer_key_complete: boolean
+  shuffle_questions: boolean
+  auto_grade_objective: boolean
+  question_paper_url: string | null
+  question_paper_provider: string | null
+  question_paper_warning: string | null
+  max_upload_files: number
+  results_published: boolean
+  results_published_at: ApiDateTime | null
+  created_at: ApiDateTime
+  updated_at: ApiDateTime | null
+}
+
+/** The student view, with the timing resolved for THIS student. */
+export interface StudentExamOut {
+  id: number
+  class_id: number
+  class_room: ClassRoomOut | null
+  subject_id: number
+  subject: SubjectOut | null
+  teacher: UserOut | null
+  title: string
+  description: string | null
+  instructions: string | null
+  mode: ExamMode
+  status: ExamStatus
+  window_state: ExamWindowState
+  grading_scheme: GradingScheme
+  max_marks: number
+  pass_marks: number | null
+  starts_at: ApiDateTime
+  ends_at: ApiDateTime
+  /** The last moment a hand-in of theirs is accepted: ends_at + concession + grace. */
+  closes_at: ApiDateTime
+  duration_minutes: number | null
+  extra_time_minutes: number
+  upload_grace_minutes: number
+  late_submission_allowed: boolean
+  question_paper_url: string | null
+  max_upload_files: number
+  /** Empty in a listing and before the window opens. */
+  questions: StudentQuestionOut[]
+  question_count: number
+  results_published: boolean
+  submission_status: SubmissionStatus | null
+  submitted_at: ApiDateTime | null
+  expires_at: ApiDateTime | null
+  can_start: boolean
+  can_submit: boolean
+}
+
+export interface AnswerIn {
+  question_id: number
+  answer?: AnswerValue
+  attachments?: string[]
+}
+
+export interface AnswerSaveIn {
+  answers: AnswerIn[]
+}
+
+export interface SubmitIn {
+  answers?: AnswerIn[]
+}
+
+export interface AnswerOut {
+  question_id: number
+  answer: AnswerValue
+  attachments: string[]
+}
+
+export interface AttachmentOut {
+  file_url: string
+  filename: string | null
+  provider: string | null
+  storage_warning: string | null
+  uploaded_at: ApiDateTime | null
+  question_id: number | null
+}
+
+export interface QuestionScoreOut {
+  question_id: number
+  marks_awarded: number
+  max_marks: number | null
+  /** True when the answer key decided this line rather than a person. */
+  auto: boolean
+  remarks: string | null
+}
+
+/** One script, as staff read it during valuation. */
+export interface SubmissionOut {
+  id: string
+  exam_id: number
+  student_id: number
+  student: UserOut | null
+  class_id: number
+  subject_id: number
+  status: SubmissionStatus
+  started_at: ApiDateTime | null
+  submitted_at: ApiDateTime | null
+  expires_at: ApiDateTime | null
+  is_late: boolean
+  late_by_minutes: number
+  answers: AnswerOut[]
+  attachments: AttachmentOut[]
+  question_scores: QuestionScoreOut[]
+  marks_obtained: number | null
+  percentage: number | null
+  grade: string | null
+  passed: boolean | null
+  auto_graded_marks: number | null
+  evaluator_remarks: string | null
+  evaluated_by: number | null
+  evaluator: UserOut | null
+  evaluated_at: ApiDateTime | null
+  created_at: ApiDateTime | null
+  updated_at: ApiDateTime | null
+}
+
+/** A student's own script. Valuation fields are null until results are published. */
+export interface StudentSubmissionOut {
+  id: string
+  exam_id: number
+  status: SubmissionStatus
+  started_at: ApiDateTime | null
+  submitted_at: ApiDateTime | null
+  expires_at: ApiDateTime | null
+  is_late: boolean
+  answers: AnswerOut[]
+  attachments: AttachmentOut[]
+  results_published: boolean
+  marks_obtained: number | null
+  max_marks: number | null
+  percentage: number | null
+  grade: string | null
+  passed: boolean | null
+  evaluator_remarks: string | null
+  question_scores: QuestionScoreOut[]
+}
+
+export interface QuestionScoreIn {
+  question_id: number
+  marks_awarded: number
+  remarks?: string | null
+}
+
+/**
+ * POST /exams/{id}/submissions/{student}/evaluate. Under MARKS send
+ * `question_scores` (totalled server-side) or a flat `marks_obtained`; under
+ * GRADE send `grade`, which must be one of the exam's own bands.
+ */
+export interface EvaluationIn {
+  question_scores?: QuestionScoreIn[]
+  marks_obtained?: number | null
+  grade?: string | null
+  remarks?: string | null
+}
+
+export interface ResultsPublished {
+  exam_id: number
+  published: number
+  skipped_unevaluated: number
+  grade_rows_written: number
+  message: string
+}
+
+export interface ExamStats {
+  exam_id: number
+  title: string
+  class_id: number
+  enrolled_students: number
+  started: number
+  submitted: number
+  evaluated: number
+  missing: number
+  late: number
+  average_percentage: number | null
+  highest_percentage: number | null
+  lowest_percentage: number | null
+  pass_count: number | null
+  fail_count: number | null
+  results_published: boolean
+}
+
+// ------------------------------------------------------------ report cards
+
+export interface ReportCardExamLine {
+  exam_id: number
+  title: string
+  mode: string | null
+  conducted_on: ApiDateTime | null
+  grading_scheme: string | null
+  marks_obtained: number | null
+  max_marks: number | null
+  percentage: number | null
+  grade: string | null
+  passed: boolean | null
+  /** The student never handed in. Zeroed only if the card counts missing as zero. */
+  missed: boolean
+  remarks: string | null
+}
+
+export interface ReportCardSubjectLine {
+  subject_id: number
+  subject_name: string | null
+  subject_code: string | null
+  exams: ReportCardExamLine[]
+  total_marks: number
+  total_max_marks: number
+  percentage: number | null
+  grade: string | null
+  exams_counted: number
+  exams_missed: number
+  teacher_remarks: string | null
+}
+
+/** POST /report-cards/generate. `include_rank` needs the whole class (empty `student_ids`). */
+export interface ReportCardGenerate {
+  class_id: number
+  title: string
+  student_ids?: number[]
+  exam_ids?: number[]
+  from_date?: ApiDateTime | null
+  to_date?: ApiDateTime | null
+  published_results_only?: boolean
+  count_missing_as_zero?: boolean
+  grade_bands?: GradeBand[]
+  include_attendance?: boolean
+  include_rank?: boolean
+  remarks?: string | null
+  publish?: boolean
+}
+
+/** PUT /report-cards/{id} — the parts a human owns. Marks are a snapshot. */
+export interface ReportCardUpdate {
+  remarks?: string
+  title?: string
+  is_published?: boolean
+  /** Keyed by subject id as a string. */
+  subject_remarks?: Record<string, string>
+}
+
+export interface ReportCardOut {
+  id: string
+  student_id: number
+  student: UserOut | null
+  class_id: number
+  class_room: ClassRoomOut | null
+  title: string
+  generated_by: number | null
+  generated_at: ApiDateTime
+  from_date: ApiDateTime | null
+  to_date: ApiDateTime | null
+  subjects: ReportCardSubjectLine[]
+  total_marks: number
+  total_max_marks: number
+  overall_percentage: number
+  overall_grade: string | null
+  exams_counted: number
+  exams_missed: number
+  attendance_percentage: number | null
+  rank: number | null
+  class_size: number | null
+  remarks: string | null
+  is_published: boolean
+  published_at: ApiDateTime | null
+}
+
+export interface ReportCardBatch {
+  class_id: number
+  generated: number
+  skipped: number
+  published: boolean
+  cards: ReportCardOut[]
+  warnings: string[]
 }

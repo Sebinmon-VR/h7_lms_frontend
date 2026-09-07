@@ -3,6 +3,8 @@ import {
   CalendarCheck,
   Check,
   Copy,
+  Disc,
+  Download,
   ExternalLink,
   Film,
   LinkIcon,
@@ -26,12 +28,14 @@ import {
   useCreateMeeting,
   useDeleteMeeting,
   useMyClasses,
+  useSyncMeetingRecording,
   useTeacherMeetings,
   useUpdateMeeting,
 } from '@/queries/teacher.queries'
 import { splitMeetings } from '@/lib/derive'
 import { formatCountdown, formatDateTime, meetingPhase } from '@/lib/datetime'
 import { MAX_UPLOAD_BYTES, formatFileSize, resolveFileUrl } from '@/lib/files'
+import { canCollectRecording, recordingHint } from '@/lib/recordings'
 import { subjectName, className as classNameOf } from '@/lib/select'
 import { useCopyToClipboard, useNow } from '@/lib/hooks'
 import { Badge } from '@/components/ui/badge'
@@ -61,7 +65,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { MeetStatusBadge, MeetingPhaseBadge } from '@/components/domain/badges'
+import { MeetStatusBadge, MeetingPhaseBadge, RecordingStatusBadge } from '@/components/domain/badges'
 import { FiledBy } from '@/components/domain/filed-by'
 import { EmptyState, ErrorState } from '@/components/feedback/states'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
@@ -79,6 +83,7 @@ const schema = z.object({
   recording_url: z.string().url('Enter a valid URL').or(z.literal('')).optional(),
   auto_create_meet: z.boolean(),
   invite_students: z.boolean(),
+  auto_record: z.boolean(),
   duration_minutes: z.coerce
     .number()
     .int('Use a whole number of minutes')
@@ -96,6 +101,7 @@ const DEFAULT_VALUES: FormValues = {
   recording_url: '',
   auto_create_meet: true,
   invite_students: true,
+  auto_record: true,
   duration_minutes: 60,
 }
 
@@ -143,9 +149,11 @@ function MeetingFormDialog({
             meeting_link: editing.meeting_link ?? '',
             recording_url: editing.recording_url ?? '',
             duration_minutes: editing.duration_minutes ?? 60,
-            // Generation already happened (or did not) at create time.
+            // Generation already happened (or did not) at create time, and
+            // recording is armed on the conference at that same moment.
             auto_create_meet: false,
             invite_students: false,
+            auto_record: false,
           }
         : {
             ...DEFAULT_VALUES,
@@ -235,6 +243,7 @@ function MeetingFormDialog({
           status: 'SCHEDULED',
           auto_create_meet: values.auto_create_meet,
           invite_students: values.invite_students,
+          auto_record: values.auto_record,
           duration_minutes: values.duration_minutes,
         })
       }
@@ -385,6 +394,32 @@ function MeetingFormDialog({
                   />
                 </div>
 
+                {/*
+                  Recording is a property of the Meet conference itself, which
+                  is why it can only be switched on for a link the LMS
+                  generates: a pasted link belongs to a meeting we cannot
+                  configure.
+                */}
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="flex items-center gap-1.5 text-sm font-medium">
+                      <Disc className="size-4 text-danger" />
+                      Record this class automatically
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Meet starts recording when the first person joins — nobody has to press
+                      anything. A few minutes after the class ends the video is filed into the
+                      school Drive and shared with the students.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={form.watch('auto_record')}
+                    onCheckedChange={(v) => form.setValue('auto_record', v)}
+                    disabled={!meetGenerationActive}
+                    aria-label="Record this class automatically"
+                  />
+                </div>
+
                 {meetGenerationActive ? (
                   <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
                     <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warning" />
@@ -418,7 +453,11 @@ function MeetingFormDialog({
               id="meeting-recording"
               label="Recording"
               error={form.formState.errors.recording_url?.message}
-              hint="Paste a link, or upload a file to host it on the server."
+              hint={
+                editing
+                  ? 'A recorded Meet session fills this in on its own once the video has been filed. Paste or upload only to override it.'
+                  : 'Only needed for a session recorded elsewhere — an automatically recorded class fills this in itself.'
+              }
             >
               <div className="space-y-2">
                 <Input id="meeting-recording" placeholder="https://…" {...form.register('recording_url')} />
@@ -478,6 +517,8 @@ export function MeetingCard({
   onDelete,
   onRegenerate,
   regenerating,
+  onCollectRecording,
+  collecting,
 }: {
   meeting: LiveMeetingOut
   now: Date
@@ -487,6 +528,9 @@ export function MeetingCard({
   onDelete?: (meeting: LiveMeetingOut) => void
   onRegenerate?: (meeting: LiveMeetingOut) => void
   regenerating?: boolean
+  /** Fetch this session's recording now rather than waiting for the sweep. */
+  onCollectRecording?: (meeting: LiveMeetingOut) => void
+  collecting?: boolean
 }) {
   const phase = meetingPhase(meeting.scheduled_time, now)
   const { copied, copy } = useCopyToClipboard()
@@ -496,6 +540,12 @@ export function MeetingCard({
   // Retrying is only meaningful while there is no link and the session has not
   // already happened — the backend 400s on a meeting that already has one.
   const canRegenerate = !!onRegenerate && !meeting.meeting_link && phase !== 'past'
+
+  // Recordings are collected on their own a few minutes after a class ends, so
+  // this is the impatient path, not the normal one.
+  const canCollect = !!onCollectRecording && canCollectRecording(meeting, phase)
+  // Segments beyond the first — `recording_url` already points at that one.
+  const extraSegments = (meeting.recording_files ?? []).slice(1)
 
   return (
     <Card className={phase === 'live' ? 'border-danger/40 shadow-glow' : undefined}>
@@ -548,6 +598,25 @@ export function MeetingCard({
                 </TooltipContent>
               </Tooltip>
             )}
+
+            {/*
+              Recording state is only worth a badge once it says something the
+              buttons below do not. A session still to happen shows that it is
+              armed; a finished one shows where its video got to. STORED needs
+              no badge — the "Recording" button is the answer.
+            */}
+            {meeting.recording_status &&
+              meeting.recording_status !== 'STORED' &&
+              !(phase !== 'past' && meeting.recording_status === 'NOT_REQUESTED') && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <RecordingStatusBadge status={meeting.recording_status} />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>{recordingHint(meeting)}</TooltipContent>
+                </Tooltip>
+              )}
           </div>
           <p className="mt-2 truncate text-base font-semibold">{meeting.title}</p>
           <p className="mt-0.5 text-sm text-muted-foreground">{formatDateTime(meeting.scheduled_time)}</p>
@@ -603,10 +672,51 @@ export function MeetingCard({
             <Button asChild variant="outline" size="sm">
               <a href={recording} target="_blank" rel="noopener noreferrer">
                 <Film className="size-4" />
-                Recording
+                {/* Numbered only when there is more than one part, so the
+                    ordinary single-video case stays plain. */}
+                {extraSegments.length > 0 ? 'Part 1' : 'Recording'}
                 <ExternalLink className="size-3" />
               </a>
             </Button>
+          )}
+          {/* A class recorded in more than one sitting keeps its later parts
+              here; `recording_url` only ever points at the first. */}
+          {extraSegments.map((file, index) => (
+            <Button
+              key={file.drive_file_id ?? file.web_view_link ?? index}
+              asChild
+              variant="outline"
+              size="sm"
+            >
+              <a
+                href={resolveFileUrl(file.web_view_link) ?? undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Film className="size-4" />
+                Part {index + 2}
+                <ExternalLink className="size-3" />
+              </a>
+            </Button>
+          ))}
+          {canCollect && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  loading={collecting}
+                  onClick={() => onCollectRecording?.(meeting)}
+                >
+                  <Download className="size-4" />
+                  Fetch recording
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Recordings are collected on their own a few minutes after a class ends. This asks
+                now instead — pressing it twice cannot file the same video twice.
+              </TooltipContent>
+            </Tooltip>
           )}
 
           {showActions && (
@@ -642,6 +752,7 @@ export default function TeacherMeetingsPage() {
   const isAdmin = useIsAdminViewingTeacher()
   const meetingsQuery = useTeacherMeetings(!isAdmin)
   const deleteMeeting = useDeleteMeeting()
+  const collectRecording = useSyncMeetingRecording()
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<LiveMeetingOut | null>(null)
   const [cancelling, setCancelling] = React.useState<LiveMeetingOut | null>(null)
@@ -693,6 +804,8 @@ export default function TeacherMeetingsPage() {
             now={now}
             onEdit={openEdit}
             onDelete={setCancelling}
+            onCollectRecording={(m) => collectRecording.mutate(m.id)}
+            collecting={collectRecording.isPending && collectRecording.variables === meeting.id}
           />
         ))}
       </div>
@@ -703,7 +816,7 @@ export default function TeacherMeetingsPage() {
     <>
       <PageHeader
         title="Meetings"
-        description="Schedule live classes, share join links and attach recordings."
+        description="Schedule live classes, share join links, and watch back what was recorded."
         actions={
           <Button variant="primary" icon={<Plus />} onClick={openCreate}>
             Schedule meeting
@@ -732,7 +845,11 @@ export default function TeacherMeetingsPage() {
           {renderList(groups.past, 'No past meetings', 'Meetings move here once they have finished.')}
         </TabsContent>
         <TabsContent value="recordings">
-          {renderList(groups.recordings, 'No recordings yet', 'Attach a recording to a meeting to make it available to students.')}
+          {renderList(
+            groups.recordings,
+            'No recordings yet',
+            'A class scheduled with recording on is filed here a few minutes after it ends. You can also attach one by hand from the meeting.',
+          )}
         </TabsContent>
       </Tabs>
 

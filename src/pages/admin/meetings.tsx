@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Radio, TriangleAlert, Video } from 'lucide-react'
+import { Disc, Plus, Radio, TriangleAlert, Video } from 'lucide-react'
 import * as React from 'react'
 import { useForm } from 'react-hook-form'
 import { Link } from 'react-router-dom'
@@ -10,6 +10,7 @@ import {
   useAdminCreateMeeting,
   useAdminDeleteMeeting,
   useAdminMeetings,
+  useAdminSyncRecording,
   useAdminUpdateMeeting,
   useClasses,
   useMappings,
@@ -54,6 +55,7 @@ const schema = z.object({
   meeting_link: z.string().url('Enter a valid URL').or(z.literal('')).optional(),
   auto_create_meet: z.boolean(),
   invite_students: z.boolean(),
+  auto_record: z.boolean(),
   duration_minutes: z.coerce
     .number()
     .int('Use a whole number of minutes')
@@ -71,6 +73,7 @@ const DEFAULT_VALUES: FormValues = {
   meeting_link: '',
   auto_create_meet: true,
   invite_students: true,
+  auto_record: true,
   duration_minutes: 60,
 }
 
@@ -119,6 +122,7 @@ function AdminMeetingDialog({
             duration_minutes: editing.duration_minutes ?? 60,
             auto_create_meet: false,
             invite_students: false,
+            auto_record: false,
           }
         : DEFAULT_VALUES,
     )
@@ -191,6 +195,7 @@ function AdminMeetingDialog({
           status: 'SCHEDULED',
           auto_create_meet: values.auto_create_meet,
           invite_students: values.invite_students,
+          auto_record: values.auto_record,
           duration_minutes: values.duration_minutes,
         })
       }
@@ -407,6 +412,32 @@ function AdminMeetingDialog({
                   />
                 </div>
 
+                {/*
+                  Recording is configured on the Meet conference itself, so it
+                  can only be armed for a link the LMS generates — and it is
+                  filed into the school Drive rather than the teacher's, which
+                  is the reason it is worth switching on at all.
+                */}
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="flex items-center gap-1.5 text-sm font-medium">
+                      <Disc className="size-4 text-danger" />
+                      Record this class automatically
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Meet records from the moment the first person joins. The video is filed into
+                      the school Drive a few minutes after the class ends and shared with the
+                      enrolled students.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={form.watch('auto_record')}
+                    onCheckedChange={(v) => form.setValue('auto_record', v)}
+                    disabled={!meetGenerationActive}
+                    aria-label="Record this class automatically"
+                  />
+                </div>
+
                 {meetGenerationActive ? (
                   <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
                     <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warning" />
@@ -466,6 +497,7 @@ export default function AdminMeetingsPage() {
   const usersQuery = useUsers()
   const deleteMeeting = useAdminDeleteMeeting()
   const regenerate = useRegenerateMeetingLink()
+  const collectRecording = useAdminSyncRecording()
 
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<LiveMeetingOut | null>(null)
@@ -543,6 +575,8 @@ export default function AdminMeetingsPage() {
             onDelete={setCancelling}
             onRegenerate={(m) => regenerate.mutate(m.id)}
             regenerating={regenerate.isPending && regenerate.variables === meeting.id}
+            onCollectRecording={(m) => collectRecording.mutate(m.id)}
+            collecting={collectRecording.isPending && collectRecording.variables === meeting.id}
           />
         ))}
       </div>
@@ -636,7 +670,11 @@ export default function AdminMeetingsPage() {
           {renderList(groups.past, 'No past meetings', 'Meetings move here once they have finished.')}
         </TabsContent>
         <TabsContent value="recordings">
-          {renderList(groups.recordings, 'No recordings yet', 'Attach a recording to a meeting to make it available to students.')}
+          {renderList(
+            groups.recordings,
+            'No recordings yet',
+            'Recorded classes are filed here a few minutes after they end. If one is missing, Recordings reports what the collection sweep decided about it.',
+          )}
         </TabsContent>
       </Tabs>
 

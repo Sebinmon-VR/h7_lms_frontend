@@ -34,6 +34,7 @@ import type {
   UserUpdate,
 } from '@/api/types'
 import { ROLE_LABEL, isTeachingRole } from '@/lib/constants'
+import { reportRecordingOutcome } from '@/lib/recordings'
 import { STALE, qk } from './keys'
 import { markMonitoringStale } from './query-client'
 
@@ -335,6 +336,70 @@ export function useRunReminders() {
       void qc.invalidateQueries({ queryKey: qk.admin.jobs() })
       toast.success('Reminder sweep started', {
         description: 'Already-sent reminders are skipped, so nobody is emailed twice.',
+      })
+    },
+    onError: (error) => {
+      toast.error(error instanceof ApiError ? error.message : 'Could not start the sweep.')
+    },
+  })
+}
+
+// ------------------------------------------------------------- recordings
+
+export function useRecordingStatus(enabled = true) {
+  return useQuery({
+    queryKey: qk.admin.recordingStatus(),
+    queryFn: adminApi.recordingStatus,
+    enabled,
+    staleTime: 15_000,
+    // The sweep runs on its own interval, so the panel goes stale on its own.
+    refetchInterval: 30_000,
+  })
+}
+
+/**
+ * Deliberately NOT auto-fetched, for the same reason as the reminder preview:
+ * it asks Meet about every finished session to answer, which is a question an
+ * admin asks on purpose rather than background data.
+ */
+export function useRecordingPreview() {
+  return useQuery({
+    queryKey: qk.admin.recordingPreview(),
+    queryFn: adminApi.previewRecordings,
+    enabled: false,
+    staleTime: 30_000,
+    retry: false,
+  })
+}
+
+export function useRecordingLog(limit = 50, enabled = true) {
+  return useQuery({
+    queryKey: qk.admin.recordingLog(limit),
+    queryFn: () => adminApi.recordingLog(limit),
+    enabled,
+    staleTime: STALE.transactional,
+  })
+}
+
+/**
+ * Runs a collection sweep now. Safe to press twice — the Firestore claim on
+ * each (meeting, recording) pair means an already-filed video is skipped
+ * whoever asks for the sweep.
+ *
+ * The meeting lists are invalidated because a successful sweep writes
+ * `recording_url` and `recording_status` onto the sessions it filed.
+ */
+export function useRunRecordings() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => adminApi.runRecordings(),
+    onSuccess: (job) => {
+      qc.setQueryData(qk.admin.job(job.job_id), job)
+      void qc.invalidateQueries({ queryKey: qk.admin.jobs() })
+      void qc.invalidateQueries({ queryKey: qk.admin.recordingsRoot() })
+      invalidateMeetings(qc)
+      toast.success('Recording sweep started', {
+        description: 'Recordings already filed are skipped, so nothing is duplicated.',
       })
     },
     onError: (error) => {
@@ -859,9 +924,23 @@ function reportMeetOutcome(created: LiveMeetingOut) {
     })
     return
   }
+  // The link works but Meet refused to arm recording — a partial success, and
+  // one nobody would notice until the class was over and no video appeared.
+  if (created.recording_status === 'ARM_FAILED') {
+    toast.warning('Scheduled, but it will not record itself', {
+      description:
+        created.recording_error ??
+        'Google Meet would not switch automatic recording on for this session. Check Admin → Recordings for what is missing.',
+      duration: 10_000,
+    })
+    return
+  }
   if (created.google_event_id) {
     toast.success('Meeting scheduled', {
-      description: 'A Google Calendar invitation has been sent to the enrolled students.',
+      description:
+        created.recording_status === 'ARMED'
+          ? 'The enrolled students have been invited, and the session will record itself.'
+          : 'A Google Calendar invitation has been sent to the enrolled students.',
     })
     return
   }
@@ -915,7 +994,15 @@ export function useRegenerateMeetingLink() {
         prev?.map((m) => (m.id === updated.id ? updated : m)),
       )
       toast.success('Meet link created', {
-        description: 'The session now has a link and the class has been invited.',
+        description:
+          // The regenerated conference is a different space, so recording had
+          // to be armed again on it — worth saying, since that can fail on its
+          // own while the link itself is fine.
+          updated.recording_status === 'ARM_FAILED'
+            ? 'The class has been invited, but automatic recording could not be switched on for the new conference.'
+            : updated.recording_status === 'ARMED'
+              ? 'The class has been invited, and the session will record itself.'
+              : 'The session now has a link and the class has been invited.',
       })
     },
     onError: (error) => {
@@ -929,6 +1016,36 @@ export function useRegenerateMeetingLink() {
     },
     onSettled: () => {
       invalidateMeetings(qc)
+    },
+  })
+}
+
+/**
+ * Collects one session's recording now instead of waiting for the sweep.
+ *
+ * Same endpoint semantics as the teacher's, without the ownership scoping: an
+ * admin can chase any teacher's session. Pressing it early is harmless — the
+ * Firestore claim means an already-filed video is never filed twice — so the
+ * ordinary "Meet has not published it yet" answer is reported as information
+ * rather than as a failure.
+ */
+export function useAdminSyncRecording() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (meetingId: number) => adminApi.syncMeetingRecording(meetingId),
+    onSuccess: (updated) => {
+      qc.setQueryData<LiveMeetingOut[]>(qk.admin.meetings(), (prev) =>
+        prev?.map((m) => (m.id === updated.id ? updated : m)),
+      )
+      invalidateMeetings(qc)
+      void qc.invalidateQueries({ queryKey: qk.admin.recordingsRoot() })
+      reportRecordingOutcome(updated)
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof ApiError ? error.message : 'Could not collect the recording.',
+        { duration: 8_000 },
+      )
     },
   })
 }

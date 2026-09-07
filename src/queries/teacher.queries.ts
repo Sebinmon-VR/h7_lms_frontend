@@ -2,6 +2,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { toast } from 'sonner'
 
 import { teacherApi } from '@/api/teacher.api'
+import { ApiError } from '@/api/errors'
 import type {
   AttendanceOut,
   AttendanceUpdate,
@@ -20,6 +21,7 @@ import type {
   TopicUpdate,
   UserOut,
 } from '@/api/types'
+import { reportRecordingOutcome } from '@/lib/recordings'
 import { STALE, qk } from './keys'
 import { markMonitoringStale } from './query-client'
 
@@ -330,9 +332,21 @@ export function useCreateMeeting() {
             'Google Meet could not generate a link for this session. The meeting is saved — add a link manually, or ask an administrator to retry it once Workspace delegation is in place.',
           duration: 10_000,
         })
+      } else if (created.recording_status === 'ARM_FAILED' && submitted.auto_record !== false) {
+        // The link works, but Meet refused to arm recording — a partial success
+        // nobody would notice until the class was over and no video appeared.
+        toast.warning('Scheduled, but it will not record itself', {
+          description:
+            created.recording_error ??
+            'Google Meet would not switch automatic recording on for this session. An administrator can check what is missing under Recordings.',
+          duration: 10_000,
+        })
       } else if (created.google_event_id) {
         toast.success('Meeting scheduled', {
-          description: 'A Google Calendar invitation has been sent to the enrolled students.',
+          description:
+            created.recording_status === 'ARMED'
+              ? 'The class has been invited, and the session will record itself.'
+              : 'A Google Calendar invitation has been sent to the enrolled students.',
         })
       } else {
         toast.success('Meeting scheduled')
@@ -384,6 +398,36 @@ export function useDeleteMeeting() {
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.teacher.meetings() })
+    },
+  })
+}
+
+/**
+ * Collects this session's recording now instead of waiting for the sweep.
+ *
+ * Every outcome below is reported as what it is rather than as a failure:
+ * recordings are filed automatically a few minutes after a class ends, so the
+ * ordinary answer to pressing this early is "Meet has not published it yet".
+ * Only a genuine 4xx/5xx reaches `onError`.
+ */
+export function useSyncMeetingRecording() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (meetingId: number) => teacherApi.syncMeetingRecording(meetingId),
+    onSuccess: (updated) => {
+      qc.setQueryData<LiveMeetingOut[]>(qk.teacher.meetings(), (prev) =>
+        prev?.map((m) => (m.id === updated.id ? updated : m)),
+      )
+      void qc.invalidateQueries({ queryKey: qk.teacher.meetings() })
+      // Students read the same record, and a filed recording is the point.
+      void qc.invalidateQueries({ queryKey: qk.student.meetings() })
+      reportRecordingOutcome(updated)
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof ApiError ? error.message : 'Could not collect the recording.',
+        { duration: 8_000 },
+      )
     },
   })
 }

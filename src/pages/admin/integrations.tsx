@@ -3,13 +3,16 @@ import {
   CalendarClock,
   CheckCircle2,
   CloudUpload,
+  Disc,
   HardDrive,
   Mail,
   RefreshCw,
   ShieldAlert,
+  Video,
   XCircle,
 } from 'lucide-react'
 import * as React from 'react'
+import { Link } from 'react-router-dom'
 
 import type { EmailHealth, HealthProbe, IntegrationsHealth } from '@/api/types'
 import { useIntegrations, useStorageTestUpload } from '@/queries/admin.queries'
@@ -157,7 +160,7 @@ function EmailCard({ email }: { email: EmailHealth }) {
 
 function IntegrationsGrid({ data }: { data: IntegrationsHealth }) {
   const testUpload = useStorageTestUpload()
-  const { storage, drive, google_meet: meet, email } = data
+  const { storage, drive, google_meet: meet, meet_recording: recording, email } = data
 
   return (
     <>
@@ -242,6 +245,49 @@ function IntegrationsGrid({ data }: { data: IntegrationsHealth }) {
           <Detail label="Credentials file" value={meet.credentials_file} mono />
         </IntegrationCard>
 
+        {/*
+          Its own card rather than a line on the Meet one: recording depends on
+          a different API and a different pair of delegation scopes, so a school
+          whose Meet links work perfectly can still be unable to record a single
+          class — and the fix is a different form in the Workspace console.
+        */}
+        {recording && (
+          <IntegrationCard
+            title="Class recording"
+            icon={<Disc className="size-4" />}
+            probe={recording}
+            probed={data.probed}
+            actions={
+              <Button asChild variant="outline" size="sm">
+                <Link to="/admin/recordings">
+                  <Video className="size-4" />
+                  Recordings
+                </Link>
+              </Button>
+            }
+          >
+            <Detail label="Enabled" value={<Bool value={recording.enabled} />} />
+            <Detail label="Acting as" value={recording.acting_as} mono />
+            <Detail label="Transfer mode" value={recording.transfer_mode} />
+            <Detail label="Destination folder" value={recording.destination_folder} />
+            <Detail label="Shared with students" value={<Bool value={recording.share_with_students} />} />
+            <Detail label="Collected after" value={`${recording.harvest_delay_minutes} min`} />
+            <Detail label="Sweep interval" value={`${recording.scan_interval_seconds}s`} />
+            <Detail label="Gives up after" value={`${recording.give_up_after_hours}h`} />
+            {/* The exact strings the domain-wide delegation form asks for. */}
+            <Detail
+              label="Required scopes"
+              value={
+                <span className="font-mono text-2xs leading-relaxed">
+                  {(recording.required_scopes ?? []).join(' ')}
+                </span>
+              }
+            />
+            <Detail label="Service account ID" value={recording.service_account?.client_id} mono />
+            <Detail label="Credentials file" value={recording.credentials_file} mono />
+          </IntegrationCard>
+        )}
+
         <EmailCard email={email} />
       </div>
 
@@ -286,7 +332,7 @@ export default function AdminIntegrationsPage() {
     <>
       <PageHeader
         title="Integrations"
-        description="Where files are stored, how meetings are created, and what is currently broken."
+        description="Where files are stored, how meetings are created and recorded, and what is currently broken."
         actions={
           <Button
             variant="outline"

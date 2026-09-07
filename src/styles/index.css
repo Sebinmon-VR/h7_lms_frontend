@@ -385,3 +385,26 @@
     @apply block max-w-full truncate;
   }
 }
+
+/* ------------------------------------------------------------------
+   Report card printing. `printReportCard()` sets the body flag for the
+   duration of the print dialog so the card is the only thing on the page.
+   ------------------------------------------------------------------ */
+@media print {
+  body.printing-report-card {
+    background: white;
+  }
+  body.printing-report-card * {
+    visibility: hidden;
+  }
+  body.printing-report-card .report-card-print,
+  body.printing-report-card .report-card-print * {
+    visibility: visible;
+  }
+  body.printing-report-card .report-card-print {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    margin: 0;
+  }
+}

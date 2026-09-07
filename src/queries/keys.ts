@@ -49,6 +49,10 @@ export const qk = {
     reminderPreview: () => ['admin', 'reminders', 'preview'] as const,
     reminderLog: (limit: number) => ['admin', 'reminders', 'log', limit] as const,
     remindersRoot: () => ['admin', 'reminders'] as const,
+    recordingStatus: () => ['admin', 'recordings', 'status'] as const,
+    recordingPreview: () => ['admin', 'recordings', 'preview'] as const,
+    recordingLog: (limit: number) => ['admin', 'recordings', 'log', limit] as const,
+    recordingsRoot: () => ['admin', 'recordings'] as const,
   },
   health: {
     root: ['health'] as const,
@@ -83,6 +87,33 @@ export const qk = {
     timetable: () => ['student', 'timetable'] as const,
     timetableDay: (onDate?: string) => ['student', 'timetable', 'day', onDate ?? 'today'] as const,
     timetableUpcoming: () => ['student', 'timetable', 'upcoming'] as const,
+    /**
+     * The exam module, student side. Each exam carries this student's own
+     * state (can start, has handed in, personal deadline), so the list is
+     * refetched after every write to a script rather than patched by hand.
+     */
+    exams: () => ['student', 'exams'] as const,
+    exam: (examId: number) => ['student', 'exams', examId] as const,
+    submission: (examId: number) => ['student', 'exams', examId, 'submission'] as const,
+    reportCards: () => ['student', 'report-cards'] as const,
+    reportCard: (cardId: string) => ['student', 'report-cards', cardId] as const,
+  },
+  /**
+   * The exam module, staff side. Shared by the teacher and admin screens
+   * because the backend serves both from the same endpoints — the only
+   * difference is how much each caller is allowed to see, which the server
+   * decides per request. Keys carry no filters for the usual reason.
+   */
+  exams: {
+    root: ['exams'] as const,
+    list: () => ['exams', 'list'] as const,
+    detail: (examId: number) => ['exams', 'detail', examId] as const,
+    stats: (examId: number) => ['exams', 'stats', examId] as const,
+    submissions: (examId: number) => ['exams', 'submissions', examId] as const,
+    submission: (examId: number, studentId: number) =>
+      ['exams', 'submissions', examId, studentId] as const,
+    reportCards: () => ['exams', 'report-cards'] as const,
+    reportCard: (cardId: string) => ['exams', 'report-cards', cardId] as const,
   },
 } as const
 

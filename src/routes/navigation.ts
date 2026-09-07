@@ -4,7 +4,10 @@ import {
   BookOpen,
   CalendarCheck,
   CalendarRange,
+  ClipboardCheck,
   ClipboardList,
+  Disc,
+  FileBadge,
   FileText,
   GraduationCap,
   LayoutDashboard,
@@ -72,6 +75,23 @@ const ADMIN_NAV: NavSection[] = [
     ],
   },
   {
+    heading: 'Assessment',
+    items: [
+      {
+        to: '/admin/exams',
+        label: 'Exams',
+        icon: ClipboardCheck,
+        description: 'Every exam set by any teacher, and the marking behind it',
+      },
+      {
+        to: '/admin/report-cards',
+        label: 'Report Cards',
+        icon: FileBadge,
+        description: 'Consolidated results per student, per class',
+      },
+    ],
+  },
+  {
     heading: 'Content',
     items: [
       {
@@ -103,6 +123,12 @@ const ADMIN_NAV: NavSection[] = [
         icon: Bell,
         description: 'Class reminder emails and delivery log',
       },
+      {
+        to: '/admin/recordings',
+        label: 'Recordings',
+        icon: Disc,
+        description: 'Where recorded classes were filed, and what is holding one up',
+      },
     ],
   },
 ]
@@ -127,6 +153,18 @@ const TEACHER_NAV: NavSection[] = [
       { to: '/teacher/gradebook', label: 'Gradebook', icon: FileText, description: 'Record and review test marks' },
     ],
   },
+  {
+    heading: 'Assessment',
+    items: [
+      { to: '/teacher/exams', label: 'Exams', icon: ClipboardCheck, description: 'Set an exam, mark scripts, release results' },
+      {
+        to: '/teacher/report-cards',
+        label: 'Report Cards',
+        icon: FileBadge,
+        description: 'Issue term cards for the classes you lead',
+      },
+    ],
+  },
 ]
 
 const STUDENT_NAV: NavSection[] = [
@@ -145,7 +183,9 @@ const STUDENT_NAV: NavSection[] = [
       { to: '/student/syllabus', label: 'What We Learned', icon: ClipboardList, description: 'Topics your class has covered' },
       { to: '/student/meetings', label: 'Live Classes', icon: Video, description: 'Join a class or watch it back' },
       { to: '/student/materials', label: 'Notes & Books', icon: Library, description: 'Things your teachers shared' },
+      { to: '/student/exams', label: 'Exams', icon: ClipboardCheck, description: 'Sit an exam or see how you did' },
       { to: '/student/grades', label: 'My Marks', icon: FileText, description: 'How you did in each test' },
+      { to: '/student/report-cards', label: 'Report Cards', icon: FileBadge, description: 'How your term went' },
     ],
   },
 ]
