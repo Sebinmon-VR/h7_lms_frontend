@@ -31,14 +31,23 @@ function describe(error: unknown): string {
 // =====================================================================
 
 /**
- * Every exam this user may act on. Fetched unfiltered: `class_id` is the only
- * real server-side filter and the list is small, so one cache entry filters
- * instantly on the client and stays consistent after every write.
+ * Every school exam this user may act on. Fetched unfiltered: `class_id` is the
+ * only real server-side filter and the list is small, so one cache entry
+ * filters instantly on the client and stays consistent after every write.
+ *
+ * School exams only. `GET /exams` is shared by both products — a tuition
+ * assessment is a row in the same table, and an admin (or a teacher who does
+ * both jobs) gets them back mixed in with the class exams. They belong on the
+ * tuition screens, which have their own endpoints, so they are dropped here
+ * rather than shown on a class board with no class. Tested against
+ * `!== 'TUITION'` so an exam written before the field existed still reads as
+ * the school exam it is.
  */
 export function useExams(enabled = true) {
   return useQuery({
     queryKey: qk.exams.list(),
     queryFn: () => examApi.list(),
+    select: (exams) => exams.filter((e) => e.program !== 'TUITION'),
     staleTime: STALE.transactional,
     enabled,
   })
@@ -299,10 +308,12 @@ export function usePublishResults() {
 // Staff — report cards
 // =====================================================================
 
+/** Class cards only — a tuition card has no class and is read on its own page. */
 export function useReportCards(enabled = true) {
   return useQuery({
     queryKey: qk.exams.reportCards(),
     queryFn: () => examApi.listReportCards(),
+    select: (cards) => cards.filter((c) => c.program !== 'TUITION'),
     staleTime: STALE.transactional,
     enabled,
   })

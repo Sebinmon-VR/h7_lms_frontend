@@ -260,7 +260,13 @@ export default function ReportCardsPage() {
 
   const classOptions = React.useMemo(() => {
     const map = new Map<number, string>()
-    for (const c of cards) map.set(c.class_id, c.class_room?.name ?? `Class ${String(c.class_id).slice(-6)}`)
+    for (const c of cards) {
+      // A tuition card has no class, so it cannot be bucketed by one. Skipped
+      // rather than filed under "null", which would offer a filter that means
+      // nothing on this school-side screen.
+      if (c.class_id == null) continue
+      map.set(c.class_id, c.class_room?.name ?? `Class ${String(c.class_id).slice(-6)}`)
+    }
     return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
   }, [cards])
 

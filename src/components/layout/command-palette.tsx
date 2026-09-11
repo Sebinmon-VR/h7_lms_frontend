@@ -59,10 +59,10 @@ export function CommandPalette({
 }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { role, logout } = useAuth()
+  const { role, user, logout } = useAuth()
   const { mode, setMode } = useTheme()
 
-  const sections = navigationFor(role)
+  const sections = navigationFor(user)
 
   /**
    * Read straight from cache — never triggers a fetch.

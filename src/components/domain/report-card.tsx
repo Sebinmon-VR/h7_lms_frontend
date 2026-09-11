@@ -243,11 +243,20 @@ export function ReportCardView({
   card,
   actions,
   className,
+  hideRank,
 }: {
   card: ReportCardOut
   /** Rendered in the header, hidden when printing. */
   actions?: React.ReactNode
   className?: string
+  /**
+   * Drops the rank slot entirely rather than showing it empty.
+   *
+   * For a one-to-one tuition student there is no cohort and there never will
+   * be one, so an eternally blank "Class rank" reads as missing data rather
+   * than as a deliberate absence.
+   */
+  hideRank?: boolean
 }) {
   const studentName = card.student?.full_name ?? `Student #${String(card.student_id).slice(-6)}`
   const className_ = card.class_room ? `${card.class_room.name}${card.class_room.code ? ` · ${card.class_room.code}` : ''}` : ''
@@ -326,13 +335,15 @@ export function ReportCardView({
               }
               hint={`${card.exams_counted} ${card.exams_counted === 1 ? 'exam' : 'exams'}${card.exams_missed > 0 ? `, ${card.exams_missed} missed` : ''}`}
             />
-            <Summary
-              icon={Trophy}
-              label="Class rank"
-              value={card.rank != null ? `#${card.rank}` : '—'}
-              hint={card.rank != null && card.class_size != null ? `of ${card.class_size} students` : 'Not ranked'}
-              tone={card.rank != null && card.rank <= 3 ? 'warning' : 'neutral'}
-            />
+            {!hideRank && (
+              <Summary
+                icon={Trophy}
+                label="Class rank"
+                value={card.rank != null ? `#${card.rank}` : '—'}
+                hint={card.rank != null && card.class_size != null ? `of ${card.class_size} students` : 'Not ranked'}
+                tone={card.rank != null && card.rank <= 3 ? 'warning' : 'neutral'}
+              />
+            )}
             <Summary
               icon={CalendarCheck}
               label="Attendance"

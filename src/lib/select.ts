@@ -31,17 +31,24 @@ export function subjectCode(
   return record.subject?.code ?? dir?.get(record.subject_id)?.code ?? null
 }
 
+/**
+ * `class_id` is null on tuition records — an exam, grade or card set for one
+ * student rather than a class. There is no class to name, so say so rather
+ * than inventing a `Class #null`.
+ */
 export function className(
-  record: { class_room?: ClassRoomOut | null; class_id: number },
+  record: { class_room?: ClassRoomOut | null; class_id: number | null },
   dir?: Directory<ClassRoomOut>,
 ): string {
+  if (record.class_id == null) return record.class_room?.name ?? 'One-to-one'
   return record.class_room?.name ?? dir?.get(record.class_id)?.name ?? `Class ${shortId(record.class_id)}`
 }
 
 export function classCode(
-  record: { class_room?: ClassRoomOut | null; class_id: number },
+  record: { class_room?: ClassRoomOut | null; class_id: number | null },
   dir?: Directory<ClassRoomOut>,
 ): string | null {
+  if (record.class_id == null) return record.class_room?.code ?? null
   return record.class_room?.code ?? dir?.get(record.class_id)?.code ?? null
 }
 

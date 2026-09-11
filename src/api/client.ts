@@ -73,9 +73,42 @@ export const apiClient = axios.create({
   headers: { Accept: 'application/json' },
 })
 
+/**
+ * The browser's own view of where this machine is, e.g. "Europe/London".
+ *
+ * Resolved once — it is a fixed property of the device, and asking on every
+ * request would cost an `Intl` construction per call for an answer that does
+ * not change. Wrapped because a locked-down browser can throw here, and a
+ * timezone hint is never worth failing a request over.
+ */
+const BROWSER_TIMEZONE = (() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null
+  } catch {
+    return null
+  }
+})()
+
 apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   if (accessToken) {
     config.headers.set('Authorization', `Bearer ${accessToken}`)
+  }
+
+  /**
+   * Where the caller is sitting, for the tuition module.
+   *
+   * The backend records this against the profile and renders every tuition
+   * instant into it, so a student outside India sees their classes at their
+   * own hour without configuring anything — and so does the reminder email a
+   * background sweep sends them hours later.
+   *
+   * Sent on every request rather than only the tuition ones: the header is
+   * recorded and never enforced, non-tuition endpoints ignore an unknown
+   * header, and gating it on the URL would mean the detection depended on
+   * which screen the user happened to open first.
+   */
+  if (BROWSER_TIMEZONE) {
+    config.headers.set('X-Timezone', BROWSER_TIMEZONE)
   }
   // Let the browser set the multipart boundary itself.
   if (config.data instanceof FormData) {

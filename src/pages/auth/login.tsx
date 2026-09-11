@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { AlertCircle, Eye, EyeOff, LogIn, MailCheck } from 'lucide-react'
 import * as React from 'react'
 import { useForm } from 'react-hook-form'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { z } from 'zod'
 
@@ -68,7 +68,7 @@ export default function LoginPage() {
     setFormError(null)
     try {
       const user = await login(values)
-      navigate(from ?? roleHome(user?.role ?? null), { replace: true })
+      navigate(from ?? roleHome(user ?? null), { replace: true })
     } catch (error) {
       setFormError(describeSignInFailure(error))
     }
@@ -221,11 +221,11 @@ export default function LoginPage() {
         </div>
       )}
 
+      {/* No self-registration. The backend has no `POST /auth/register` — accounts
+          are provisioned by an administrator, who issues credentials from the
+          Users screen. Inviting people to sign up here only produced a 404. */}
       <p className="mt-7 text-center text-sm text-muted-foreground">
-        New student?{' '}
-        <Link to="/register" className="font-medium text-primary hover:underline">
-          Create an account
-        </Link>
+        Accounts are created by your school. Contact the office if you cannot sign in.
       </p>
     </AuthLayout>
   )

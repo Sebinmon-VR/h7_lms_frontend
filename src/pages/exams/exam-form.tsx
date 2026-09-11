@@ -633,7 +633,13 @@ export default function ExamFormPage() {
               emptyMessage="No classes available."
               options={
                 editing && original
-                  ? [{ value: String(original.class_id), label: original.class_room?.name ?? 'Class' }]
+                  ? [
+                      {
+                        value: String(original.class_id),
+                        // Null on a tuition assessment — set for one student, not a class.
+                        label: original.class_room?.name ?? (original.class_id == null ? 'One-to-one' : 'Class'),
+                      },
+                    ]
                   : catalogue.classes.map((c) => ({ value: String(c.id), label: c.name, hint: c.code }))
               }
             />

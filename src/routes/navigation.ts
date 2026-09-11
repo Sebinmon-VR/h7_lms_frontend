@@ -3,6 +3,7 @@ import {
   Bell,
   BookOpen,
   CalendarCheck,
+  CalendarClock,
   CalendarRange,
   ClipboardCheck,
   ClipboardList,
@@ -16,12 +17,17 @@ import {
   LineChart,
   Link2,
   Plug,
+  Receipt,
+  Settings2,
+  ShieldCheck,
+  UserRound,
   Users,
   Video,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
-import type { UserRole } from '@/api/types'
+import type { UserOut, UserRole } from '@/api/types'
+import { hasProgram } from '@/lib/tuition'
 
 export interface NavItem {
   to: string
@@ -190,25 +196,219 @@ const STUDENT_NAV: NavSection[] = [
   },
 ]
 
-export function navigationFor(role: UserRole | null): NavSection[] {
+/**
+ * The online tuition product, as its own section rather than folded into the
+ * lists above.
+ *
+ * A tuition class is not a school class with fewer people in it: it is one
+ * student, one teacher, a recurring weekly slot, a countdown and an invoice.
+ * Mixing its screens into "Classroom" would leave a teacher who does both jobs
+ * unable to tell which set of students they were looking at.
+ */
+const ADMIN_TUITION_NAV: NavSection[] = [
+  {
+    heading: 'Online tuition',
+    items: [
+      {
+        to: '/admin/tuition',
+        label: 'Overview',
+        icon: LayoutDashboard,
+        end: true,
+        description: 'Attendance, hours taught and what needs fixing',
+      },
+      {
+        to: '/admin/tuition/enrollments',
+        label: 'Arrangements',
+        icon: GraduationCap,
+        description: 'Who teaches which student, for which subject',
+      },
+      {
+        to: '/admin/tuition/schedule',
+        label: 'Schedule',
+        icon: CalendarClock,
+        description: 'Weekly class times, clashes and generated classes',
+      },
+      {
+        to: '/admin/tuition/sessions',
+        label: 'Classes',
+        icon: Video,
+        description: 'Every class, live or finished',
+      },
+      {
+        to: '/admin/tuition/fees',
+        label: 'Fees & Invoices',
+        icon: Receipt,
+        description: 'Fee plans, billing runs and payments',
+      },
+      {
+        to: '/tuition/library',
+        label: 'Library',
+        icon: Library,
+        description: 'Shared books, notes and recordings, and uploads awaiting approval',
+      },
+      {
+        to: '/admin/tuition/access',
+        label: 'People & Access',
+        icon: ShieldCheck,
+        description: 'Add tuition students and tutors, and grant access to existing accounts',
+      },
+      {
+        to: '/admin/tuition/settings',
+        label: 'Tuition Settings',
+        icon: Settings2,
+        description: 'Timezone, class length, reminders and lateness rules',
+      },
+    ],
+  },
+]
+
+const TEACHER_TUITION_NAV: NavSection[] = [
+  {
+    heading: 'Online tuition',
+    items: [
+      {
+        to: '/tuition/teacher',
+        label: 'Tuition Home',
+        icon: CalendarClock,
+        end: true,
+        description: 'Your next one-to-one classes',
+      },
+      {
+        to: '/tuition/teacher/students',
+        label: 'My Students',
+        icon: UserRound,
+        description: 'The students you teach one to one',
+      },
+      {
+        to: '/tuition/teacher/sessions',
+        label: 'Classes',
+        icon: Video,
+        description: 'Start a class, take the register, set the next one',
+      },
+      {
+        to: '/tuition/teacher/assessments',
+        label: 'Homework & Exams',
+        icon: ClipboardCheck,
+        description: 'Set work for one student and mark it',
+      },
+      {
+        to: '/tuition/library',
+        label: 'Library',
+        icon: Library,
+        description: 'Books, notes and recordings you share',
+      },
+      {
+        to: '/tuition/teacher/reports',
+        label: 'My Report',
+        icon: BarChart3,
+        description: 'Classes taught, hours and attendance',
+      },
+    ],
+  },
+]
+
+const STUDENT_TUITION_NAV: NavSection[] = [
+  {
+    heading: 'Online tuition',
+    items: [
+      {
+        to: '/tuition/student',
+        label: 'Tuition Home',
+        icon: CalendarClock,
+        end: true,
+        description: 'Your next one-to-one classes',
+      },
+      {
+        to: '/tuition/student/subjects',
+        label: 'My Tutors',
+        icon: UserRound,
+        description: 'What you learn one to one, and who teaches it',
+      },
+      {
+        to: '/tuition/student/sessions',
+        label: 'Classes',
+        icon: Video,
+        description: 'Join a class or look back at one',
+      },
+      {
+        to: '/tuition/student/assessments',
+        label: 'Homework & Exams',
+        icon: ClipboardCheck,
+        description: 'Work your tutor set you — homework, assignments and papers to sit',
+      },
+      {
+        to: '/tuition/student/report-cards',
+        label: 'Report Cards',
+        icon: FileBadge,
+        description: 'How your term went, subject by subject',
+      },
+      {
+        to: '/tuition/library',
+        label: 'Library',
+        icon: Library,
+        description: 'Books and notes your tutors shared',
+      },
+      {
+        to: '/tuition/student/reports',
+        label: 'My Attendance',
+        icon: BarChart3,
+        description: 'Classes attended and hours taught',
+      },
+    ],
+  },
+]
+
+/**
+ * Navigation for a signed-in user.
+ *
+ * Takes the whole profile, not just the role, because the tuition sections
+ * depend on the `programs` list too — a teacher's menu differs from another
+ * teacher's menu based on which products they are part of. Admins always see
+ * the tuition section: one admin team runs both, matching the backend, which
+ * does not programme-scope admins either.
+ */
+/**
+ * Navigation for a signed-in user, scoped to the products they belong to.
+ *
+ * Each programme contributes its own sections and NEITHER is implied by the
+ * other. A tuition-only student has no school timetable, no school attendance
+ * and no school report cards — showing those menu items would advertise pages
+ * that answer 403, which reads as a broken app rather than as a boundary.
+ *
+ * Absent `programs` means school-only, matching the backend: every account that
+ * predates tuition was a school account. Admins get everything — one admin team
+ * runs both, and the backend does not programme-scope them either.
+ */
+export function navigationFor(user: Pick<UserOut, 'role' | 'programs'> | null): NavSection[] {
+  const role = user?.role ?? null
+  if (role === 'ADMIN') return [...ADMIN_NAV, ...ADMIN_TUITION_NAV]
+
+  const lms = hasProgram(user, 'LMS')
+  const tuition = hasProgram(user, 'TUITION')
+  const sections: NavSection[] = []
+
   switch (role) {
-    case 'ADMIN':
-      return ADMIN_NAV
     // Same navigation for both teaching roles. What a class teacher may
     // additionally reach is decided per class inside these pages, and the
     // classes they lead appear under "My Classes" rather than as a new section.
     case 'CLASS_TEACHER':
     case 'TEACHER':
-      return TEACHER_NAV
+      if (lms) sections.push(...TEACHER_NAV)
+      if (tuition) sections.push(...TEACHER_TUITION_NAV)
+      break
     case 'STUDENT':
-      return STUDENT_NAV
+      if (lms) sections.push(...STUDENT_NAV)
+      if (tuition) sections.push(...STUDENT_TUITION_NAV)
+      break
     default:
       return []
   }
+
+  return sections
 }
 
-export function allNavItems(role: UserRole | null): NavItem[] {
-  return navigationFor(role).flatMap((section) => section.items)
+export function allNavItems(user: Pick<UserOut, 'role' | 'programs'> | null): NavItem[] {
+  return navigationFor(user).flatMap((section) => section.items)
 }
 
 export const PORTAL_LABEL: Record<UserRole, string> = {

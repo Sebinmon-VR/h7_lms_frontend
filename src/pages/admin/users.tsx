@@ -17,7 +17,7 @@ import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { z } from 'zod'
 
-import type { CredentialsIssued, UserOut, UserProfileFields, UserRole } from '@/api/types'
+import type { CredentialsIssued, Program, UserOut, UserProfileFields, UserRole } from '@/api/types'
 import { ApiError } from '@/api/errors'
 import {
   useCreateUser,
@@ -30,6 +30,7 @@ import {
 } from '@/queries/admin.queries'
 import { ALL_ROLES, ROLES, ROLE_LABEL, isTeachingRole } from '@/lib/constants'
 import { formatDateTime, formatRelative } from '@/lib/datetime'
+import { PROGRAM_LABEL } from '@/lib/tuition'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -92,6 +93,15 @@ const createSchema = z.object({
     .max(200)
     .refine((v) => v === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), 'Enter a valid email address'),
   role: z.enum(['ADMIN', 'TEACHER', 'STUDENT']),
+  /**
+   * Which products the account may reach.
+   *
+   * Defaults to the school alone. A tuition tutor or student needs TUITION
+   * ticked here or their login works and every tuition screen refuses them —
+   * so it sits beside the role rather than among the optional profile fields,
+   * which is also how the backend models it.
+   */
+  programs: z.array(z.enum(['LMS', 'TUITION'])).min(1, 'Pick at least one'),
 })
 type CreateValues = z.infer<typeof createSchema>
 
@@ -119,6 +129,68 @@ function previewEmail(fullName: string): string | null {
   return local
 }
 
+/**
+ * Product access, as two checkboxes.
+ *
+ * Separate from the role, because they answer different questions: a role says
+ * what somebody may do, a programme says where. The backend checks both on
+ * every tuition request, so a teacher without TUITION is refused by every
+ * tuition screen however valid their login.
+ *
+ * Both together is a real configuration, not a mistake — a teacher who
+ * genuinely does both jobs needs one account, not two. The last remaining box
+ * cannot be cleared: an account belonging to no programme reaches nothing, and
+ * the API rejects an empty list.
+ */
+function ProgramsField({
+  value,
+  onChange,
+  error,
+}: {
+  value: Program[]
+  onChange: (next: Program[]) => void
+  error?: string
+}) {
+  const toggle = (program: Program, checked: boolean) => {
+    const next = new Set(value)
+    if (checked) next.add(program)
+    else next.delete(program)
+    if (next.size === 0) return
+    onChange(Array.from(next))
+  }
+
+  return (
+    <Field
+      id="programs"
+      label="Programme access"
+      required
+      error={error}
+      hint="A tuition tutor or student needs Online tuition ticked, or every tuition screen refuses them."
+    >
+      <div className="flex flex-wrap gap-4 rounded-lg border border-border px-3 py-2.5">
+        {(['LMS', 'TUITION'] as Program[]).map((program) => {
+          const checked = value.includes(program)
+          const isLast = checked && value.length === 1
+          return (
+            <label
+              key={program}
+              className="flex items-center gap-2 text-sm"
+              title={isLast ? 'An account must belong to at least one programme.' : undefined}
+            >
+              <Checkbox
+                checked={checked}
+                disabled={isLast}
+                onCheckedChange={(v) => toggle(program, v === true)}
+              />
+              {PROGRAM_LABEL[program]}
+            </label>
+          )
+        })}
+      </div>
+    </Field>
+  )
+}
+
 function CreateUserDialog({
   open,
   onOpenChange,
@@ -135,12 +207,12 @@ function CreateUserDialog({
 
   const form = useForm<CreateValues>({
     resolver: zodResolver(createSchema),
-    defaultValues: { full_name: '', email: '', role: 'STUDENT' },
+    defaultValues: { full_name: '', email: '', role: 'STUDENT', programs: ['LMS'] },
   })
 
   React.useEffect(() => {
     if (!open) return
-    form.reset({ full_name: '', email: '', role: 'STUDENT' })
+    form.reset({ full_name: '', email: '', role: 'STUDENT', programs: ['LMS'] })
     setOverrideEmail(false)
     setProfile({})
   }, [open, form])
@@ -157,6 +229,7 @@ function CreateUserDialog({
         ...profile,
         full_name: values.full_name,
         role: values.role,
+        programs: values.programs,
         email: overrideEmail && email ? email : null,
         password: null,
       })
@@ -270,6 +343,12 @@ function CreateUserDialog({
               </Select>
             </Field>
 
+            <ProgramsField
+              value={form.watch('programs')}
+              onChange={(next) => form.setValue('programs', next, { shouldValidate: true })}
+              error={form.formState.errors.programs?.message}
+            />
+
             <ProfileFieldsSection
               role={form.watch('role')}
               value={profile}
@@ -302,6 +381,7 @@ const editSchema = z.object({
   // their row and pressing Save would silently demote them. It is granted and
   // revoked by assigning classes on Teacher Mappings, not by picking it here.
   role: z.enum(['ADMIN', 'CLASS_TEACHER', 'TEACHER', 'STUDENT']),
+  programs: z.array(z.enum(['LMS', 'TUITION'])).min(1, 'Pick at least one'),
 })
 type EditValues = z.infer<typeof editSchema>
 
@@ -316,6 +396,7 @@ function profileOf(user: UserOut): UserProfileFields {
     created_at: _created,
     updated_at: _updated,
     firebase_uid: _uid,
+    programs: _programs,
     ...profile
   } = user
   return profile
@@ -329,7 +410,7 @@ function EditUserDialog({ user, onClose }: { user: UserOut | null; onClose: () =
 
   const form = useForm<EditValues>({
     resolver: zodResolver(editSchema),
-    defaultValues: { full_name: '', email: '', is_active: true, role: 'STUDENT' },
+    defaultValues: { full_name: '', email: '', is_active: true, role: 'STUDENT', programs: ['LMS'] },
   })
 
   React.useEffect(() => {
@@ -339,6 +420,9 @@ function EditUserDialog({ user, onClose }: { user: UserOut | null; onClose: () =
         email: user.email,
         is_active: user.is_active,
         role: user.role,
+        // Absent on profiles that predate the tuition module, which read as
+        // school-only — the safe direction, and what the backend assumes too.
+        programs: user.programs?.length ? user.programs : ['LMS'],
       })
       setProfile(profileOf(user))
       setConfirmRole(null)
@@ -357,6 +441,9 @@ function EditUserDialog({ user, onClose }: { user: UserOut | null; onClose: () =
         // Only sent when it actually changed — including it unchanged would
         // still revoke the user's tokens and sign them out for nothing.
         ...(values.role !== user.role && { role: values.role }),
+        // Replaces the list outright, which is the point: product access has
+        // to be revocable, and a merge would make revoking impossible.
+        programs: values.programs,
       },
     })
     onClose()
@@ -446,6 +533,12 @@ function EditUserDialog({ user, onClose }: { user: UserOut | null; onClose: () =
                 to Teacher on its own.
               </p>
             )}
+
+            <ProgramsField
+              value={form.watch('programs')}
+              onChange={(next) => form.setValue('programs', next, { shouldDirty: true })}
+              error={form.formState.errors.programs?.message}
+            />
 
             {user && (
               <ProfileFieldsSection
@@ -803,6 +896,8 @@ export default function AdminUsersPage() {
             { header: 'Name', value: (u) => u.full_name },
             { header: 'Email', value: (u) => u.email },
             { header: 'Role', value: (u) => u.role },
+            // Absent reads as school-only, matching the backend's own default.
+            { header: 'Programmes', value: (u) => (u.programs?.length ? u.programs : ['LMS']).join(' + ') },
             { header: 'Active', value: (u) => (u.is_active ? 'Yes' : 'No') },
             { header: 'Created', value: (u) => u.created_at },
           ],

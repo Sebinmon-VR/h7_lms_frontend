@@ -7,6 +7,7 @@ import { getAccessToken, loadStoredToken, onAuthEvent, setAccessToken } from '@/
 import { ApiError } from '@/api/errors'
 import type { LoginRequest, UserOut, UserRole } from '@/api/types'
 import { STORAGE_KEYS } from '@/lib/constants'
+import { hasProgram } from '@/lib/tuition'
 import {
   firebaseAuthMessage,
   firebaseSendPasswordReset,
@@ -456,17 +457,38 @@ export function useAuth() {
 }
 
 /** Where each role lands after signing in. */
-export function roleHome(role: UserRole | null): string {
-  switch (role) {
+/**
+ * Where this account lands, given both its role and its products.
+ *
+ * Takes the whole profile rather than a bare role because the two products are
+ * separate front doors: a tuition-only student has no school dashboard to land
+ * on, and sending them to one produces a redirect straight back out of it.
+ *
+ * The contract that matters is that this ALWAYS returns somewhere the caller
+ * can actually reach — every route guard redirects here on refusal, so a home
+ * the user is not allowed to open would be an infinite loop rather than an
+ * error. `/profile` is the floor: it sits behind no role or programme guard.
+ */
+export function roleHome(user: Pick<UserOut, 'role' | 'programs'> | null): string {
+  if (!user) return '/login'
+
+  const lms = hasProgram(user, 'LMS')
+  const tuition = hasProgram(user, 'TUITION')
+
+  switch (user.role) {
+    // Admins are never programme-scoped — one admin team runs both products,
+    // and the backend takes the same view.
     case 'ADMIN':
       return '/admin'
     // A class teacher lands on the teacher portal like any other teacher. The
     // extra reach is inside those pages, not a separate section of the app.
     case 'CLASS_TEACHER':
     case 'TEACHER':
-      return '/teacher'
+      if (lms) return '/teacher'
+      return tuition ? '/tuition/teacher' : '/profile'
     case 'STUDENT':
-      return '/student'
+      if (lms) return '/student'
+      return tuition ? '/tuition/student' : '/profile'
     default:
       return '/login'
   }

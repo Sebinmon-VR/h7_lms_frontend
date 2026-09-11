@@ -505,6 +505,22 @@ function OverviewTab({ exam, stats, onGoTo }: { exam: ExamOut; stats: ExamStats 
 
 // ---------------------------------------------------------- submissions
 
+/**
+ * Someone we have an id for but no profile: a student who has left the class
+ * and whose script still needs marking, or the student a tuition assessment is
+ * set for before they have started it and hydrated themselves onto a script.
+ */
+function placeholderStudent(studentId: number): UserOut {
+  return {
+    id: studentId,
+    full_name: `Student #${String(studentId).slice(-6)}`,
+    email: '',
+    role: 'STUDENT',
+    is_active: true,
+    created_at: '',
+  } as UserOut
+}
+
 type SubmissionFilter = 'ALL' | 'TO_MARK' | 'MARKED' | 'NOT_IN'
 
 interface RosterRow {
@@ -539,10 +555,7 @@ function SubmissionsTab({
     // A script from someone no longer on the roster still needs marking.
     for (const s of submissions) {
       if (!seen.has(s.student_id)) {
-        list.push({
-          student: s.student ?? ({ id: s.student_id, full_name: `Student #${String(s.student_id).slice(-6)}`, email: '', role: 'STUDENT', is_active: true, created_at: '' } as UserOut),
-          submission: s,
-        })
+        list.push({ student: s.student ?? placeholderStudent(s.student_id), submission: s })
       }
     }
     return list.sort((a, b) => a.student.full_name.localeCompare(b.student.full_name))
@@ -835,7 +848,16 @@ export default function ExamDetailPage() {
   const [reopening, setReopening] = React.useState<SubmissionOut | null>(null)
 
   const submissions = React.useMemo(() => submissionsQuery.data ?? [], [submissionsQuery.data])
-  const roster = React.useMemo(() => rosterQuery.data ?? [], [rosterQuery.data])
+
+  const roster = React.useMemo<UserOut[]>(() => {
+    // An LMS exam is sat by a class; a tuition assessment by the one student it
+    // was set for. `class_id` is null on the latter, so the class roster query
+    // never runs and this is where its roster of one comes from.
+    if (exam?.program !== 'TUITION') return rosterQuery.data ?? []
+    if (exam.student_id == null) return []
+    const known = submissions.find((sub) => sub.student_id === exam.student_id)?.student
+    return [known ?? placeholderStudent(exam.student_id)]
+  }, [exam?.program, exam?.student_id, rosterQuery.data, submissions])
   const handedIn = submissions.filter((s) => s.status === 'SUBMITTED' || s.status === 'EVALUATED')
   const toMark = handedIn.filter((s) => s.status === 'SUBMITTED').length
   const evaluated = handedIn.length - toMark
@@ -1007,7 +1029,10 @@ export default function ExamDetailPage() {
               exam={exam}
               submissions={submissions}
               roster={roster}
-              rosterPending={rosterQuery.isPending}
+              // A disabled query reports `isPending` forever, and the class
+              // roster query is disabled on a tuition assessment — which has
+              // no class to fetch. Nothing is loading there.
+              rosterPending={exam.program !== 'TUITION' && rosterQuery.isPending}
               onReopen={setReopening}
             />
           )}
@@ -1021,8 +1046,12 @@ export default function ExamDetailPage() {
       <ConfirmDialog
         open={confirm === 'publish'}
         onOpenChange={(v) => !v && setConfirm(null)}
-        title="Publish this exam to the class?"
-        description={`Every student in ${classLabel(exam)} will see it and can start once the window opens at ${formatDateTime(exam.starts_at)}. The question paper is fixed once anyone hands in.`}
+        title={exam.program === 'TUITION' ? 'Set this work for your student?' : 'Publish this exam to the class?'}
+        description={
+          exam.program === 'TUITION'
+            ? `Your student will see it and can start once the window opens at ${formatDateTime(exam.starts_at)}. The question paper is fixed once they hand in.`
+            : `Every student in ${classLabel(exam)} will see it and can start once the window opens at ${formatDateTime(exam.starts_at)}. The question paper is fixed once anyone hands in.`
+        }
         confirmLabel="Publish"
         loading={publishExam.isPending}
         onConfirm={() => publishExam.mutate(exam.id, { onSettled: () => setConfirm(null) })}
@@ -1031,7 +1060,13 @@ export default function ExamDetailPage() {
       <ConfirmDialog
         open={confirm === 'results'}
         onOpenChange={(v) => !v && setConfirm(null)}
-        title={exam.results_published ? 'Re-publish results?' : 'Release results to the class?'}
+        title={
+          exam.results_published
+            ? 'Re-publish results?'
+            : exam.program === 'TUITION'
+              ? 'Release results to your student?'
+              : 'Release results to the class?'
+        }
         description={
           <>
             {evaluated} marked script{evaluated === 1 ? '' : 's'} will be released. Students then see their marks, the

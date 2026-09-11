@@ -115,10 +115,16 @@ export function useTeacherMaterials(enabled = true) {
   })
 }
 
+/**
+ * Class marks only. Auto-marking a tuition assessment writes a grade row too,
+ * and that row carries no `class_id` — every screen reading this hook groups by
+ * class, so a tuition mark has nowhere to sit.
+ */
 export function useTeacherGrades(enabled = true) {
   return useQuery({
     queryKey: qk.teacher.grades(),
     queryFn: teacherApi.listGrades,
+    select: (grades) => grades.filter((g) => g.class_id != null),
     staleTime: STALE.transactional,
     enabled,
   })

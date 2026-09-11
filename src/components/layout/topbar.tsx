@@ -31,8 +31,8 @@ const THEME_OPTIONS: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
 
 function Breadcrumbs() {
   const location = useLocation()
-  const { role } = useAuth()
-  const items = allNavItems(role)
+  const { role, user } = useAuth()
+  const items = allNavItems(user)
 
   // Longest matching nav path wins, so nested routes resolve to their section.
   const match = items

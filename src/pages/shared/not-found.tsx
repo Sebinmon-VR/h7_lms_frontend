@@ -5,7 +5,7 @@ import { roleHome, useAuth } from '@/providers/auth-provider'
 import { Button } from '@/components/ui/button'
 
 export default function NotFoundPage() {
-  const { role } = useAuth()
+  const { user } = useAuth()
 
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
@@ -19,7 +19,7 @@ export default function NotFoundPage() {
         The link may be out of date, or the page may not be available for your role.
       </p>
       <Button asChild variant="primary" className="mt-6">
-        <Link to={roleHome(role)}>
+        <Link to={roleHome(user)}>
           <Home className="size-4" />
           Back to dashboard
         </Link>

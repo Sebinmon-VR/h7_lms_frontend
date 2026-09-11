@@ -11,9 +11,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Wordmark, Logo } from './logo'
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { role } = useAuth()
+  const { role, user } = useAuth()
   const [collapsed, setCollapsed] = usePersistentState(STORAGE_KEYS.sidebar, false)
-  const sections = navigationFor(role)
+  const sections = navigationFor(user)
 
   return (
     <aside

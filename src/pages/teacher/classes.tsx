@@ -158,7 +158,10 @@ export default function TeacherClassesPage() {
     for (const t of mine(topicsQuery.data)) ensure(key(t.class_id, t.subject_id)).topics += 1
     for (const m of mine(materialsQuery.data)) ensure(key(m.class_id, m.subject_id)).materials += 1
     for (const m of mine(meetingsQuery.data)) ensure(key(m.class_id, m.subject_id)).meetings += 1
-    for (const g of mine(gradesQuery.data)) ensure(key(g.class_id, g.subject_id)).grades += 1
+    for (const g of mine(gradesQuery.data)) {
+      if (g.class_id == null) continue // tuition grade: belongs to no class
+      ensure(key(g.class_id, g.subject_id)).grades += 1
+    }
     for (const a of mine(attendanceQuery.data)) ensure(key(a.class_id, a.subject_id)).attendance += 1
 
     return map

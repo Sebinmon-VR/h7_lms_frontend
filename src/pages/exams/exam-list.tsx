@@ -134,7 +134,10 @@ export default function ExamListPage() {
   // class with no exams is not something to filter to.
   const classOptions = React.useMemo(() => {
     const map = new Map<number, string>()
-    for (const e of exams) map.set(e.class_id, classLabel(e))
+    for (const e of exams) {
+      if (e.class_id == null) continue
+      map.set(e.class_id, classLabel(e))
+    }
     return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
   }, [exams])
 

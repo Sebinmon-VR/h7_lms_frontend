@@ -19,6 +19,15 @@
  */
 
 /**
+ * The online tuition product's shapes live next door for size only, and are
+ * re-exported here so `@/api/types` stays the single import surface for the
+ * whole app. See `tuition.types.ts` for the two conventions that module runs
+ * on — participants are never sent, and every instant arrives twice.
+ */
+export * from './tuition.types'
+import type { Program, TuitionAssessmentCategory } from './tuition.types'
+
+/**
  * `CLASS_TEACHER` is a TEACHER with extra reach, not a separate kind of user.
  * They take periods, own subject mappings and appear on the timetable exactly
  * like a TEACHER, so anything asking "may this user own a teaching record?"
@@ -84,6 +93,15 @@ export interface UserProfileFields {
   date_of_birth?: ApiDate | null
   gender?: Gender | null
   photo_url?: string | null
+  /**
+   * IANA zone used to render this person's times, e.g. "Asia/Dubai".
+   *
+   * Only the tuition module reads it: classes there are stored as absolute
+   * instants and rendered per reader, so a student in London and their teacher
+   * in Dubai each see the same class on their own clock. Null means they see
+   * programme time, which is right for the majority who are in it.
+   */
+  timezone?: string | null
 
   address_line1?: string | null
   address_line2?: string | null
@@ -126,6 +144,14 @@ export interface UserOut extends UserProfileFields {
   email: string
   role: UserRole
   is_active: boolean
+  /**
+   * Which products this account may reach. A role says what someone may do; a
+   * program says where, and the backend checks both on every tuition route.
+   *
+   * Absent on profiles created before the tuition module existed, which read as
+   * LMS-only — so treat a missing value as `['LMS']` rather than as "all".
+   */
+  programs?: Program[]
   created_at: ApiDateTime
   /**
    * Links the profile to its Firebase Auth account. Null on profiles created
@@ -152,6 +178,12 @@ export interface UserCreate extends UserProfileFields {
   email?: string | null
   password?: string | null
   role: UserRole
+  /**
+   * Defaults to `['LMS']` server-side when omitted. A tuition teacher or
+   * student must be created with `['TUITION']` (or both) — without it their
+   * login works and every tuition endpoint refuses them.
+   */
+  programs?: Program[]
 }
 
 /** Options for POST /admin/users/{id}/generate-credentials. */
@@ -201,6 +233,8 @@ export interface UserUpdate extends UserProfileFields {
    * wrong navigation until it expires. Always confirm before sending this.
    */
   role?: UserRole
+  /** Replaces product access outright — a merge would make revoking impossible. */
+  programs?: Program[]
 }
 
 /**
@@ -612,7 +646,8 @@ export interface ExamGradeOut {
   id: number
   student_id: number
   student: UserOut | null
-  class_id: number
+  /** Null on a tuition record, which belongs to one student, not a class. */
+  class_id: number | null
   class_room: ClassRoomOut | null
   subject_id: number
   subject: SubjectOut | null
@@ -1302,7 +1337,26 @@ export interface TimeConcessionGrant {
 /** The staff view. Carries the answer key. */
 export interface ExamOut {
   id: number
-  class_id: number
+  /**
+   * Which product set this paper: `LMS` for a class exam, `TUITION` for one
+   * set for a single student on a one-to-one arrangement. Papers written
+   * before tuition existed carry no value server-side and read as `LMS`,
+   * which is what they are.
+   */
+  program: Program
+  category: TuitionAssessmentCategory
+  /**
+   * The one student a tuition assessment is set for. Null on a class exam,
+   * whose roster comes from the class instead.
+   */
+  student_id: number | null
+  enrollment_id: number | null
+  /**
+   * Null on a tuition assessment — it is set for a student, not a class.
+   * `ExamCreate` still requires one, because the LMS route that takes it
+   * genuinely does.
+   */
+  class_id: number | null
   class_room: ClassRoomOut | null
   subject_id: number
   subject: SubjectOut | null
@@ -1346,7 +1400,11 @@ export interface ExamOut {
 /** The student view, with the timing resolved for THIS student. */
 export interface StudentExamOut {
   id: number
-  class_id: number
+  program: Program
+  category: TuitionAssessmentCategory
+  enrollment_id: number | null
+  /** Null on a tuition assessment — set for this student, not for a class. */
+  class_id: number | null
   class_room: ClassRoomOut | null
   subject_id: number
   subject: SubjectOut | null
@@ -1425,7 +1483,8 @@ export interface SubmissionOut {
   exam_id: number
   student_id: number
   student: UserOut | null
-  class_id: number
+  /** Null when the script is for a tuition assessment. */
+  class_id: number | null
   subject_id: number
   status: SubmissionStatus
   started_at: ApiDateTime | null
@@ -1499,7 +1558,9 @@ export interface ResultsPublished {
 export interface ExamStats {
   exam_id: number
   title: string
-  class_id: number
+  /** Null on a tuition assessment. */
+  class_id: number | null
+  /** Students entitled to sit it: the class roster, or 1 for tuition. */
   enrolled_students: number
   started: number
   submitted: number
@@ -1576,7 +1637,18 @@ export interface ReportCardOut {
   id: string
   student_id: number
   student: UserOut | null
-  class_id: number
+  /**
+   * `LMS` for a class card, `TUITION` for one spanning a student's one-to-one
+   * subjects. A tuition card carries no rank or class size — a one-to-one
+   * student has no cohort.
+   */
+  program: Program
+  /**
+   * Null on a tuition card: a one-to-one student is in no class. School cards
+   * always carry one, so a screen that groups by class should filter these out
+   * rather than bucket them under "null".
+   */
+  class_id: number | null
   class_room: ClassRoomOut | null
   title: string
   generated_by: number | null

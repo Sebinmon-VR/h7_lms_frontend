@@ -1,17 +1,16 @@
 import { get, post } from './client'
-import type { LoginRequest, TokenResponse, UserCreate, UserOut } from './types'
+import type { LoginRequest, TokenResponse, UserOut } from './types'
 
+/**
+ * There is no public registration. The backend exposes only `/auth/login`,
+ * `/auth/token` and `/auth/me`; accounts are provisioned by an administrator,
+ * who generates credentials from the Users screen. An earlier build offered a
+ * sign-up form against `POST /auth/register`, which the backend no longer has.
+ */
 export const authApi = {
   /** 401 here is a wrong password, not an expired session. */
   login: (body: LoginRequest) =>
     post<TokenResponse>('/auth/login', body, { meta: { skipAuthRedirect: true } }),
-
-  /**
-   * Public registration. The backend accepts role "ADMIN" from anonymous
-   * callers — the UI only ever sends "STUDENT".
-   */
-  register: (body: UserCreate) =>
-    post<UserOut>('/auth/register', body, { meta: { skipAuthRedirect: true } }),
 
   me: () => get<UserOut>('/auth/me'),
 }

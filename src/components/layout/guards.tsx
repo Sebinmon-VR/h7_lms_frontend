@@ -3,7 +3,8 @@ import { toast } from 'sonner'
 import * as React from 'react'
 import { Loader2, ServerCrash } from 'lucide-react'
 
-import type { UserRole } from '@/api/types'
+import type { Program, UserRole } from '@/api/types'
+import { PROGRAM_LABEL, hasProgram } from '@/lib/tuition'
 import { roleHome, useAuth } from '@/providers/auth-provider'
 import { Button } from '@/components/ui/button'
 import { Wordmark } from './logo'
@@ -64,7 +65,7 @@ export function RequireAuth() {
  * in-page error.
  */
 export function RequireRole({ allow }: { allow: UserRole[] }) {
-  const { role } = useAuth()
+  const { role, user } = useAuth()
   const notified = React.useRef(false)
 
   if (role && !allow.includes(role)) {
@@ -72,20 +73,52 @@ export function RequireRole({ allow }: { allow: UserRole[] }) {
       notified.current = true
       toast.error('That page is not available for your role.')
     }
-    return <Navigate to={roleHome(role)} replace />
+    return <Navigate to={roleHome(user)} replace />
   }
+  return <Outlet />
+}
+
+/**
+ * Gates the online tuition screens on programme membership.
+ *
+ * A role guard is not enough here and the backend says so: it checks the role
+ * AND the `programs` list on every tuition route, because a school teacher with
+ * a perfectly valid login has no business in the tuition timetable. Mirroring
+ * that check in the router turns what would be a wall of 403s into a redirect
+ * with an explanation.
+ *
+ * Admins pass unconditionally. One admin team runs both products, and an
+ * administrator locked out because nobody ticked a box is a support call, not
+ * a security win — the backend takes the same view.
+ */
+export function RequireProgram({ program }: { program: Program }) {
+  const { user, role } = useAuth()
+  const notified = React.useRef(false)
+
+  if (role === 'ADMIN') return <Outlet />
+
+  if (user && !hasProgram(user, program)) {
+    if (!notified.current) {
+      notified.current = true
+      toast.error(`Your account is not part of ${PROGRAM_LABEL[program].toLowerCase()}.`, {
+        description: 'An administrator can grant access from the programme access screen.',
+      })
+    }
+    return <Navigate to={roleHome(user)} replace />
+  }
+
   return <Outlet />
 }
 
 /** Signed-in users never see the login screen. */
 export function RedirectIfAuthenticated({ children }: { children: React.ReactNode }) {
-  const { status, role } = useAuth()
+  const { status, user } = useAuth()
   if (status === 'booting') return <BootSplash />
-  if (status === 'authenticated') return <Navigate to={roleHome(role)} replace />
+  if (status === 'authenticated') return <Navigate to={roleHome(user)} replace />
   return <>{children}</>
 }
 
 export function RoleHomeRedirect() {
-  const { role } = useAuth()
-  return <Navigate to={roleHome(role)} replace />
+  const { user } = useAuth()
+  return <Navigate to={roleHome(user)} replace />
 }

@@ -1,4 +1,36 @@
-import type { UserRole } from '@/api/types'
+import type { Program, UserRole } from '@/api/types'
+
+/**
+ * Which of the three tuition routers answered.
+ *
+ * `/admin/tuition/sessions`, `/tuition/teachers/sessions` and
+ * `/tuition/students/sessions` return the same shape but a different slice —
+ * everyone's, mine-as-teacher, mine-as-student. An admin who opens a teacher
+ * screen would otherwise read the admin-wide cache and see other people's
+ * classes, so the caller's viewpoint is part of the key.
+ */
+export type TuitionScope = 'admin' | 'teacher' | 'student'
+
+/**
+ * The filters that reach the server. `who` is whichever counterparty id the
+ * endpoint accepts — a student for the teacher's list, a subject for the
+ * student's, either for the admin's.
+ */
+/** Filters that reach `GET /admin/tuition/billing`. */
+export interface TuitionBillingKey {
+  student?: number
+  status?: string
+  from?: string
+  to?: string
+  unpaidOnly?: boolean
+}
+
+export interface TuitionSessionFilters {
+  from?: string
+  to?: string
+  status?: string
+  who?: number | string
+}
 
 /**
  * Query key factory.
@@ -114,6 +146,104 @@ export const qk = {
       ['exams', 'submissions', examId, studentId] as const,
     reportCards: () => ['exams', 'report-cards'] as const,
     reportCard: (cardId: string) => ['exams', 'report-cards', cardId] as const,
+  },
+  /**
+   * The online tuition product.
+   *
+   * Filters DO belong in these keys, unlike the LMS ones above. A tuition
+   * session list is a real Firestore range query over a date window, so
+   * `from`/`to` fetch genuinely different rows rather than re-slicing one
+   * response — and the windows a user moves between (this week, last month)
+   * are worth caching separately.
+   *
+   * `sessionsRoot()` is what mutations invalidate: starting, ending or
+   * cancelling a class changes rows in windows we cannot name, so the whole
+   * subtree goes rather than one entry.
+   */
+  tuition: {
+    root: ['tuition'] as const,
+
+    /** Also the cheapest "am I in the programme?" probe — it 403s if not. */
+    me: () => ['tuition', 'me'] as const,
+    settings: (program: Program) => ['tuition', 'settings', program] as const,
+    settingsRoot: () => ['tuition', 'settings'] as const,
+
+    /** `includeAll` is a real server-side difference: it widens past the programme. */
+    users: (role: UserRole | 'ALL', includeAll: boolean) =>
+      ['tuition', 'users', role, includeAll] as const,
+    usersRoot: () => ['tuition', 'users'] as const,
+
+    enrollments: (includeInactive: boolean) =>
+      ['tuition', 'enrollments', includeInactive] as const,
+    enrollmentsRoot: () => ['tuition', 'enrollments'] as const,
+    enrollment: (enrollmentId: number) => ['tuition', 'enrollment', enrollmentId] as const,
+
+    slots: () => ['tuition', 'slots'] as const,
+    conflicts: () => ['tuition', 'conflicts'] as const,
+    scheduleStatus: () => ['tuition', 'schedule', 'status'] as const,
+
+    sessions: (scope: TuitionScope, filters: TuitionSessionFilters = {}) =>
+      [
+        'tuition',
+        'sessions',
+        scope,
+        filters.from ?? 'any',
+        filters.to ?? 'any',
+        filters.status ?? 'any',
+        filters.who ?? 'any',
+      ] as const,
+    sessionsRoot: () => ['tuition', 'sessions'] as const,
+    session: (scope: TuitionScope, sessionId: string) =>
+      ['tuition', 'session', scope, sessionId] as const,
+    upcoming: (scope: TuitionScope) => ['tuition', 'upcoming', scope] as const,
+
+    /** One entry, filtered on the client — the server has no text search. */
+    library: () => ['tuition', 'library'] as const,
+    libraryPending: () => ['tuition', 'library', 'pending'] as const,
+    libraryItem: (itemId: number) => ['tuition', 'library', 'item', itemId] as const,
+
+    assessments: (scope: TuitionScope) => ['tuition', 'assessments', scope] as const,
+    assessmentsRoot: () => ['tuition', 'assessments'] as const,
+    reportCards: () => ['tuition', 'report-cards'] as const,
+
+    feePlans: () => ['tuition', 'fee-plans'] as const,
+    invoices: (studentId?: number) => ['tuition', 'invoices', studentId ?? 'ALL'] as const,
+    invoicesRoot: () => ['tuition', 'invoices'] as const,
+    invoice: (invoiceId: string) => ['tuition', 'invoice', invoiceId] as const,
+    feeSummary: (from?: string, to?: string) =>
+      ['tuition', 'fees', 'summary', from ?? 'any', to ?? 'any'] as const,
+    feesRoot: () => ['tuition', 'fees'] as const,
+
+    /**
+     * The billing screen. Every filter is in the key because the server
+     * computes the summary from exactly the rows it returned — two filter sets
+     * are two genuinely different answers, not one list sliced twice.
+     */
+    billing: (filters: TuitionBillingKey = {}) =>
+      [
+        'tuition',
+        'billing',
+        filters.student ?? 'ALL',
+        filters.status ?? 'any',
+        filters.from ?? 'any',
+        filters.to ?? 'any',
+        filters.unpaidOnly ? 'unpaid' : 'all',
+      ] as const,
+    billingRoot: () => ['tuition', 'billing'] as const,
+    studentBilling: (studentId: number) => ['tuition', 'billing', 'student', studentId] as const,
+    invoiceDetail: (invoiceId: string) => ['tuition', 'invoice', invoiceId, 'detail'] as const,
+
+    overview: (from?: string, to?: string) =>
+      ['tuition', 'reports', 'overview', from ?? 'any', to ?? 'any'] as const,
+    studentReport: (scope: TuitionScope, studentId: number, from?: string, to?: string) =>
+      ['tuition', 'reports', 'student', scope, studentId, from ?? 'any', to ?? 'any'] as const,
+    teacherReport: (scope: TuitionScope, teacherId: number, from?: string, to?: string) =>
+      ['tuition', 'reports', 'teacher', scope, teacherId, from ?? 'any', to ?? 'any'] as const,
+    reportsRoot: () => ['tuition', 'reports'] as const,
+
+    reminderStatus: () => ['tuition', 'reminders', 'status'] as const,
+    reminderPreview: () => ['tuition', 'reminders', 'preview'] as const,
+    remindersRoot: () => ['tuition', 'reminders'] as const,
   },
 } as const
 
