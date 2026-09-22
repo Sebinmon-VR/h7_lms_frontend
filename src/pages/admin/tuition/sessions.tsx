@@ -200,7 +200,7 @@ export default function AdminTuitionSessionsPage() {
                 actions={
                   <>
                     {/* Only ever an override. `is_billable` is null until
-                        somebody sets it, and null means "as the fee plan says". */}
+                        somebody sets it, and null means "as the package says". */}
                     <Button
                       variant="outline"
                       size="sm"

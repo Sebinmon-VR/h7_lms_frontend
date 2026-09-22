@@ -1,9 +1,11 @@
 import type {
-  FeeBasis,
+  AcademicTerm,
   InvoiceOut,
   InvoiceStatus,
   LibraryApprovalStatus,
   LibraryVisibility,
+  PackageBillingMode,
+  PackageStatusOut,
   Program,
   TuitionAssessmentCategory,
   TuitionAttendanceTotals,
@@ -152,23 +154,56 @@ export const ASSESSMENT_CATEGORIES = Object.keys(
   ASSESSMENT_CATEGORY_LABEL,
 ) as TuitionAssessmentCategory[]
 
-export const FEE_BASIS_LABEL: Record<FeeBasis, string> = {
-  PER_SESSION: 'Per class',
-  HOURLY: 'Per hour taught',
-  MONTHLY: 'Monthly retainer',
+export const BILLING_MODE_LABEL: Record<PackageBillingMode, string> = {
+  PER_CLASS: 'Per class attended',
+  PACKAGE: 'Whole package per term',
 }
 
 /**
- * What each basis actually counts, spelled out where an admin picks one.
+ * What each mode actually charges, spelled out where an admin picks one.
  *
- * HOURLY bills the minutes actually taught, which differ from the scheduled
- * minutes whenever a teacher was late and the class ran on — that is the whole
- * reason it is a separate basis and not a rename of PER_SESSION.
+ * The package is the same either way — "30 classes for 15,000" — and the mode
+ * decides WHEN the money is asked for, which is the question a parent asks.
  */
-export const FEE_BASIS_HINT: Record<FeeBasis, string> = {
-  PER_SESSION: 'Counts classes that were conducted, and multiplies.',
-  HOURLY: 'Counts the minutes actually taught, not the minutes scheduled.',
-  MONTHLY: 'A flat amount for the period, however many classes ran.',
+export const BILLING_MODE_HINT: Record<PackageBillingMode, string> = {
+  PER_CLASS:
+    'Each invoice bills the classes attended in its period at the per-class rate. The 30 is the allowance the usage is reported against.',
+  PACKAGE:
+    'The whole amount is billed on the first invoice of the term. Later invoices in the term bill only classes beyond the allowance.',
+}
+
+export const BILLING_MODES = Object.keys(BILLING_MODE_LABEL) as PackageBillingMode[]
+
+export const TERM_LABEL: Record<AcademicTerm, string> = {
+  TERM_1: 'Term 1',
+  TERM_2: 'Term 2',
+}
+
+export const TERMS = Object.keys(TERM_LABEL) as AcademicTerm[]
+
+/**
+ * "14 of 30 classes used, 16 remaining" — the one line every package screen
+ * needs, derived the same way everywhere so the student and the office read
+ * the same sentence. Over the allowance, it says so rather than going negative.
+ */
+export function packageUsageLabel(status: Pick<
+  PackageStatusOut,
+  'classes_included' | 'classes_used_to_date' | 'classes_remaining' | 'classes_over'
+>): string {
+  const included = status.classes_included
+  if (included == null) {
+    return `${status.classes_used_to_date} class${status.classes_used_to_date === 1 ? '' : 'es'} taken`
+  }
+  if (status.classes_over > 0) {
+    return `${status.classes_used_to_date} of ${included} classes used — ${status.classes_over} over the allowance`
+  }
+  return `${status.classes_used_to_date} of ${included} classes used, ${status.classes_remaining ?? 0} remaining`
+}
+
+/** 0–100 for a usage bar; capped at 100 so overage reads as full, not broken. */
+export function packageUsagePercent(used: number, included: number | null | undefined): number {
+  if (!included || included <= 0) return 0
+  return Math.min(100, Math.round((used / included) * 100))
 }
 
 // ---------------------------------------------------------------- sessions

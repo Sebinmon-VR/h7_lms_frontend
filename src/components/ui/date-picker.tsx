@@ -65,7 +65,7 @@ export function DatePicker({
           disabled={disabled}
           aria-invalid={invalid || undefined}
           className={cn(
-            'flex h-9.5 w-full items-center gap-2 rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs transition-colors',
+            'flex h-9.5 w-full items-center gap-2 rounded-md border border-input bg-card px-3.5 py-2 text-sm shadow-xs transition-[color,background-color,border-color,box-shadow] hover:border-primary/35 focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/15 focus-visible:ring-offset-0',
             'disabled:cursor-not-allowed disabled:opacity-60',
             invalid && 'border-danger',
             className,
@@ -151,7 +151,7 @@ export function DateTimePicker({
         onChange(Number.isNaN(d.getTime()) ? null : d.toISOString())
       }}
       className={cn(
-        'h-9.5 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-xs transition-colors',
+        'h-9.5 w-full rounded-md border border-input bg-card px-3.5 py-2 text-sm shadow-xs transition-[color,background-color,border-color,box-shadow] hover:border-primary/35 focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/15 focus-visible:ring-offset-0',
         'disabled:cursor-not-allowed disabled:opacity-60',
         invalid && 'border-danger',
       )}

@@ -28,13 +28,29 @@ export * from './tuition.types'
 import type { Program, TuitionAssessmentCategory } from './tuition.types'
 
 /**
+ * The school modules added in the September release — admissions, families,
+ * notices, finance, live-class timing, extra classes, the calendar, homework,
+ * leave, support and oversight. Next door for size, re-exported here for the
+ * same reason as the tuition types: one import surface for the whole app.
+ */
+export * from './school.types'
+
+/**
  * `CLASS_TEACHER` is a TEACHER with extra reach, not a separate kind of user.
  * They take periods, own subject mappings and appear on the timetable exactly
  * like a TEACHER, so anything asking "may this user own a teaching record?"
  * must accept both — see `TEACHING_ROLES` in `lib/constants`. Testing
  * `role === 'TEACHER'` is the bug this role introduces.
+ *
+ * `PARENT` is a guardian's OWN login, linked to one or more student profiles
+ * rather than being one of them. It reaches almost nothing directly: a parent's
+ * home is `GET /parent/children`, and what they may see of each child is
+ * decided by that link's per-aspect flags, not by the role. The bug this one
+ * introduces is an exhaustive switch — a role picker, a badge colour map, a
+ * navigation table — with no branch for it, which lands every parent on
+ * whatever the default case happens to do.
  */
-export type UserRole = 'ADMIN' | 'CLASS_TEACHER' | 'TEACHER' | 'STUDENT'
+export type UserRole = 'ADMIN' | 'CLASS_TEACHER' | 'TEACHER' | 'STUDENT' | 'PARENT'
 
 export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED'
 
@@ -110,7 +126,15 @@ export interface UserProfileFields {
   postal_code?: string | null
   country?: string | null
 
-  /** Unique per school. */
+  /**
+   * Unique per school.
+   *
+   * Under the default `admission_id_mode: AUTO`, leaving this blank on
+   * `POST /admin/users` gets one issued (`ADM-2026-0001`) — the same is true of
+   * `employee_id`. A value you send is always kept, so a migration carrying
+   * historical numbers is unaffected. Either way the RESPONSE carries what was
+   * assigned: read it back rather than assuming the field is still empty.
+   */
   admission_number?: string | null
   /** Unique within a class, not globally. */
   roll_number?: string | null
@@ -120,6 +144,35 @@ export interface UserProfileFields {
   guardian_phone?: string | null
   guardian_email?: string | null
   guardian_relation?: string | null
+
+  /**
+   * Which intake this student belongs to. Ids into the admissions module, both
+   * optional — a school that has not set admissions up must still be able to
+   * enroll. `POST /admin/users` fills `academic_year_id` with the current year
+   * when a student is created without one, so read the response back rather
+   * than assuming it stayed empty.
+   */
+  academic_year_id?: number | null
+  /** Carries any standing fee concession — see `AdmissionCategoryOut`. */
+  admission_category_id?: number | null
+  /**
+   * The year the student FIRST joined. Set on admission and left alone by
+   * promotion, unlike `academic_year_id`. The one-time admission charge is
+   * billed in this year only.
+   */
+  admission_year_id?: number | null
+
+  /**
+   * What the student is studying. Free text rather than an id: schools name
+   * these inconsistently ("CBSE", "State Board Plus Two") and a reference
+   * table nobody maintains is worse than a label. Drives the tuition library's
+   * syllabus filter when that setting is on.
+   */
+  syllabus?: string | null
+  /** e.g. Science, Commerce, Humanities. */
+  academic_stream?: string | null
+  /** Language of instruction. */
+  medium?: string | null
 
   /** Unique per school. */
   employee_id?: string | null

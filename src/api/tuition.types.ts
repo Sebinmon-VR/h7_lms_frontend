@@ -10,6 +10,10 @@ import type {
   ReportCardOut,
   SubjectOut,
 } from './types'
+// Imported from its own module rather than through the `types` barrel: this
+// file is one of the two that barrel re-exports, and going back through it
+// would make the cycle a real one at type-resolution time.
+import type { IdentifierMode } from './school.types'
 
 /**
  * Online tuition.
@@ -49,6 +53,8 @@ import type {
  */
 export type Program = 'LMS' | 'TUITION'
 
+import type { AcademicTerm, CurrencyOptionOut } from './school.types'
+
 export type TuitionEnrollmentStatus = 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'CANCELLED'
 
 /**
@@ -79,7 +85,15 @@ export type TuitionMaterialType =
   | 'WORKSHEET'
   | 'QUESTION_PAPER'
 
-export type FeeBasis = 'PER_SESSION' | 'HOURLY' | 'MONTHLY'
+/**
+ * How a package turns into a bill.
+ *
+ * PER_CLASS bills the classes attended each period at the package's per-class
+ * rate (`amount / classes_included`); PACKAGE bills the whole amount once per
+ * term, then only classes beyond the allowance. Same package either way — the
+ * mode decides WHEN the money is asked for, not what it buys.
+ */
+export type PackageBillingMode = 'PER_CLASS' | 'PACKAGE'
 
 export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'PARTIALLY_PAID' | 'PAID' | 'CANCELLED'
 
@@ -177,7 +191,6 @@ export interface TuitionEnrollmentCreate {
   grade_level?: string | null
   /** Class length for this arrangement; falls back to the programme default. */
   default_duration_minutes?: number | null
-  fee_plan_id?: number | null
   start_date?: ApiDate | null
   end_date?: ApiDate | null
   notes?: string | null
@@ -191,7 +204,6 @@ export interface TuitionEnrollmentUpdate {
   goals?: string | null
   grade_level?: string | null
   default_duration_minutes?: number | null
-  fee_plan_id?: number | null
   start_date?: ApiDate | null
   end_date?: ApiDate | null
   notes?: string | null
@@ -212,7 +224,6 @@ export interface TuitionEnrollmentOut {
   goals?: string | null
   grade_level?: string | null
   default_duration_minutes?: number | null
-  fee_plan_id?: number | null
   start_date?: ApiDate | null
   end_date?: ApiDate | null
   notes?: string | null
@@ -492,6 +503,15 @@ export interface LibraryLinkCreate {
   visibility?: LibraryVisibility
   shared_with_user_ids?: number[]
   tags?: string[]
+  /**
+   * Which syllabus this material is for — CBSE, ICSE, IGCSE. A LIST, because
+   * one worksheet genuinely serves two boards.
+   *
+   * Empty means GENERAL: when `library_syllabus_filter` is on, untagged
+   * material stays visible to everybody rather than disappearing, so turning
+   * the filter on does not blank a library built before anybody was tagging.
+   */
+  syllabus?: string[]
   external_url: string
 }
 
@@ -508,6 +528,15 @@ export interface LibraryUploadForm {
   enrollment_id?: number | null
   visibility?: LibraryVisibility
   tags?: string[]
+  /**
+   * Which syllabus this material is for — CBSE, ICSE, IGCSE. A LIST, because
+   * one worksheet genuinely serves two boards.
+   *
+   * Empty means GENERAL: when `library_syllabus_filter` is on, untagged
+   * material stays visible to everybody rather than disappearing, so turning
+   * the filter on does not blank a library built before anybody was tagging.
+   */
+  syllabus?: string[]
   shared_with_user_ids?: number[]
 }
 
@@ -523,6 +552,15 @@ export interface LibraryItemUpdate {
   visibility?: LibraryVisibility
   shared_with_user_ids?: number[]
   tags?: string[]
+  /**
+   * Which syllabus this material is for — CBSE, ICSE, IGCSE. A LIST, because
+   * one worksheet genuinely serves two boards.
+   *
+   * Empty means GENERAL: when `library_syllabus_filter` is on, untagged
+   * material stays visible to everybody rather than disappearing, so turning
+   * the filter on does not blank a library built before anybody was tagging.
+   */
+  syllabus?: string[]
   external_url?: string | null
 }
 
@@ -552,6 +590,8 @@ export interface LibraryItemOut {
   /** Set when the file fell back to local disk. It IS saved — just not where expected. */
   storage_warning?: string | null
   tags: string[]
+  /** Empty means general — shown to every syllabus. See `LibraryItemBase`. */
+  syllabus: string[]
   shared_with_user_ids: number[]
 
   uploaded_by: number
@@ -670,34 +710,127 @@ export interface TuitionReportCardResult {
 
 // ----------------------------------------------------------------- fees
 
-export interface FeePlanCreate {
+/**
+ * What a student buys: so many classes for so much, on ANY subjects.
+ *
+ * "15,000 for 30 classes" is `amount: 15000, classes_included: 30`; the
+ * per-class rate (500) is derived server-side, never typed. The fee is not per
+ * subject — a student on a package spends its classes on maths and physics
+ * alike — which is why there is no `subject_id` here and no price on an
+ * enrollment.
+ */
+export interface TuitionPackageCreate {
   name: string
-  basis?: FeeBasis
+  /** The package price, in the base currency. */
   amount: number
+  /** Classes the package buys, across every subject. */
+  classes_included: number
   currency?: string | null
-  /** Scopes the plan to one subject; null is the programme default plan. */
-  subject_id?: number | null
-  /** Charged for a class the student missed. Null bills it in full. */
-  no_show_amount?: number | null
-  charge_teacher_no_show?: boolean
+  billing_mode?: PackageBillingMode
+  /**
+   * Scopes the package to one session year; null offers it in every year.
+   * The year must include TUITION in its programs or the backend answers 400.
+   */
+  academic_year_id?: number | null
+  /** Scopes it to Term 1 or Term 2; null offers it in both. */
+  term?: AcademicTerm | null
+  /** Cap on concurrent subjects for a student on this package. Null is no cap. */
+  max_subjects?: number | null
+  /**
+   * Whether a class the student missed without notice still uses up one of
+   * the package's classes. On by default: the teacher turned up and the slot
+   * was spent.
+   */
+  count_missed_classes?: boolean
   is_active?: boolean
   notes?: string | null
 }
 
-export type FeePlanUpdate = Partial<FeePlanCreate>
+export type TuitionPackageUpdate = Partial<TuitionPackageCreate>
 
-export interface FeePlanOut {
+export interface TuitionPackageOut {
   id: number
   name: string
-  basis: FeeBasis
   amount: number
+  classes_included: number
+  /** `amount / classes_included` — what one class of the allowance costs. */
+  per_class_amount: number
   currency: string
-  subject_id?: number | null
-  no_show_amount?: number | null
-  charge_teacher_no_show: boolean
+  billing_mode: PackageBillingMode
+  academic_year_id?: number | null
+  academic_year_name?: string | null
+  term?: AcademicTerm | null
+  term_name?: string | null
+  max_subjects?: number | null
+  count_missed_classes: boolean
   is_active: boolean
   notes?: string | null
+  /** How many students are currently on it. */
+  students_assigned: number
   created_at?: ApiDateTime | null
+  updated_at?: ApiDateTime | null
+}
+
+/**
+ * Puts a student on a package for a term. `PUT /admin/tuition/students/{id}/package`.
+ *
+ * Only `package_id` is required. Year and term default from the package's own
+ * scope, else from the calendar (the term today is in), and the dates default
+ * to that term's. Assigning again for the same year and term REPLACES the
+ * earlier assignment — a new term needs a new assignment, which is what starts
+ * a fresh allowance.
+ */
+export interface PackageAssignmentCreate {
+  package_id: number
+  academic_year_id?: number | null
+  term?: AcademicTerm | null
+  starts_on?: ApiDate | null
+  ends_on?: ApiDate | null
+  notes?: string | null
+}
+
+export interface PackageAssignmentOut {
+  id: number
+  student_id: number
+  student_name?: string | null
+  package_id: number
+  package_name?: string | null
+  package_amount: number
+  classes_included: number
+  billing_mode?: PackageBillingMode | null
+  currency?: string | null
+  academic_year_id?: number | null
+  academic_year_name?: string | null
+  term?: AcademicTerm | null
+  term_name?: string | null
+  starts_on?: ApiDate | null
+  ends_on?: ApiDate | null
+  is_active: boolean
+  notes?: string | null
+  assigned_by?: number | null
+  created_at?: ApiDateTime | null
+  ended_at?: ApiDateTime | null
+}
+
+/**
+ * Where a student stands on their package as of a date.
+ *
+ * `assignment` and `package` are NULL when nothing is assigned — the normal
+ * state of a student admitted this morning, not an error. Render "no package
+ * yet" rather than a failure.
+ */
+export interface PackageStatusOut {
+  student_id: number
+  as_of: ApiDate
+  assignment?: PackageAssignmentOut | null
+  package?: TuitionPackageOut | null
+  /** Where the usage count starts — the term's first day, normally. */
+  usage_from?: ApiDate | null
+  usage_to?: ApiDate | null
+  classes_included?: number | null
+  classes_used_to_date: number
+  classes_remaining?: number | null
+  classes_over: number
 }
 
 /** Builds a bill from counted classes. Refuses to overwrite one already issued. */
@@ -705,10 +838,166 @@ export interface InvoiceGenerate {
   student_id: number
   period_start: ApiDate
   period_end: ApiDate
+  /** Manual adjustment for the period, in the BASE currency. */
   discount_amount?: number
-  tax_amount?: number
+  /**
+   * Overrides the computed tax. Omit to use the currency's own settings.
+   *
+   * Null rather than zero by default, deliberately: a default of zero would
+   * read as "charge no tax" and silently switch the setting off for every bill.
+   */
+  tax_amount?: number | null
+  /** Bill in this currency. The rate is FROZEN when the invoice is issued. */
+  currency?: string | null
   due_date?: ApiDate | null
   notes?: string | null
+}
+
+/**
+ * One subject's share of the classes on a package line.
+ *
+ * Counts only — the money is on the package, not the subject — but these are
+ * what let a family check "14 classes" against the timetable: 6 English,
+ * 5 Maths, 3 Science.
+ */
+export interface SubjectUsageOut {
+  enrollment_id: number | string
+  subject_id?: number | null
+  subject_name?: string | null
+  subject_code?: string | null
+  teacher_id?: number | null
+  teacher_name?: string | null
+  /** Classes this subject spent from the package in the period. */
+  classes_counted: number
+  sessions_conducted: number
+  sessions_billable: number
+  sessions_attended: number
+  sessions_missed: number
+  sessions_cancelled: number
+  teacher_no_show: number
+  taught_minutes: number
+}
+
+/**
+ * THE package line on a tuition bill, with the counts it was priced from.
+ *
+ * One line per bill: the package, how many classes were counted in the period,
+ * where the student stands on the allowance, and the subjects those classes
+ * came from. Under PER_CLASS billing `amount` is `classes_billed × unit_amount`;
+ * under PACKAGE billing it is `package_amount + overage_amount`, and `note` /
+ * `already_billed_on` explain a zero package charge raised earlier in the term.
+ */
+export interface TuitionBreakdownLine {
+  package_id?: number | null
+  package_name?: string | null
+  assignment_id?: number | null
+  billing_mode?: PackageBillingMode | null
+  term?: AcademicTerm | null
+  term_name?: string | null
+
+  classes_included?: number | null
+  /** The per-class rate, in the displayed currency. */
+  unit_amount?: number | null
+  unit_label?: string | null
+  quantity: number
+  classes_billed: number
+  classes_used_before_period: number
+  classes_used_to_date: number
+  classes_remaining?: number | null
+  usage_from?: ApiDate | null
+
+  package_amount: number
+  overage_classes: number
+  overage_amount: number
+  already_billed_on?: string | null
+  note?: string | null
+
+  /** The same figures BEFORE conversion, so a payer can see where they came from. */
+  base_amount?: number | null
+  base_unit_amount?: number | null
+
+  sessions_conducted: number
+  sessions_billable: number
+  sessions_attended?: number | null
+  sessions_missed?: number | null
+  sessions_cancelled: number
+  teacher_no_show: number
+  taught_minutes?: number | null
+  subjects: SubjectUsageOut[]
+
+  amount: number
+  taxable: boolean
+  discount_amount: number
+  tax_amount: number
+  net_amount: number
+}
+
+/**
+ * The tuition payment page's data.
+ *
+ * Same guarantees as the school's `FeeBreakdownOut`: one computation serves the
+ * student's page, the office's preview and the invoice generator, so a preview
+ * cannot disagree with the bill that follows.
+ *
+ *   subtotal − discount_total + tax_total + convenience_total
+ *     ± rounding_adjustment = total_amount
+ *
+ * Nothing on it is OWED yet — it is what the period has accrued. The bill is
+ * the invoice.
+ */
+export interface TuitionFeeBreakdownOut {
+  student_id: number
+  student_name?: string | null
+  admission_number?: string | null
+  period_start: ApiDate
+  period_end: ApiDate
+  academic_year_id?: number | null
+  academic_year_name?: string | null
+  term?: AcademicTerm | null
+  term_name?: string | null
+
+  /**
+   * The package the period was priced against, and where the student stands
+   * on it. Null package fields mean nothing is assigned: the classes are
+   * counted but unpriced, and `detail` says so.
+   */
+  package_id?: number | null
+  package_name?: string | null
+  assignment_id?: number | null
+  billing_mode?: PackageBillingMode | null
+  classes_included?: number | null
+  classes_billed: number
+  classes_used_to_date: number
+  classes_remaining?: number | null
+  subjects: SubjectUsageOut[]
+
+  currency: string
+  currency_symbol?: string | null
+  base_currency?: string | null
+  exchange_rate: number
+  available_currencies: string[]
+  /**
+   * The switcher. Each option carries its own tax and surcharge rules AND what
+   * this period would come to in it, so the page can show "INR (recommended) ·
+   * AED · USD" with totals before the payer picks. The base is recommended.
+   */
+  recommended_currency?: string | null
+  currency_options?: CurrencyOptionOut[]
+
+  line_items: TuitionBreakdownLine[]
+  subtotal: number
+  discount_total: number
+  taxable_base: number
+  tax_total: number
+  tax_label: string
+  convenience_total: number
+  total_amount: number
+  rounding_adjustment: number
+
+  sessions_conducted: number
+  gateway_enabled: boolean
+  gateway_provider?: string | null
+  detail?: string | null
 }
 
 /** Bills everyone with classes in a period. Issued invoices are skipped, not failed. */
@@ -724,7 +1013,13 @@ export interface PaymentRecord {
   paid_at?: ApiDateTime | null
 }
 
-/** One priced row on an invoice. Its shape follows the fee basis, so it stays loose. */
+/**
+ * The priced row on an invoice — the package line, frozen as it was issued.
+ *
+ * Loose on purpose: an invoice raised before packages carried one row per
+ * subject with a `subject` and `basis`, and those bills must still render.
+ * New rows carry the package fields and `subjects[]` inside them.
+ */
 export interface InvoiceLineItem {
   description?: string
   subject?: string
@@ -732,7 +1027,20 @@ export interface InvoiceLineItem {
   quantity?: number
   unit_amount?: number
   amount?: number
-  basis?: FeeBasis
+  package_id?: number | null
+  package_name?: string | null
+  billing_mode?: PackageBillingMode | null
+  term_name?: string | null
+  classes_included?: number | null
+  classes_billed?: number
+  classes_used_to_date?: number
+  classes_remaining?: number | null
+  package_amount?: number
+  overage_classes?: number
+  overage_amount?: number
+  already_billed_on?: string | null
+  note?: string | null
+  subjects?: SubjectUsageOut[]
   [key: string]: unknown
 }
 
@@ -754,12 +1062,46 @@ export interface InvoiceOut {
   period_end: ApiDate
   status: InvoiceStatus
   currency: string
+  currency_symbol?: string | null
+  base_currency?: string | null
+  /** Frozen when the invoice is issued. */
+  exchange_rate?: number
+  /** What the tax line is called in this currency — "GST", "VAT". */
+  tax_label?: string | null
+  tax_is_manual?: boolean
+  taxable_base?: number
+  /** The gateway surcharge, on top of tax. */
+  convenience_amount?: number
+  /**
+   * Which session year's rates produced these figures.
+   *
+   * STORED on the invoice rather than re-derived, because a year's date range
+   * can be edited afterwards and an issued bill has to stay explicable against
+   * the rates it was actually priced from.
+   */
+  academic_year_id?: number | null
+  academic_year_name?: string | null
+  /** The term and package the bill was priced against, frozen with the figures. */
+  term?: AcademicTerm | null
+  term_name?: string | null
+  package_id?: number | null
+  package_name?: string | null
+  assignment_id?: number | null
+  billing_mode?: PackageBillingMode | null
+  classes_included?: number | null
+  classes_billed?: number
+  classes_used_to_date?: number
+  classes_remaining?: number | null
   line_items: InvoiceLineItem[]
   subtotal: number
   discount_amount: number
   tax_amount: number
   total_amount: number
   amount_paid: number
+  /** On the student's and parent's routes only; absent on the admin list. */
+  amount_outstanding?: number
+  gateway_enabled?: boolean
+  gateway_provider?: string | null
   payments: InvoicePayment[]
   issued_at?: ApiDateTime | null
   due_date?: ApiDate | null
@@ -832,8 +1174,17 @@ export interface StudentBillingAccount {
   summary: TuitionBillingSummary
 }
 
-/** An invoice line with the individual classes it was priced from. */
+/** One subject inside a detailed line, with the classes behind its count. */
+export interface SubjectUsageDetail extends SubjectUsageOut {
+  sessions: TuitionSessionOut[]
+}
+
+/**
+ * An invoice line with the individual classes it was priced from — every
+ * class on `sessions`, and the same classes grouped under each subject.
+ */
 export interface InvoiceLineDetail extends InvoiceLineItem {
+  subjects?: SubjectUsageDetail[]
   sessions: TuitionSessionOut[]
 }
 
@@ -915,7 +1266,16 @@ export interface TuitionAttendanceTotals {
 /** A per-subject or per-counterparty breakdown row: totals-shaped, plus a label. */
 export interface TuitionReportBreakdown extends Partial<TuitionAttendanceTotals> {
   subject_id?: number
-  subject?: string
+  /**
+   * The resolved name. The service hydrates it from the subject document, so
+   * it is `subject_name` — NOT `subject`, which was what this type claimed and
+   * which left every breakdown row rendering "Subject 1786685844633" through
+   * its own id fallback.
+   */
+  subject_name?: string | null
+  /** Present on a per-subject row where the arrangement is still known. */
+  enrollment_id?: number
+  enrollment_status?: string | null
   student_id?: number
   student_name?: string
   teacher_id?: number
@@ -989,8 +1349,51 @@ export interface ProgramSettingsUpdate {
   session_horizon_days?: number
   student_uploads_need_approval?: boolean
   currency?: string
-  default_session_fee?: number
   auto_create_meet?: boolean
+
+  /**
+   * Read-only library, in two independent halves. With uploads off the upload
+   * endpoints answer 403 for students; with downloads off
+   * `POST /tuition/library/{id}/download` does, and they can still view in the
+   * browser. Hide the control rather than letting the request be refused.
+   */
+  student_library_uploads_enabled?: boolean
+  student_library_downloads_enabled?: boolean
+  /**
+   * Narrows students to library items matching the `syllabus` on their
+   * profile — PLUS every untagged item, so turning it on never blanks a
+   * library built before anybody was tagging. Teachers and admins always see
+   * everything.
+   */
+  library_syllabus_filter?: boolean
+
+  /**
+   * The school's live-class clock, kept here so a student who takes both
+   * products meets one answer to "can I join yet?" rather than two. These
+   * feed `ClassTimingOut`; see it for why the join button binds to `may_join`
+   * alone.
+   */
+  join_open_minutes_before?: number
+  default_class_minutes?: number
+  join_grace_minutes?: number
+  /** Off makes an extra-class request arrive already APPROVED. */
+  extra_class_needs_approval?: boolean
+
+  /**
+   * How admission and staff numbers are issued.
+   *
+   * AUTO fills a BLANK field only — a value sent on create is always kept, so
+   * a migration carrying historical numbers works without switching to MANUAL
+   * and back. The prefixes live here rather than in the environment because a
+   * school renames its admission series far more often than it redeploys.
+   *
+   * These four are writable on the LMS programme only; sending them to
+   * TUITION is silently ignored by the backend's key allowlist.
+   */
+  admission_id_mode?: IdentifierMode
+  admission_id_prefix?: string
+  employee_id_mode?: IdentifierMode
+  employee_id_prefix?: string
 }
 
 /** GET /admin/tuition/settings/{program}. LMS reads back only the shared half. */
@@ -1023,6 +1426,22 @@ export interface TuitionProfile {
   default_session_minutes: number
   reminder_minutes_before: number[]
   server_timezone: string
+
+  /**
+   * Library policy, readable by EVERY tuition user including students.
+   *
+   * The same three values live on `/admin/tuition/settings/{program}`, which
+   * only an admin may read — so a student's client has no other way to learn
+   * the library is read-only, and would otherwise render an upload button that
+   * answers 403 when pressed.
+   *
+   * They say what is ALLOWED, never what is enforced: the backend still checks
+   * on every upload and download. Treat a missing value as permitted, the way
+   * the server's own defaults do.
+   */
+  student_library_uploads_enabled?: boolean
+  student_library_downloads_enabled?: boolean
+  library_syllabus_filter?: boolean
 }
 
 export interface TimezoneUpdate {

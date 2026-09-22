@@ -57,7 +57,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { Field } from '@/components/forms/field'
+import { Field, FormError } from '@/components/forms/field'
 import { EmptyState } from '@/components/feedback/states'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { UserCell } from '@/components/domain/user-cell'
@@ -162,12 +162,8 @@ function ClassFormDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
-          <DialogBody className="space-y-4">
-            {form.formState.errors.root && (
-              <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
-                {form.formState.errors.root.message}
-              </p>
-            )}
+          <DialogBody className="space-y-5">
+            <FormError message={form.formState.errors.root?.message} />
             <Field id="name" label="Class name" required error={form.formState.errors.name?.message}>
               <Input id="name" placeholder="Grade 10 — Section A" {...form.register('name')} />
             </Field>

@@ -617,8 +617,12 @@ export default function ExamFormPage() {
         </>
       }
     >
-      <FormSection step={1} title="What" description="Which class sits it, in which subject, and what it is called.">
-        <div className="grid gap-4 sm:grid-cols-2">
+      {/* Stacked, not the section's default grid: this form pairs its own fields
+          (class + subject, opens + closes) and gives title and mode the full
+          width. Inside a three-column grid each pair would get a third of the
+          row and each field a sixth. */}
+      <FormSection step={1} columns={1} title="What" description="Which class sits it, in which subject, and what it is called.">
+        <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
           <Field id="exam-class" label="Class" required error={showError('classId')}>
             <Combobox
               id="exam-class"
@@ -705,7 +709,7 @@ export default function ExamFormPage() {
           />
         </Field>
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
           <Field id="exam-description" label="Description" hint="What the exam covers. Shown to students.">
             <Textarea
               id="exam-description"
@@ -729,10 +733,11 @@ export default function ExamFormPage() {
 
       <FormSection
         step={2}
+        columns={1}
         title="When"
         description="The window bounds when anyone may sit it; the duration limits each student once they start."
       >
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
           <Field id="exam-starts" label="Opens" required error={showError('startsAt')} hint="Shown to students in their own timezone.">
             <DateTimePicker id="exam-starts" value={form.startsAt} onChange={(v) => set('startsAt', v)} invalid={!!showError('startsAt')} />
           </Field>
@@ -740,7 +745,7 @@ export default function ExamFormPage() {
             <DateTimePicker id="exam-ends" value={form.endsAt} onChange={(v) => set('endsAt', v)} invalid={!!showError('endsAt')} />
           </Field>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
           <Field
             id="exam-duration"
             label="Time per student"
@@ -790,6 +795,7 @@ export default function ExamFormPage() {
 
       <FormSection
         step={3}
+        columns={1}
         title="Marking"
         description="How a valued script is reported. Fixed once scripts are handed in, so half a class is never marked one way and half another."
       >
@@ -820,7 +826,7 @@ export default function ExamFormPage() {
             className={cn(handedIn && 'pointer-events-none opacity-60')}
           />
         </Field>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
           <Field
             id="exam-max"
             label="Out of"
@@ -876,7 +882,7 @@ export default function ExamFormPage() {
         </label>
       </FormSection>
 
-      <FormSection step={4} title="Options">
+      <FormSection step={4} columns={1} title="Options">
         <label className="flex items-start gap-3 rounded-lg border border-border px-3 py-2.5">
           <Switch checked={form.shuffle} onCheckedChange={(v) => set('shuffle', v)} className="mt-0.5" />
           <span className="text-sm">

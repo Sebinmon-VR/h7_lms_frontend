@@ -7,10 +7,11 @@ import { useTheme, type ThemeMode } from '@/providers/theme-provider'
 import { formatDateTime } from '@/lib/datetime'
 import { API_BASE } from '@/lib/env'
 import { cn } from '@/lib/cn'
+import { ROLE_LABEL } from '@/lib/constants'
 import { Avatar } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Separator } from '@/components/ui/separator'
 import { RoleBadge, ActiveBadge } from '@/components/domain/badges'
 import { ProfileSummary } from '@/components/domain/profile-summary'
 import { PageHeader } from '@/components/layout/page-header'
@@ -69,38 +70,68 @@ export default function ProfilePage() {
                 : 'Your details are managed by an administrator. Names, emails and passwords cannot be changed from here.'}
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-5">
-            <div className="flex items-center gap-4">
-              <Avatar name={user?.full_name} size="xl" />
-              <div className="min-w-0">
-                <p className="truncate text-lg font-semibold">{user?.full_name ?? '—'}</p>
-                <p className="truncate text-sm text-muted-foreground">{user?.email || 'No email on record'}</p>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  {user?.role && <RoleBadge role={user.role} />}
-                  {user && <ActiveBadge active={user.is_active} />}
+          <CardContent className="space-y-6">
+            {/* An identity banner rather than an avatar sitting on a white
+                card. Who you are is the one thing this page is certain of, so
+                it gets the visual weight — everything under it is detail. */}
+            <div className="relative -mx-6 -mt-6 overflow-hidden border-b border-border bg-muted/40 px-6 py-6">
+              <div
+                className="pointer-events-none absolute -right-10 -top-16 size-48 rounded-full opacity-40 blur-3xl"
+                style={{
+                  background:
+                    'radial-gradient(circle, hsl(var(--primary) / 0.45), transparent 70%)',
+                }}
+                aria-hidden
+              />
+              <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center">
+                <Avatar name={user?.full_name} src={user?.photo_url} size="xl" />
+                <div className="min-w-0">
+                  <h2 className="truncate text-xl font-semibold tracking-tight">
+                    {user?.full_name ?? '—'}
+                  </h2>
+                  <p className="truncate text-sm text-muted-foreground">
+                    {user?.email || 'No email on record'}
+                  </p>
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                    {user?.role && <RoleBadge role={user.role} />}
+                    {user && <ActiveBadge active={user.is_active} />}
+                    {user?.admission_number && (
+                      <Badge tone="outline" size="sm">
+                        {user.admission_number}
+                      </Badge>
+                    )}
+                    {user?.employee_id && (
+                      <Badge tone="outline" size="sm">
+                        {user.employee_id}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
 
-            <Separator />
-
-            <dl className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-muted-foreground">Member since</dt>
-                <dd className="mt-1 text-sm">{formatDateTime(user?.created_at)}</dd>
+            <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+              <div className="space-y-1">
+                <dt className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Member since
+                </dt>
+                <dd className="text-sm font-medium">{formatDateTime(user?.created_at)}</dd>
               </div>
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-muted-foreground">Role</dt>
-                <dd className="mt-1 text-sm">
-                  {user?.role ?? '—'}
-                  <span className="ml-2 text-xs text-muted-foreground">(set by an administrator)</span>
+              <div className="space-y-1">
+                <dt className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Role
+                </dt>
+                <dd className="text-sm font-medium">
+                  {user?.role ? ROLE_LABEL[user.role] : '—'}
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                    set by an administrator
+                  </span>
                 </dd>
               </div>
             </dl>
 
             {user && (
               <>
-                <Separator />
                 <ProfileSummary user={user} />
                 {/*
                   Read-only on purpose, not an oversight: profile detail and the

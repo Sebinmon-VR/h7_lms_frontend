@@ -162,13 +162,13 @@ function GenerateDialog({
             overwrites the previous version.
           </DialogDescription>
         </DialogHeader>
-        <DialogBody className="space-y-4">
+        <DialogBody className="space-y-5">
           {error && (
             <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger" role="alert">
               {error}
             </p>
           )}
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
             <Field id="rc-class" label="Class" required>
               <Combobox
                 id="rc-class"
@@ -183,7 +183,7 @@ function GenerateDialog({
               <Input id="rc-title" value={title} onChange={(e) => setTitle(e.target.value)} />
             </Field>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
             <Field id="rc-from" label="Exams from" hint="Leave blank for no lower bound.">
               <DatePicker id="rc-from" value={fromDate} onChange={setFromDate} placeholder="Start of period" />
             </Field>
@@ -496,7 +496,7 @@ function RemarksDialog({
           <DialogTitle>Remarks</DialogTitle>
           <DialogDescription>The marks are a snapshot and cannot be edited here. Correct the script and re-issue the card instead.</DialogDescription>
         </DialogHeader>
-        <DialogBody className="space-y-4">
+        <DialogBody className="space-y-5">
           <Field id="rc-edit-title" label="Title">
             <Input id="rc-edit-title" value={title} onChange={(e) => setTitle(e.target.value)} />
           </Field>

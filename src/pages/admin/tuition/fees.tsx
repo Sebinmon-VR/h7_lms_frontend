@@ -5,8 +5,10 @@ import {
   Download,
   FileSearch,
   FileText,
+  Package,
   Phone,
   UserRound,
+  UsersRound,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -18,30 +20,43 @@ import * as React from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 
-import type { BillingExportView, FeeBasis, FeePlanOut, InvoiceOut } from '@/api/types'
-import { useSubjects } from '@/queries/admin.queries'
+import type {
+  AcademicTerm,
+  BillingExportView,
+  InvoiceLineDetail,
+  InvoiceLineItem,
+  InvoiceOut,
+  PackageBillingMode,
+  TuitionPackageOut,
+  TuitionSessionOut,
+} from '@/api/types'
+import { useAcademicYears } from '@/queries/admissions.queries'
 import {
   useCancelInvoice,
-  useCreateFeePlan,
-  useDeleteFeePlan,
-  useFeePlans,
+  useCreatePackage,
+  useDeletePackage,
   useGenerateInvoice,
   useGenerateInvoiceBatch,
   useInvoiceDetail,
   useIssueInvoice,
+  usePackageStudents,
+  usePackages,
   useRecordPayment,
   useStudentBilling,
   useTuitionBilling,
   useTuitionExport,
   useTuitionUsers,
-  useUpdateFeePlan,
+  useUpdatePackage,
 } from '@/queries/tuition.queries'
 import { formatDate, formatDateTime } from '@/lib/datetime'
 import {
-  FEE_BASIS_HINT,
-  FEE_BASIS_LABEL,
+  BILLING_MODES,
+  BILLING_MODE_HINT,
+  BILLING_MODE_LABEL,
   INVOICE_STATUS_LABEL,
   INVOICE_STATUS_TONE,
+  TERMS,
+  TERM_LABEL,
   amountOutstanding,
   formatMoney,
   isEditableInvoice,
@@ -86,7 +101,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
-import { Field } from '@/components/forms/field'
+import { Field, FormError } from '@/components/forms/field'
 import { EmptyState } from '@/components/feedback/states'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { SessionStatusBadge } from '@/components/domain/tuition'
@@ -94,54 +109,58 @@ import { PageHeader } from '@/components/layout/page-header'
 import { PeriodPicker, useReportPeriod } from './period'
 
 /**
- * Fee plans and invoicing.
+ * Packages and invoicing.
  *
- * Billing here is derived, not typed in: a fee plan says how to price a class,
- * and generating an invoice counts the classes that were actually conducted in
- * a period and multiplies. That is why the attendance rules matter to money —
- * a class the teacher missed is not chargeable, and a class the student missed
- * generally is.
+ * The fee is a PACKAGE, not a rate per subject: a student buys "30 classes for
+ * 15,000" and spends them on whichever subjects they take. A package is
+ * assigned to a student for a term — the year runs April to March in two — and
+ * generating an invoice counts the classes actually conducted in a period
+ * against it. That is why the attendance rules matter to money: a class the
+ * teacher missed never counts, and a class the student missed generally does.
  *
  * A DRAFT is recomputed from those counts every time it is regenerated. Once
  * ISSUED the numbers are frozen, because a bill that changes after it was sent
  * is not a bill.
  */
 
-const FEE_BASES: FeeBasis[] = ['PER_SESSION', 'HOURLY', 'MONTHLY']
-
-const planSchema = z.object({
-  name: z.string().min(1, 'Name the plan').max(150),
-  basis: z.string(),
-  amount: z.string().min(1, 'Enter an amount'),
+const packageSchema = z.object({
+  name: z.string().min(1, 'Name the package').max(150),
+  amount: z.string().min(1, 'Enter the price'),
+  classes_included: z.string().min(1, 'Enter how many classes it buys'),
   currency: z.string().max(8).optional(),
-  subject_id: z.string().optional(),
-  no_show_amount: z.string().optional(),
-  charge_teacher_no_show: z.boolean(),
+  billing_mode: z.string(),
+  academic_year_id: z.string().optional(),
+  term: z.string().optional(),
+  max_subjects: z.string().optional(),
+  count_missed_classes: z.boolean(),
   is_active: z.boolean(),
   notes: z.string().max(1000).optional(),
 })
-type PlanValues = z.infer<typeof planSchema>
+type PackageValues = z.infer<typeof packageSchema>
 
-function FeePlanDialog({
+function PackageDialog({
   open,
   onOpenChange,
   editing,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
-  editing: FeePlanOut | null
+  editing: TuitionPackageOut | null
 }) {
-  const subjects = useSubjects(open)
-  const create = useCreateFeePlan()
-  const update = useUpdateFeePlan()
+  // Only tuition years can scope a package — the backend refuses a
+  // school-only year with a 400 rather than letting the package never resolve.
+  const years = useAcademicYears({ program: 'TUITION' }, open)
+  const create = useCreatePackage()
+  const update = useUpdatePackage()
 
-  const form = useForm<PlanValues>({
-    resolver: zodResolver(planSchema),
+  const form = useForm<PackageValues>({
+    resolver: zodResolver(packageSchema),
     defaultValues: {
       name: '',
-      basis: 'PER_SESSION',
       amount: '',
-      charge_teacher_no_show: false,
+      classes_included: '30',
+      billing_mode: 'PER_CLASS',
+      count_missed_classes: true,
       is_active: true,
     },
   })
@@ -150,41 +169,50 @@ function FeePlanDialog({
     if (!open) return
     form.reset({
       name: editing?.name ?? '',
-      basis: editing?.basis ?? 'PER_SESSION',
       amount: editing ? String(editing.amount) : '',
+      classes_included: editing ? String(editing.classes_included) : '30',
       currency: editing?.currency ?? '',
-      subject_id: editing?.subject_id ? String(editing.subject_id) : '',
-      no_show_amount: editing?.no_show_amount != null ? String(editing.no_show_amount) : '',
-      charge_teacher_no_show: editing?.charge_teacher_no_show ?? false,
+      billing_mode: editing?.billing_mode ?? 'PER_CLASS',
+      academic_year_id: editing?.academic_year_id ? String(editing.academic_year_id) : '',
+      term: editing?.term ?? '',
+      max_subjects: editing?.max_subjects != null ? String(editing.max_subjects) : '',
+      count_missed_classes: editing?.count_missed_classes ?? true,
       is_active: editing?.is_active ?? true,
       notes: editing?.notes ?? '',
     })
   }, [open, editing, form])
 
-  const basis = form.watch('basis') as FeeBasis
+  const mode = form.watch('billing_mode') as PackageBillingMode
+  // The rate is derived, never typed — shown live so "15,000 for 30" reads
+  // as "500 a class" before the admin has saved anything.
+  const amount = Number(form.watch('amount'))
+  const classes = Number(form.watch('classes_included'))
+  const perClass = amount > 0 && classes > 0 ? amount / classes : null
 
-  const onSubmit = async (values: PlanValues) => {
+  const onSubmit = async (values: PackageValues) => {
     const body = {
       name: values.name,
-      basis: values.basis as FeeBasis,
       amount: Number(values.amount),
+      classes_included: Number(values.classes_included),
       currency: values.currency?.trim() || null,
-      subject_id: values.subject_id ? Number(values.subject_id) : null,
-      // Null is meaningful and is NOT the same as zero: null bills a missed
-      // class in full, zero bills nothing for it.
-      no_show_amount: values.no_show_amount === '' ? null : Number(values.no_show_amount),
-      charge_teacher_no_show: values.charge_teacher_no_show,
+      billing_mode: values.billing_mode as PackageBillingMode,
+      // Null is an UNSCOPED package, on offer in every year and both terms —
+      // not "no year".
+      academic_year_id: values.academic_year_id ? Number(values.academic_year_id) : null,
+      term: (values.term || null) as AcademicTerm | null,
+      max_subjects: values.max_subjects ? Number(values.max_subjects) : null,
+      count_missed_classes: values.count_missed_classes,
       is_active: values.is_active,
       notes: values.notes || null,
     }
 
     try {
-      if (editing) await update.mutateAsync({ planId: editing.id, body })
+      if (editing) await update.mutateAsync({ packageId: editing.id, body })
       else await create.mutateAsync(body)
       onOpenChange(false)
     } catch (error) {
       form.setError('root', {
-        message: (error as { message?: string })?.message ?? 'Could not save the fee plan.',
+        message: (error as { message?: string })?.message ?? 'Could not save the package.',
       })
     }
   }
@@ -193,110 +221,167 @@ function FeePlanDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>{editing ? 'Edit fee plan' : 'New fee plan'}</DialogTitle>
+          <DialogTitle>{editing ? 'Edit package' : 'New package'}</DialogTitle>
           <DialogDescription>
-            A plan without a subject is the programme default. One scoped to a subject overrides it
-            for that subject, and an arrangement can override both.
+            So many classes for so much, on any subjects. A student on a package spends its
+            classes on whichever subjects they take — there is no rate per subject.
           </DialogDescription>
         </DialogHeader>
 
         <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
-          <DialogBody className="space-y-4">
-            {form.formState.errors.root && (
-              <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
-                {form.formState.errors.root.message}
-              </p>
-            )}
+          <DialogBody className="space-y-5">
+            <FormError message={form.formState.errors.root?.message} />
 
-            <Field id="plan-name" label="Name" required error={form.formState.errors.name?.message}>
-              <Input id="plan-name" placeholder="Standard hourly" {...form.register('name')} />
+            <Field id="pkg-name" label="Name" required error={form.formState.errors.name?.message}>
+              <Input id="pkg-name" placeholder="Standard — 30 classes" {...form.register('name')} />
             </Field>
 
-            <Field id="basis" label="How it is worked out" required hint={FEE_BASIS_HINT[basis]}>
-              <Select value={basis} onValueChange={(v) => form.setValue('basis', v)}>
-                <SelectTrigger id="basis">
+            <div className="grid gap-x-4 gap-y-5 sm:grid-cols-3">
+              <Field
+                id="pkg-amount"
+                label="Price"
+                required
+                error={form.formState.errors.amount?.message}
+              >
+                <Input id="pkg-amount" type="number" step="0.01" min={0} {...form.register('amount')} />
+              </Field>
+              <Field
+                id="pkg-classes"
+                label="Classes included"
+                required
+                error={form.formState.errors.classes_included?.message}
+              >
+                <Input
+                  id="pkg-classes"
+                  type="number"
+                  min={1}
+                  step={1}
+                  {...form.register('classes_included')}
+                />
+              </Field>
+              <Field id="pkg-currency" label="Currency" hint="Blank uses the programme's.">
+                <Input id="pkg-currency" placeholder="INR" maxLength={8} {...form.register('currency')} />
+              </Field>
+            </div>
+
+            <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              {perClass != null ? (
+                <>
+                  Works out at{' '}
+                  <strong className="text-foreground">
+                    {formatMoney(perClass, form.watch('currency')?.trim() || editing?.currency || 'INR')}
+                  </strong>{' '}
+                  a class. That is the rate every class is priced at.
+                </>
+              ) : (
+                'Enter a price and a class count to see the per-class rate.'
+              )}
+            </p>
+
+            <Field id="pkg-mode" label="How it is billed" required hint={BILLING_MODE_HINT[mode]}>
+              <Select value={mode} onValueChange={(v) => form.setValue('billing_mode', v)}>
+                <SelectTrigger id="pkg-mode">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {FEE_BASES.map((value) => (
+                  {BILLING_MODES.map((value) => (
                     <SelectItem key={value} value={value}>
-                      {FEE_BASIS_LABEL[value]}
+                      {BILLING_MODE_LABEL[value]}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </Field>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            {/* Scope. Blank on both means a standing offer, available in every
+                year and both terms. A term-scoped package is what "Term 1
+                2026-27 — 30 classes" is. */}
+            <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
               <Field
-                id="amount"
-                label="Amount"
-                required
-                error={form.formState.errors.amount?.message}
+                id="pkg-year"
+                label="Session year"
+                hint="Blank offers it in every year. The year must include tuition."
               >
-                <Input id="amount" type="number" step="0.01" min={0} {...form.register('amount')} />
+                <Combobox
+                  id="pkg-year"
+                  value={form.watch('academic_year_id') || null}
+                  onChange={(v) => form.setValue('academic_year_id', v)}
+                  options={[
+                    { value: '', label: 'Every year' },
+                    ...(years.data ?? []).map((y) => ({
+                      value: String(y.id),
+                      label: y.name,
+                      hint: y.is_current ? 'current' : undefined,
+                    })),
+                  ]}
+                  placeholder="Every year"
+                />
               </Field>
-              <Field id="currency" label="Currency" hint="Leave blank to use the programme's.">
-                <Input id="currency" placeholder="AED" maxLength={8} {...form.register('currency')} />
+              <Field id="pkg-term" label="Term" hint="Blank offers it in both terms.">
+                <Select
+                  value={form.watch('term') || 'ANY'}
+                  onValueChange={(v) => form.setValue('term', v === 'ANY' ? '' : v)}
+                >
+                  <SelectTrigger id="pkg-term">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ANY">Either term</SelectItem>
+                    {TERMS.map((term) => (
+                      <SelectItem key={term} value={term}>
+                        {TERM_LABEL[term]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
             </div>
 
-            <Field id="plan-subject" label="Subject" hint="Leave blank to make this the default plan.">
-              <Combobox
-                id="plan-subject"
-                value={form.watch('subject_id') || null}
-                onChange={(v) => form.setValue('subject_id', v)}
-                options={[
-                  { value: '', label: 'Any subject (default plan)' },
-                  ...(subjects.data ?? []).map((s) => ({
-                    value: String(s.id),
-                    label: s.name,
-                    hint: s.code,
-                  })),
-                ]}
-                placeholder="Any subject"
-              />
-            </Field>
-
             <Field
-              id="noshow"
-              label="Charge when the student misses"
-              hint="Leave blank to bill a missed class in full. Enter 0 to bill nothing for it."
+              id="pkg-max-subjects"
+              label="Most subjects at once"
+              hint="Blank is no cap. Adding a subject beyond it is refused."
             >
               <Input
-                id="noshow"
+                id="pkg-max-subjects"
                 type="number"
-                step="0.01"
-                min={0}
-                placeholder="Full amount"
-                {...form.register('no_show_amount')}
+                min={1}
+                step={1}
+                placeholder="No cap"
+                {...form.register('max_subjects')}
               />
             </Field>
 
             <label className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
               <span className="text-sm">
-                Charge when the teacher misses
+                A missed class still counts
                 <span className="block text-xs text-muted-foreground">
-                  Off by default. A class the programme failed to deliver is not normally the
-                  student's to pay for.
+                  On: a class the student skipped without notice uses one of the package's
+                  classes — the teacher turned up and the slot was spent. A class the teacher
+                  missed never counts either way.
                 </span>
               </span>
               <Switch
-                checked={form.watch('charge_teacher_no_show')}
-                onCheckedChange={(v) => form.setValue('charge_teacher_no_show', v)}
+                checked={form.watch('count_missed_classes')}
+                onCheckedChange={(v) => form.setValue('count_missed_classes', v)}
               />
             </label>
 
             <label className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
-              <span className="text-sm">Active</span>
+              <span className="text-sm">
+                Active
+                <span className="block text-xs text-muted-foreground">
+                  Inactive packages cannot be assigned. Students already on one stay on it.
+                </span>
+              </span>
               <Switch
                 checked={form.watch('is_active')}
                 onCheckedChange={(v) => form.setValue('is_active', v)}
               />
             </label>
 
-            <Field id="plan-notes" label="Notes">
-              <Textarea id="plan-notes" rows={2} {...form.register('notes')} />
+            <Field id="pkg-notes" label="Notes">
+              <Textarea id="pkg-notes" rows={2} {...form.register('notes')} />
             </Field>
           </DialogBody>
 
@@ -305,7 +390,7 @@ function FeePlanDialog({
               Cancel
             </Button>
             <Button type="submit" loading={create.isPending || update.isPending}>
-              {editing ? 'Save plan' : 'Create plan'}
+              {editing ? 'Save package' : 'Create package'}
             </Button>
           </DialogFooter>
         </DialogForm>
@@ -314,16 +399,91 @@ function FeePlanDialog({
   )
 }
 
-function FeePlansTab() {
-  const plans = useFeePlans()
-  const remove = useDeleteFeePlan()
+/** Who is on a package. Students are put on one from the Student subjects screen. */
+function PackageStudentsSheet({
+  pkg,
+  onOpenChange,
+}: {
+  pkg: TuitionPackageOut | null
+  onOpenChange: (open: boolean) => void
+}) {
+  const [includeEnded, setIncludeEnded] = React.useState(false)
+  const rows = usePackageStudents(pkg?.id ?? null, includeEnded)
+
+  return (
+    <Sheet open={!!pkg} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full sm:max-w-lg">
+        <SheetHeader>
+          <SheetTitle>{pkg ? `Students on ${pkg.name}` : 'Students'}</SheetTitle>
+        </SheetHeader>
+        <SheetBody>
+          <label className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
+            <Checkbox checked={includeEnded} onCheckedChange={(v) => setIncludeEnded(v === true)} />
+            Include past assignments
+          </label>
+          <QueryBoundary
+            query={rows}
+            loading={<Skeleton className="h-40" />}
+            isEmpty={(data) => data.length === 0}
+            empty={
+              <EmptyState
+                icon={<UsersRound />}
+                title="Nobody is on this package"
+                description="Put a student on it from Student subjects — pick the student, then Assign a package."
+              />
+            }
+          >
+            {(data) => (
+              <ul className="space-y-2">
+                {data.map((a) => (
+                  <li
+                    key={a.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">
+                        {a.student_name ?? `Student ${a.student_id}`}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {[a.academic_year_name, a.term_name].filter(Boolean).join(' · ') ||
+                          'Any term'}
+                        {a.starts_on
+                          ? ` · ${formatDate(a.starts_on)}${a.ends_on ? ` – ${formatDate(a.ends_on)}` : ''}`
+                          : ''}
+                      </p>
+                    </div>
+                    <Badge tone={a.is_active ? 'success' : 'neutral'} size="sm">
+                      {a.is_active ? 'Current' : 'Ended'}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </QueryBoundary>
+        </SheetBody>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+function PackagesTab() {
+  const packages = usePackages()
+  const remove = useDeletePackage()
   const [open, setOpen] = React.useState(false)
-  const [editing, setEditing] = React.useState<FeePlanOut | null>(null)
-  const [deleting, setDeleting] = React.useState<FeePlanOut | null>(null)
+  const [editing, setEditing] = React.useState<TuitionPackageOut | null>(null)
+  const [deleting, setDeleting] = React.useState<TuitionPackageOut | null>(null)
+  const [deleteError, setDeleteError] = React.useState<string | null>(null)
+  const [viewing, setViewing] = React.useState<TuitionPackageOut | null>(null)
 
   return (
     <>
-      <div className="mb-4 flex justify-end">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="max-w-2xl text-sm text-muted-foreground">
+          A package is what a student buys — so many classes for so much, on any subjects.
+          Put a student on one for a term from{' '}
+          <span className="font-medium text-foreground">Student subjects</span>; every
+          invoice then counts their classes against it.
+        </p>
         <Button
           onClick={() => {
             setEditing(null)
@@ -331,25 +491,25 @@ function FeePlansTab() {
           }}
         >
           <Plus />
-          New fee plan
+          New package
         </Button>
       </div>
 
       <QueryBoundary
-        query={plans}
+        query={packages}
         loading={
           <div className="grid gap-3 sm:grid-cols-2">
             {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-32" />
+              <Skeleton key={i} className="h-36" />
             ))}
           </div>
         }
         isEmpty={(data) => data.length === 0}
         empty={
           <EmptyState
-            icon={<Banknote />}
-            title="No fee plans yet"
-            description="A plan says how to price a class. Without one, nothing can be invoiced."
+            icon={<Package />}
+            title="No packages yet"
+            description="A package says what a set of classes costs — 30 classes for 15,000, say. Without one, classes are counted but nothing can be priced."
             action={
               <Button
                 onClick={() => {
@@ -358,7 +518,7 @@ function FeePlansTab() {
                 }}
               >
                 <Plus />
-                New fee plan
+                New package
               </Button>
             }
           />
@@ -366,27 +526,34 @@ function FeePlansTab() {
       >
         {(data) => (
           <div className="grid gap-3 sm:grid-cols-2">
-            {data.map((plan) => (
-              <Card key={plan.id} className="p-4">
+            {data.map((pkg) => (
+              <Card key={pkg.id} className="p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="truncate text-sm font-semibold">{plan.name}</h3>
-                      {!plan.is_active && (
+                      <h3 className="truncate text-sm font-semibold">{pkg.name}</h3>
+                      {!pkg.is_active && (
                         <Badge tone="neutral" size="sm">
                           Inactive
                         </Badge>
                       )}
-                      {!plan.subject_id && (
-                        <Badge tone="primary" size="sm">
-                          Default
-                        </Badge>
-                      )}
+                      {/* Scope, said out loud: "any year, either term" and
+                          "Term 1 of 2026-27" are opposite statements about
+                          when the offer applies, and a blank badge would make
+                          them look the same. */}
+                      <Badge tone={pkg.academic_year_id || pkg.term ? 'accent' : 'neutral'} size="sm">
+                        {[pkg.academic_year_name ?? (pkg.academic_year_id ? 'One year' : 'Every year'),
+                          pkg.term_name ?? 'either term']
+                          .join(', ')}
+                      </Badge>
                     </div>
                     <p className="mt-1 text-lg font-semibold tabular-nums">
-                      {formatMoney(plan.amount, plan.currency)}
+                      {formatMoney(pkg.amount, pkg.currency)}
                     </p>
-                    <p className="text-xs text-muted-foreground">{FEE_BASIS_LABEL[plan.basis]}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {pkg.classes_included} classes · {formatMoney(pkg.per_class_amount, pkg.currency)}{' '}
+                      a class · {BILLING_MODE_LABEL[pkg.billing_mode]}
+                    </p>
                   </div>
 
                   <DropdownMenu>
@@ -398,14 +565,24 @@ function FeePlansTab() {
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem
                         onSelect={() => {
-                          setEditing(plan)
+                          setEditing(pkg)
                           setOpen(true)
                         }}
                       >
                         <Pencil />
                         Edit
                       </DropdownMenuItem>
-                      <DropdownMenuItem destructive onSelect={() => setDeleting(plan)}>
+                      <DropdownMenuItem onSelect={() => setViewing(pkg)}>
+                        <UsersRound />
+                        Students on it
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        destructive
+                        onSelect={() => {
+                          setDeleteError(null)
+                          setDeleting(pkg)
+                        }}
+                      >
                         <Trash2 />
                         Delete
                       </DropdownMenuItem>
@@ -415,42 +592,223 @@ function FeePlansTab() {
 
                 <dl className="mt-3 space-y-1 border-t border-border/60 pt-3 text-xs">
                   <div className="flex justify-between gap-2">
-                    <dt className="text-muted-foreground">Student misses a class</dt>
-                    <dd className="tabular-nums">
-                      {plan.no_show_amount == null
-                        ? 'Billed in full'
-                        : formatMoney(plan.no_show_amount, plan.currency)}
+                    <dt className="text-muted-foreground">Students on it</dt>
+                    <dd>
+                      <button
+                        type="button"
+                        className="font-medium underline-offset-2 hover:underline"
+                        onClick={() => setViewing(pkg)}
+                      >
+                        {pkg.students_assigned}
+                      </button>
                     </dd>
                   </div>
                   <div className="flex justify-between gap-2">
-                    <dt className="text-muted-foreground">Teacher misses a class</dt>
-                    <dd>{plan.charge_teacher_no_show ? 'Billed' : 'Not billed'}</dd>
+                    <dt className="text-muted-foreground">Student misses a class</dt>
+                    <dd>{pkg.count_missed_classes ? 'Counts' : 'Not counted'}</dd>
                   </div>
+                  {pkg.max_subjects != null && (
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-muted-foreground">Most subjects at once</dt>
+                      <dd className="tabular-nums">{pkg.max_subjects}</dd>
+                    </div>
+                  )}
                 </dl>
 
-                {plan.notes && <p className="mt-2 text-xs text-muted-foreground">{plan.notes}</p>}
+                {pkg.notes && <p className="mt-2 text-xs text-muted-foreground">{pkg.notes}</p>}
               </Card>
             ))}
           </div>
         )}
       </QueryBoundary>
 
-      <FeePlanDialog open={open} onOpenChange={setOpen} editing={editing} />
+      <PackageDialog open={open} onOpenChange={setOpen} editing={editing} />
+      <PackageStudentsSheet pkg={viewing} onOpenChange={(v) => !v && setViewing(null)} />
 
+      {/* The 409 for "students are on it" is rendered inline rather than as a
+          toast: it is the expected outcome of deleting something in use, and
+          the message says what to do instead. */}
       <ConfirmDialog
         open={!!deleting}
-        onOpenChange={(v) => !v && setDeleting(null)}
+        onOpenChange={(v) => {
+          if (!v) {
+            setDeleting(null)
+            setDeleteError(null)
+          }
+        }}
         title={`Delete “${deleting?.name}”?`}
         destructive
-        confirmLabel="Delete plan"
+        confirmLabel="Delete package"
         loading={remove.isPending}
-        description="Invoices already issued keep their amounts — those were frozen when they were issued. Drafts that used this plan will need regenerating."
-        onConfirm={() => {
+        description="Refused while any student is on it — mark it inactive instead, or move them first. Invoices already issued keep their figures either way."
+        onConfirm={async () => {
           if (!deleting) return
-          remove.mutate(deleting.id, { onSuccess: () => setDeleting(null) })
+          setDeleteError(null)
+          try {
+            await remove.mutateAsync(deleting.id)
+            setDeleting(null)
+          } catch (error) {
+            setDeleteError(
+              (error as { message?: string })?.message ?? 'Could not delete the package.',
+            )
+          }
         }}
-      />
+      >
+        <FormError message={deleteError} />
+      </ConfirmDialog>
     </>
+  )
+}
+
+/**
+ * How many classes an invoice charged for.
+ *
+ * Read off the invoice when it carries the figure; summed from the lines for a
+ * bill raised before packages, where each line was a subject with a quantity.
+ */
+function invoiceClassCount(invoice: InvoiceOut): number {
+  if (invoice.classes_billed != null) return invoice.classes_billed
+  return invoice.line_items.reduce((sum, line) => sum + Number(line.quantity ?? 0), 0)
+}
+
+/**
+ * One line on an invoice card: the package with its class count and rate, and
+ * the subjects those classes came from. An older per-subject line still
+ * renders — it has no package and no subjects, and reads as it always did.
+ */
+function InvoiceLineSummary({ line, currency }: { line: InvoiceLineItem; currency: string }) {
+  const title = line.package_name ?? String(line.description ?? line.subject ?? 'Classes')
+  const classes = line.classes_billed ?? line.quantity
+  const subjects = line.subjects ?? []
+
+  return (
+    <li className="text-xs">
+      <div className="flex flex-wrap justify-between gap-2">
+        <span className="text-muted-foreground">
+          {title}
+          {classes != null ? ` × ${classes} class${classes === 1 ? '' : 'es'}` : ''}
+          {line.unit_amount != null
+            ? ` at ${formatMoney(Number(line.unit_amount), currency)}`
+            : ''}
+          {line.term_name ? ` · ${line.term_name}` : ''}
+        </span>
+        <span className="tabular-nums">{formatMoney(Number(line.amount ?? 0), currency)}</span>
+      </div>
+      {(subjects.length > 0 || line.classes_included != null) && (
+        <p className="mt-0.5 text-2xs text-muted-foreground">
+          {subjects.map((sub) => `${sub.subject_name ?? 'Subject'} ${sub.classes_counted}`).join(' · ')}
+          {line.classes_included != null
+            ? `${subjects.length ? ' — ' : ''}${line.classes_used_to_date ?? 0} of ${line.classes_included} used`
+            : ''}
+        </p>
+      )}
+      {line.note && <p className="mt-0.5 text-2xs text-muted-foreground">{line.note}</p>}
+    </li>
+  )
+}
+
+/** The classes behind a count, one row each, with the reason any one is not billed. */
+function SessionRows({ sessions }: { sessions: TuitionSessionOut[] }) {
+  if (sessions.length === 0) return null
+  return (
+    <ul className="mt-2 space-y-1">
+      {sessions.map((session) => (
+        <li key={String(session.id)} className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="tabular-nums text-muted-foreground">
+            {formatDateTime(session.scheduled_start_at_local ?? session.scheduled_start_at)}
+          </span>
+          <SessionStatusBadge session={session} />
+          {session.attendance_status && (
+            <Badge tone="outline" size="sm">
+              {session.attendance_status}
+            </Badge>
+          )}
+          {/* Explains a class that happened but is not in the total —
+              otherwise the count looks wrong. */}
+          {session.is_billable === false && (
+            <Badge tone="neutral" size="sm">
+              Not billed
+            </Badge>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/**
+ * One line of the audit sheet: the package figures, then each subject with the
+ * classes behind its count. An invoice from before packages had one line per
+ * subject and no `subjects`; its sessions hang straight off the line.
+ */
+function AuditLine({ line, currency }: { line: InvoiceLineDetail; currency: string }) {
+  const title = line.package_name ?? String(line.subject ?? line.description ?? 'Classes')
+  const classes = line.classes_billed ?? line.quantity
+  const subjects = line.subjects ?? []
+
+  return (
+    <Card className="p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold">{title}</p>
+          <p className="text-xs text-muted-foreground">
+            {classes != null ? `${classes} class${classes === 1 ? '' : 'es'}` : ''}
+            {line.unit_amount != null
+              ? ` × ${formatMoney(Number(line.unit_amount), currency)}`
+              : ''}
+            {line.billing_mode ? ` · ${BILLING_MODE_LABEL[line.billing_mode]}` : ''}
+            {line.term_name ? ` · ${line.term_name}` : ''}
+          </p>
+          {line.classes_included != null && (
+            <p className="text-xs text-muted-foreground">
+              {line.classes_used_to_date ?? 0} of {line.classes_included} classes used this term
+              {line.classes_remaining != null ? ` · ${line.classes_remaining} remaining` : ''}
+            </p>
+          )}
+          {(line.package_amount ?? 0) > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Package charge {formatMoney(Number(line.package_amount), currency)}
+              {(line.overage_classes ?? 0) > 0
+                ? ` + ${line.overage_classes} over the allowance (${formatMoney(Number(line.overage_amount ?? 0), currency)})`
+                : ''}
+            </p>
+          )}
+          {line.note && <p className="mt-1 text-xs text-muted-foreground">{line.note}</p>}
+        </div>
+        <p className="text-sm font-semibold tabular-nums">
+          {formatMoney(Number(line.amount ?? 0), currency)}
+        </p>
+      </div>
+
+      {subjects.length > 0 ? (
+        <div className="mt-3 space-y-3 border-t border-border/60 pt-3">
+          {subjects.map((sub) => (
+            <div key={String(sub.enrollment_id)}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium">
+                  {sub.subject_name ?? 'Subject'}
+                  {sub.teacher_name ? (
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {' '}· {sub.teacher_name}
+                    </span>
+                  ) : null}
+                </p>
+                <p className="text-xs tabular-nums text-muted-foreground">
+                  {sub.classes_counted} counted · {sub.sessions_attended} attended
+                  {sub.sessions_missed > 0 ? ` · ${sub.sessions_missed} missed` : ''}
+                  {sub.teacher_no_show > 0 ? ` · ${sub.teacher_no_show} teacher absent` : ''}
+                </p>
+              </div>
+              <SessionRows sessions={sub.sessions} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="border-t border-border/60 pt-1">
+          <SessionRows sessions={line.sessions} />
+        </div>
+      )}
+    </Card>
   )
 }
 
@@ -508,15 +866,7 @@ function InvoiceCard({
       {invoice.line_items.length > 0 && (
         <ul className="mt-3 space-y-1 border-t border-border/60 pt-3">
           {invoice.line_items.map((line, index) => (
-            <li key={index} className="flex flex-wrap justify-between gap-2 text-xs">
-              <span className="text-muted-foreground">
-                {String(line.description ?? line.subject ?? 'Classes')}
-                {line.quantity != null ? ` × ${line.quantity}` : ''}
-              </span>
-              <span className="tabular-nums">
-                {formatMoney(Number(line.amount ?? 0), invoice.currency)}
-              </span>
-            </li>
+            <InvoiceLineSummary key={index} line={line} currency={invoice.currency} />
           ))}
           {invoice.discount_amount > 0 && (
             <li className="flex justify-between gap-2 text-xs">
@@ -737,55 +1087,7 @@ function InvoiceAuditSheet({
                 </div>
 
                 {data.line_items.map((line, index) => (
-                  <Card key={index} className="p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">
-                          {String(line.subject ?? line.description ?? 'Classes')}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {line.quantity != null ? `${line.quantity} × ` : ''}
-                          {line.unit_amount != null
-                            ? formatMoney(Number(line.unit_amount), data.currency)
-                            : ''}
-                          {line.basis ? ` · ${FEE_BASIS_LABEL[line.basis]}` : ''}
-                        </p>
-                      </div>
-                      <p className="text-sm font-semibold tabular-nums">
-                        {formatMoney(Number(line.amount ?? 0), data.currency)}
-                      </p>
-                    </div>
-
-                    {line.sessions.length > 0 && (
-                      <ul className="mt-3 space-y-1 border-t border-border/60 pt-3">
-                        {line.sessions.map((session) => (
-                          <li
-                            key={String(session.id)}
-                            className="flex flex-wrap items-center gap-2 text-xs"
-                          >
-                            <span className="tabular-nums text-muted-foreground">
-                              {formatDateTime(
-                                session.scheduled_start_at_local ?? session.scheduled_start_at,
-                              )}
-                            </span>
-                            <SessionStatusBadge session={session} />
-                            {session.attendance_status && (
-                              <Badge tone="outline" size="sm">
-                                {session.attendance_status}
-                              </Badge>
-                            )}
-                            {/* Explains a class that happened but is not in
-                                the total — otherwise the count looks wrong. */}
-                            {session.is_billable === false && (
-                              <Badge tone="neutral" size="sm">
-                                Not billed
-                              </Badge>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </Card>
+                  <AuditLine key={index} line={line} currency={data.currency} />
                 ))}
               </div>
             )}
@@ -896,8 +1198,9 @@ function StudentAccountSheet({
                           {formatDate(invoice.period_start)} – {formatDate(invoice.period_end)}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {invoice.line_items.length} line
-                          {invoice.line_items.length === 1 ? '' : 's'}
+                          {invoiceClassCount(invoice)} class
+                          {invoiceClassCount(invoice) === 1 ? '' : 'es'}
+                          {invoice.package_name ? ` · ${invoice.package_name}` : ''}
                           {invoice.due_date ? ` · due ${formatDate(invoice.due_date)}` : ''}
                         </p>
                       </div>
@@ -959,7 +1262,7 @@ function InvoicesTab() {
 
   const EXPORTS: { view: BillingExportView; label: string; hint: string }[] = [
     { view: 'summary', label: 'Invoices', hint: 'One row per invoice — reconciles to the ledger' },
-    { view: 'lines', label: 'Lines', hint: 'One row per subject, with the class counts behind it' },
+    { view: 'lines', label: 'Lines', hint: 'One row per subject inside the package line, with the class counts behind it' },
     { view: 'payments', label: 'Payments', hint: 'What has been paid and what is still owed' },
     { view: 'sessions', label: 'Classes', hint: 'Every class, with dates and attendance' },
   ]
@@ -1122,7 +1425,7 @@ function InvoicesTab() {
         title="Draft an invoice"
         confirmLabel="Draft invoice"
         loading={generateOne.isPending}
-        description={`Counts the classes conducted between ${formatDate(from)} and ${formatDate(to)} and prices them from the fee plans.`}
+        description={`Counts the classes conducted between ${formatDate(from)} and ${formatDate(to)} against the student's package. A student on no package is counted but priced at zero.`}
         onConfirm={() => {
           if (!target) return
           generateOne.mutate(
@@ -1186,19 +1489,19 @@ export default function AdminTuitionFeesPage() {
     <>
       <PageHeader
         title="Fees & invoices"
-        description="Bills are counted from classes actually conducted, then priced by the fee plan."
+        description="A student buys a package of classes and spends it on any subjects. Bills count the classes actually conducted against it."
       />
 
       <Tabs defaultValue="invoices">
         <TabsList className="mb-5">
           <TabsTrigger value="invoices">Invoices</TabsTrigger>
-          <TabsTrigger value="plans">Fee plans</TabsTrigger>
+          <TabsTrigger value="packages">Packages</TabsTrigger>
         </TabsList>
         <TabsContent value="invoices">
           <InvoicesTab />
         </TabsContent>
-        <TabsContent value="plans">
-          <FeePlansTab />
+        <TabsContent value="packages">
+          <PackagesTab />
         </TabsContent>
       </Tabs>
     </>

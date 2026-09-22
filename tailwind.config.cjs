@@ -71,8 +71,16 @@ module.exports = {
         },
       },
       spacing: {
-        // Control height that sits between h-9 and h-10 — the default field size.
-        9.5: '2.375rem',
+        /**
+         * The default control height, shared by inputs, selects, comboboxes,
+         * date pickers and medium buttons.
+         *
+         * Raised from 2.375rem: at 38px a field with 14px text has 12px of
+         * total vertical breathing room, which is what made every form in the
+         * app read as cramped. One token moves them all and keeps a button
+         * sitting flush beside the field it submits.
+         */
+        9.5: '2.625rem',
       },
       borderRadius: {
         lg: 'var(--radius)',

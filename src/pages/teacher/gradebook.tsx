@@ -37,7 +37,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { BatchProgress, useBatchRunner } from '@/components/feedback/batch-progress'
 import { EmptyState, ErrorState } from '@/components/feedback/states'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
-import { Field } from '@/components/forms/field'
+import { Field, FormError } from '@/components/forms/field'
 import { Textarea } from '@/components/ui/input'
 import { PageHeader } from '@/components/layout/page-header'
 import { ClassSubjectPicker, useClassSubjectSelection } from './class-subject-picker'
@@ -138,7 +138,7 @@ function ExamEntryDialog({
             Enter marks for the whole class in one pass. Leave a student blank to skip them.
           </DialogDescription>
         </DialogHeader>
-        <DialogBody className="space-y-4">
+        <DialogBody className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-[1fr_8rem]">
             <Field id="exam-name" label="Exam name" required>
               <Input
@@ -309,12 +309,8 @@ function EditGradeDialog({
               : undefined}
           </DialogDescription>
         </DialogHeader>
-        <DialogBody className="space-y-4">
-          {error && (
-            <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
-              {error}
-            </p>
-          )}
+        <DialogBody className="space-y-5">
+          <FormError message={error} />
 
           <div className="grid grid-cols-2 gap-4">
             <Field id="grade-marks" label="Marks obtained" required>

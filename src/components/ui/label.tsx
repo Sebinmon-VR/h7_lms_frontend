@@ -10,14 +10,17 @@ export const Label = React.forwardRef<
   <LabelPrimitive.Root
     ref={ref}
     className={cn(
-      'text-sm font-medium leading-none text-foreground peer-disabled:cursor-not-allowed peer-disabled:opacity-70',
+      // 13px against the control's 14px. See `Field` for why the label is the
+      // smaller of the two rather than the larger.
+      'block text-[0.8125rem] font-semibold leading-none tracking-tight text-foreground/90',
+      'peer-disabled:cursor-not-allowed peer-disabled:opacity-70',
       className,
     )}
     {...props}
   >
     {children}
     {required && (
-      <span className="ml-0.5 text-danger" aria-hidden>
+      <span className="ml-1 font-normal text-danger" aria-hidden>
         *
       </span>
     )}

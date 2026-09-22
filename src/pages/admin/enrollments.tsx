@@ -144,7 +144,7 @@ function EnrollDialog({
           <DialogTitle>Enroll students</DialogTitle>
           <DialogDescription>Select a class, then choose the students to add to it.</DialogDescription>
         </DialogHeader>
-        <DialogBody className="space-y-4">
+        <DialogBody className="space-y-5">
           <Field id="enroll-class" label="Class" required>
             <Combobox
               id="enroll-class"

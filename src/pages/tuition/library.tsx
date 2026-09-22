@@ -4,6 +4,7 @@ import {
   ExternalLink,
   Library,
   Link2,
+  Lock,
   MoreHorizontal,
   Pencil,
   Trash2,
@@ -27,9 +28,11 @@ import {
   useShareLibraryLink,
   useTuitionLibrary,
   useTuitionLibraryPending,
+  useTuitionProfile,
   useUpdateLibraryItem,
   useUploadLibraryItem,
 } from '@/queries/tuition.queries'
+import { cn } from '@/lib/cn'
 import { formatRelative } from '@/lib/datetime'
 import { MAX_UPLOAD_BYTES, formatFileSize, resolveFileUrl } from '@/lib/files'
 import {
@@ -47,6 +50,7 @@ import { Input, Textarea } from '@/components/ui/input'
 import { ProgressBar } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -103,6 +107,70 @@ function enrollmentOption(enrollment: TuitionEnrollmentOut, asStudent: boolean) 
   return { value: String(enrollment.id), label: `${subject}${other ? ` · ${other}` : ''}` }
 }
 
+/**
+ * Which syllabuses a piece of material is for.
+ *
+ * A LIST, because one worksheet genuinely serves two boards. Leaving it empty
+ * marks the item general — and general material stays visible to everybody
+ * when `library_syllabus_filter` is on, which is the mechanism that stops the
+ * setting blanking an existing library.
+ *
+ * The values are free text on the backend and are matched against the
+ * `syllabus` string on a student's profile, so the two have to agree
+ * character for character. Hence a fixed set of chips rather than a text box:
+ * "CBSE" here and "C.B.S.E." on a profile is a silently empty library.
+ */
+const SYLLABUS_OPTIONS = ['CBSE', 'ICSE', 'IGCSE', 'State Board', 'IB'] as const
+
+function SyllabusPicker({
+  value,
+  onChange,
+  idPrefix,
+}: {
+  value: string[]
+  onChange: (next: string[]) => void
+  idPrefix: string
+}) {
+  const toggle = (option: string) =>
+    onChange(
+      value.includes(option) ? value.filter((v) => v !== option) : [...value, option],
+    )
+
+  return (
+    <Field
+      id={`${idPrefix}-syllabus`}
+      label="Syllabus"
+      hint={
+        value.length === 0
+          ? 'None picked — shown to every student, whatever their syllabus.'
+          : 'Shown only to students on these syllabuses when syllabus filtering is on.'
+      }
+    >
+      <div className="flex flex-wrap gap-2" id={`${idPrefix}-syllabus`}>
+        {SYLLABUS_OPTIONS.map((option) => {
+          const on = value.includes(option)
+          return (
+            <button
+              key={option}
+              type="button"
+              onClick={() => toggle(option)}
+              aria-pressed={on}
+              className={cn(
+                'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                on
+                  ? 'border-primary/30 bg-primary/12 text-primary'
+                  : 'border-border bg-card text-muted-foreground hover:border-primary/40',
+              )}
+            >
+              {option}
+            </button>
+          )
+        })}
+      </div>
+    </Field>
+  )
+}
+
 function ShareDialog({
   open,
   onOpenChange,
@@ -124,6 +192,7 @@ function ShareDialog({
   const [visibility, setVisibility] = React.useState<LibraryVisibility>('ENROLLMENT')
   const [enrollmentId, setEnrollmentId] = React.useState<string | null>(null)
   const [tags, setTags] = React.useState('')
+  const [syllabus, setSyllabus] = React.useState<string[]>([])
   const [url, setUrl] = React.useState('')
   const [file, setFile] = React.useState<File | null>(null)
   const [progress, setProgress] = React.useState(0)
@@ -163,6 +232,11 @@ function ShareDialog({
         .split(',')
         .map((t) => t.trim())
         .filter(Boolean),
+      // Empty means GENERAL — shown to every syllabus. That is what keeps a
+      // library built before anybody was tagging visible once the filter is
+      // switched on, so leaving this untouched is a safe default rather than
+      // an omission.
+      syllabus,
     }
 
     if (mode === 'link') {
@@ -278,6 +352,8 @@ function ShareDialog({
           </Field>
         )}
 
+        <SyllabusPicker value={syllabus} onChange={setSyllabus} idPrefix="lib" />
+
         <Field id="lib-tags" label="Tags" hint="Comma-separated. Helps people find it.">
           <Input
             id="lib-tags"
@@ -333,6 +409,7 @@ function EditItemDialog({
   const [materialType, setMaterialType] = React.useState<TuitionMaterialType>('NOTES')
   const [visibility, setVisibility] = React.useState<LibraryVisibility>('ENROLLMENT')
   const [tags, setTags] = React.useState('')
+  const [syllabus, setSyllabus] = React.useState<string[]>([])
 
   React.useEffect(() => {
     if (!item) return
@@ -341,6 +418,7 @@ function EditItemDialog({
     setMaterialType(item.material_type)
     setVisibility(item.visibility)
     setTags(item.tags.join(', '))
+    setSyllabus(item.syllabus ?? [])
   }, [item])
 
   const REACH = ['PRIVATE', 'ENROLLMENT', 'SUBJECT', 'PROGRAM']
@@ -372,6 +450,7 @@ function EditItemDialog({
                 .split(',')
                 .map((t) => t.trim())
                 .filter(Boolean),
+              syllabus,
             },
           },
           { onSuccess: () => onOpenChange(false) },
@@ -423,6 +502,8 @@ function EditItemDialog({
           </Field>
         </div>
 
+        <SyllabusPicker value={syllabus} onChange={setSyllabus} idPrefix="edit" />
+
         <Field id="edit-tags" label="Tags" hint="Comma-separated.">
           <Input id="edit-tags" value={tags} onChange={(event) => setTags(event.target.value)} />
         </Field>
@@ -451,10 +532,17 @@ function LibraryCard({
   item,
   canModerate,
   canManage,
+  canDownload,
 }: {
   item: LibraryItemOut
   canModerate: boolean
   canManage: boolean
+  /**
+   * False when downloads are off for students. The item still renders — that
+   * is the distinction between this setting and the upload one: they may read
+   * the library, just not pull files out of it.
+   */
+  canDownload: boolean
 }) {
   const download = useDownloadLibraryItem()
   const moderate = useModerateLibraryItem()
@@ -503,8 +591,13 @@ function LibraryCard({
             <LibraryBadges item={item} />
           </div>
 
-          {item.tags.length > 0 && (
+          {(item.tags.length > 0 || item.syllabus.length > 0) && (
             <div className="mt-2 flex flex-wrap gap-1">
+              {item.syllabus.map((board) => (
+                <Badge key={board} tone="accent" size="sm">
+                  {board}
+                </Badge>
+              ))}
               {item.tags.map((tag) => (
                 <Badge key={tag} tone="outline" size="sm">
                   {tag}
@@ -525,10 +618,28 @@ function LibraryCard({
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">
-          <Button size="sm" variant="outline" loading={download.isPending} onClick={open}>
-            {isLink ? <ExternalLink /> : <Download />}
-            Open
-          </Button>
+          {/* A shared LINK is not a download — the backend gates
+              `POST /library/{id}/download`, which is what serves a stored
+              file. Blocking an external URL too would withhold something the
+              setting never covered. */}
+          {canDownload || isLink ? (
+            <Button size="sm" variant="outline" loading={download.isPending} onClick={open}>
+              {isLink ? <ExternalLink /> : <Download />}
+              Open
+            </Button>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge tone="neutral" size="sm">
+                  <Lock />
+                  View only
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>
+                Downloads are turned off for students in this programme.
+              </TooltipContent>
+            </Tooltip>
+          )}
 
           {(canModerate || canManage) && (
             <DropdownMenu>
@@ -612,9 +723,40 @@ function LibraryCard({
 export default function TuitionLibraryPage() {
   const { role, user } = useAuth()
   const canModerate = role === 'ADMIN' || role === 'TEACHER' || role === 'CLASS_TEACHER'
+  const asStudent = role === 'STUDENT'
 
   const library = useTuitionLibrary()
   const pending = useTuitionLibraryPending(canModerate)
+
+  /**
+   * Read-only mode, in two independent halves.
+   *
+   * Read from `/tuition/me`, NOT from the settings endpoint.
+   * `/admin/tuition/settings/{program}` is admin-only: a student asking for it
+   * gets a 403, the query resolves to undefined, and a permissive default then
+   * renders exactly the upload button this setting exists to remove. Which is
+   * what happened. `/tuition/me` is readable by every tuition user and carries
+   * the same three flags for this reason.
+   *
+   * Both gates apply to STUDENTS ONLY — the backend enforces them the same way
+   * and a teacher's upload is never refused.
+   *
+   * For a student an ABSENT flag reads as NOT allowed. That is the opposite of
+   * the usual "unknown means permitted" default, and deliberately so: the flag
+   * is missing exactly when the backend predates it, and the brief asks for a
+   * read-only student library — so the failure mode has to be the restrictive
+   * one. A permissive default here is what kept rendering an upload button
+   * nobody wanted. A teacher is unaffected either way, because the role check
+   * short-circuits before the flag is read.
+   *
+   * Uploads off hides the controls; downloads off leaves the item visible and
+   * takes away the button, because "they can still read it in the browser" is
+   * the whole point of that setting being separate from the first.
+   */
+  const profile = useTuitionProfile()
+  const uploadsAllowed = !asStudent || profile.data?.student_library_uploads_enabled === true
+  const downloadsAllowed =
+    !asStudent || profile.data?.student_library_downloads_enabled === true
 
   const [search, setSearch] = React.useState('')
   const [type, setType] = React.useState<TuitionMaterialType | 'ALL'>('ALL')
@@ -657,18 +799,30 @@ export default function TuitionLibraryPage() {
         title="Tuition library"
         description="Books, notes, worksheets and recordings shared across the programme."
         actions={
-          <>
-            <Button variant="outline" onClick={() => setShareMode('link')}>
-              <Link2 />
-              Share a link
-            </Button>
-            <Button onClick={() => setShareMode('file')}>
-              <Upload />
-              Upload
-            </Button>
-          </>
+          uploadsAllowed ? (
+            <>
+              <Button variant="outline" onClick={() => setShareMode('link')}>
+                <Link2 />
+                Share a link
+              </Button>
+              <Button onClick={() => setShareMode('file')}>
+                <Upload />
+                Upload
+              </Button>
+            </>
+          ) : undefined
         }
       />
+
+      {/* Said rather than left as a missing button: a student who uploaded
+          here last term needs to know the library changed, not wonder whether
+          the page is broken. */}
+      {asStudent && !uploadsAllowed && (
+        <p className="mb-4 flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          <Lock className="size-3.5 shrink-0" />
+          This library is read-only for students. Your teachers share the material here.
+        </p>
+      )}
 
       <Tabs defaultValue="all">
         <TabsList className="mb-4">
@@ -726,7 +880,9 @@ export default function TuitionLibraryPage() {
                 description={
                   search || type !== 'ALL'
                     ? 'Try a different search, or clear the filter.'
-                    : 'Share a book, a worksheet or a recording to start it off.'
+                    : uploadsAllowed
+                      ? 'Share a book, a worksheet or a recording to start it off.'
+                      : 'Your teachers have not shared anything here yet.'
                 }
                 action={
                   search || type !== 'ALL' ? (
@@ -739,12 +895,12 @@ export default function TuitionLibraryPage() {
                     >
                       Clear filters
                     </Button>
-                  ) : (
+                  ) : uploadsAllowed ? (
                     <Button onClick={() => setShareMode('file')}>
                       <Upload />
                       Upload
                     </Button>
-                  )
+                  ) : undefined
                 }
               />
             }
@@ -757,6 +913,7 @@ export default function TuitionLibraryPage() {
                     item={item}
                     canModerate={canModerate}
                     canManage={canModerate || item.uploaded_by === user?.id}
+                    canDownload={downloadsAllowed}
                   />
                 ))}
               </div>
@@ -787,7 +944,7 @@ export default function TuitionLibraryPage() {
               {(data) => (
                 <div className="space-y-3">
                   {data.map((item) => (
-                    <LibraryCard key={item.id} item={item} canModerate canManage />
+                    <LibraryCard key={item.id} item={item} canModerate canManage canDownload />
                   ))}
                 </div>
               )}
@@ -796,11 +953,17 @@ export default function TuitionLibraryPage() {
         )}
       </Tabs>
 
-      <ShareDialog
-        open={shareMode !== null}
-        onOpenChange={(open) => !open && setShareMode(null)}
-        mode={shareMode ?? 'file'}
-      />
+      {/* Gated as well as its buttons. Belt and braces: the three controls that
+          set `shareMode` are already hidden, but a dialog that can still be
+          opened by stale state is the sort of thing that survives a refactor
+          and quietly puts the upload form back in front of a student. */}
+      {uploadsAllowed && (
+        <ShareDialog
+          open={shareMode !== null}
+          onOpenChange={(open) => !open && setShareMode(null)}
+          mode={shareMode ?? 'file'}
+        />
+      )}
     </>
   )
 }

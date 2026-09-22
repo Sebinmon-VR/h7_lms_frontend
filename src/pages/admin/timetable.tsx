@@ -43,7 +43,7 @@ import {
 import { TimetableWeek } from '@/components/domain/timetable'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
-import { Field } from '@/components/forms/field'
+import { Field, FormError } from '@/components/forms/field'
 import { PageHeader } from '@/components/layout/page-header'
 
 /**
@@ -180,17 +180,13 @@ function EntryDialog({
             09:00 period stays at 09:00 through a daylight-saving change.
           </DialogDescription>
         </DialogHeader>
-        <DialogBody className="space-y-4">
-          {error && (
-            <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
-              {error}
-            </p>
-          )}
+        <DialogBody className="space-y-5">
+          <FormError message={error} />
           {clash && (
             <ClashNotice message={clash} busy={busy} onOverride={() => void submit(true)} />
           )}
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
             <Field id="tt-class" label="Class" required>
               <Combobox
                 id="tt-class"
@@ -245,7 +241,7 @@ function EntryDialog({
             />
           </Field>
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-x-4 gap-y-5 sm:grid-cols-3">
             <Field id="tt-day" label="Day" required>
               <Combobox
                 id="tt-day"
@@ -277,7 +273,7 @@ function EntryDialog({
             </Field>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
             <Field id="tt-room" label="Room" hint="Not checked for clashes — labels get reused.">
               <Input
                 id="tt-room"
@@ -296,7 +292,7 @@ function EntryDialog({
             </Field>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
             <Field id="tt-from" label="Applies from" hint="Defaults to today.">
               <Input
                 id="tt-from"
@@ -435,7 +431,7 @@ function BulkDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: b
             teachers before anything is sent.
           </DialogDescription>
         </DialogHeader>
-        <DialogBody className="space-y-4">
+        <DialogBody className="space-y-5">
           <Field
             id="bulk-text"
             label="Rows"

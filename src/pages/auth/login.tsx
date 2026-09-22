@@ -134,7 +134,7 @@ export default function LoginPage() {
           the Firebase SDK, which keeps the token refreshing in the background
           rather than expiring hard after an hour. */}
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label htmlFor="email" required>
             Email
           </Label>

@@ -70,7 +70,13 @@ export function lmsUserId(token: string): number | null {
   return Number.isFinite(fromSub) ? fromSub : null
 }
 
-const KNOWN_ROLES: readonly UserRole[] = ['ADMIN', 'CLASS_TEACHER', 'TEACHER', 'STUDENT']
+const KNOWN_ROLES: readonly UserRole[] = [
+  'ADMIN',
+  'CLASS_TEACHER',
+  'TEACHER',
+  'STUDENT',
+  'PARENT',
+]
 
 /**
  * The role claim, or null when it is absent or unrecognised.

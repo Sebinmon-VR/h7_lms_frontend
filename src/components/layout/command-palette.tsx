@@ -30,7 +30,7 @@ import { isTeachingRole } from '@/lib/constants'
 import { useAuth } from '@/providers/auth-provider'
 import { useTheme } from '@/providers/theme-provider'
 import { qk } from '@/queries/keys'
-import { navigationFor } from '@/routes/navigation'
+import { allNavSections } from '@/routes/navigation'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 
 /** Deep-links to a table pre-filtered by its `?q=` search parameter. */
@@ -62,7 +62,9 @@ export function CommandPalette({
   const { role, user, logout } = useAuth()
   const { mode, setMode } = useTheme()
 
-  const sections = navigationFor(user)
+  // Unscoped on purpose: jumping from a school screen to a tuition one is
+  // precisely what a command palette is for.
+  const sections = allNavSections(user)
 
   /**
    * Read straight from cache — never triggers a fetch.

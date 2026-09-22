@@ -44,7 +44,7 @@ import { FiledBy } from '@/components/domain/filed-by'
 import { EmptyState } from '@/components/feedback/states'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
-import { Field } from '@/components/forms/field'
+import { Field, FormError } from '@/components/forms/field'
 import { PageHeader } from '@/components/layout/page-header'
 import { useClassSubjectSelection } from './class-subject-picker'
 import { AdminTeacherNotice, useIsAdminViewingTeacher } from './teacher-guard'
@@ -178,12 +178,8 @@ function TopicFormDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
-          <DialogBody className="space-y-4">
-            {form.formState.errors.root && (
-              <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
-                {form.formState.errors.root.message}
-              </p>
-            )}
+          <DialogBody className="space-y-5">
+            <FormError message={form.formState.errors.root?.message} />
 
             {editing ? (
               // Immutable on update, so shown as context rather than as
@@ -198,7 +194,7 @@ function TopicFormDialog({
                 </Badge>
               </div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
                 <Field id="topic-class" label="Class" required error={form.formState.errors.class_id?.message}>
                   <Combobox
                     id="topic-class"
@@ -238,7 +234,7 @@ function TopicFormDialog({
               />
             </Field>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
               <Field id="topic-date" label="Date covered" required error={form.formState.errors.date_covered?.message}>
                 <DatePicker
                   id="topic-date"

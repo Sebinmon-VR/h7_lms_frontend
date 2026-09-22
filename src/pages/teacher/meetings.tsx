@@ -66,10 +66,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { MeetStatusBadge, MeetingPhaseBadge, RecordingStatusBadge } from '@/components/domain/badges'
+import { JoinClassButton, TeacherClassControls } from '@/components/domain/live-class'
 import { FiledBy } from '@/components/domain/filed-by'
 import { EmptyState, ErrorState } from '@/components/feedback/states'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
-import { Field } from '@/components/forms/field'
+import { Field, FormError } from '@/components/forms/field'
 import { PageHeader } from '@/components/layout/page-header'
 import { useClassSubjectSelection } from './class-subject-picker'
 import { AdminTeacherNotice, useIsAdminViewingTeacher } from './teacher-guard'
@@ -271,12 +272,8 @@ function MeetingFormDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
-          <DialogBody className="space-y-4">
-            {form.formState.errors.root && (
-              <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
-                {form.formState.errors.root.message}
-              </p>
-            )}
+          <DialogBody className="space-y-5">
+            <FormError message={form.formState.errors.root?.message} />
 
             {editing ? (
               // Class and subject are immutable on update, so show them as
@@ -294,7 +291,7 @@ function MeetingFormDialog({
                 </span>
               </div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
                 <Field id="meeting-class" label="Class" required error={form.formState.errors.class_id?.message}>
                   <Combobox
                     id="meeting-class"
@@ -650,14 +647,15 @@ export function MeetingCard({
               Add a link
             </Button>
           )}
+          {/* Opening and closing the class is the teacher's, and it is what
+              students are waiting on: with `auto_start_class` off — the
+              default — they sit at "waiting for the teacher" until this is
+              pressed. The control hides itself when auto-start is on. */}
+          {phase !== 'past' && <TeacherClassControls meetingId={meeting.id} />}
+
           {meeting.meeting_link && (
             <>
-              <Button asChild variant={phase === 'live' ? 'primary' : 'outline'} size="sm">
-                <a href={meeting.meeting_link} target="_blank" rel="noopener noreferrer">
-                  <Video className="size-4" />
-                  {phase === 'live' ? 'Join now' : 'Open link'}
-                </a>
-              </Button>
+              {phase !== 'past' && <JoinClassButton meetingId={meeting.id} />}
               <Button
                 variant="ghost"
                 size="icon-sm"

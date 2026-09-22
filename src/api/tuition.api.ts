@@ -2,20 +2,24 @@ import { apiClient, cleanParams, del, delWithBody, get, post, put } from './clie
 import type {
   ApiDate,
   AttendanceStatus,
+  AcademicTerm,
   ExamOut,
-  FeePlanCreate,
-  FeePlanOut,
-  FeePlanUpdate,
   InvoiceBatchGenerate,
   InvoiceBatchResult,
   InvoiceGenerate,
   InvoiceOut,
+  InvoiceStatus,
   LibraryItemOut,
   LibraryItemUpdate,
   LibraryLinkCreate,
   LibraryModeration,
   LibraryUploadForm,
   MeetingLinkUpdate,
+  PackageAssignmentCreate,
+  PackageAssignmentOut,
+  PackageStatusOut,
+  PaymentIntentCreate,
+  PaymentIntentOut,
   PaymentRecord,
   Program,
   ProgramAccessUpdate,
@@ -42,7 +46,11 @@ import type {
   TuitionEnrollmentCreate,
   TuitionEnrollmentOut,
   TuitionEnrollmentUpdate,
+  TuitionFeeBreakdownOut,
   TuitionFeeSummary,
+  TuitionPackageCreate,
+  TuitionPackageOut,
+  TuitionPackageUpdate,
   TuitionGenerateResult,
   TuitionMaintenanceSummary,
   TuitionProfile,
@@ -57,6 +65,8 @@ import type {
   TuitionSessionOut,
   TuitionSessionReschedule,
   TuitionSessionStatus,
+  StudentSubjectAdd,
+  StudentSubjectOut,
   TuitionSlotCreate,
   TuitionSlotOut,
   TuitionSlotUpdate,
@@ -103,7 +113,7 @@ const sid = (sessionId: string | number) => encodeURIComponent(String(sessionId)
  * by default. So the caller supplies a fallback rather than the download being
  * named after a random blob id.
  */
-async function downloadCsv(url: string, fallbackName: string, params?: Record<string, unknown>) {
+export async function downloadCsv(url: string, fallbackName: string, params?: Record<string, unknown>) {
   const response = await apiClient.get<Blob>(url, {
     params: params ? cleanParams(params) : undefined,
     responseType: 'blob',
@@ -222,6 +232,41 @@ export const tuitionAdminApi = {
    */
   deleteEnrollment: (enrollmentId: number) =>
     delWithBody<TuitionDeleteResult>(`/admin/tuition/enrollments/${enrollmentId}`),
+
+  // ------------------------------------------- subjects, student-first
+
+  /**
+   * The SAME records as the enrollments above, shaped the way the office
+   * thinks about them: one student, the subjects they take, who teaches each
+   * and how many classes have actually run.
+   *
+   * `session_count` paired with `conducted_count` is the useful figure — it is
+   * what tells an admin whether an arrangement is running or merely exists.
+   */
+  studentSubjects: (studentId: number) =>
+    get<StudentSubjectOut[]>(`/admin/tuition/students/${studentId}/subjects`),
+
+  /**
+   * Adds a subject. 409 when that subject already has a teacher for this
+   * student — a duplicate arrangement, not a second one.
+   *
+   * Adding a subject SCHEDULES NOTHING. Create slots afterwards or the student
+   * is enrolled with no classes, which looks identical to a working
+   * arrangement until the first week goes by empty.
+   */
+  addStudentSubject: (studentId: number, body: StudentSubjectAdd) =>
+    post<StudentSubjectOut>(`/admin/tuition/students/${studentId}/subjects`, body),
+
+  /**
+   * CANCELS the arrangement by default, keeping its history; `hardDelete`
+   * removes the record and the schedule with it. Answers with the enrollment
+   * as it now stands rather than 204.
+   */
+  removeStudentSubject: (studentId: number, subjectId: number, hardDelete = false) =>
+    delWithBody<StudentSubjectOut>(
+      `/admin/tuition/students/${studentId}/subjects/${subjectId}`,
+      { params: cleanParams({ hard_delete: hardDelete || undefined }) },
+    ),
 
   // ----------------------------------------------------------- slots
 
@@ -364,17 +409,102 @@ export const tuitionAdminApi = {
       params: cleanParams({ from_date: fromDate, to_date: toDate }),
     }),
 
-  // ------------------------------------------------------ fee plans
+  // ------------------------------------------------------- packages
 
-  createFeePlan: (body: FeePlanCreate) => post<FeePlanOut>('/admin/tuition/fee-plans', body),
-  feePlans: () => get<FeePlanOut[]>('/admin/tuition/fee-plans'),
-  updateFeePlan: (planId: number, body: FeePlanUpdate) =>
-    put<FeePlanOut>(`/admin/tuition/fee-plans/${planId}`, body),
-  deleteFeePlan: (planId: number) => del(`/admin/tuition/fee-plans/${planId}`),
+  /**
+   * The office's preview of one student's tuition fees for a period.
+   *
+   * The SAME computation the student's page and the invoice generator use, so
+   * the three cannot disagree. Bills nothing — it counts what the period
+   * accrued against the student's package.
+   */
+  feeBreakdown: (
+    studentId: number,
+    params: { periodStart: ApiDate; periodEnd: ApiDate; currency?: string },
+  ) =>
+    get<TuitionFeeBreakdownOut>(`/admin/tuition/students/${studentId}/fee-breakdown`, {
+      params: cleanParams({
+        period_start: params.periodStart,
+        period_end: params.periodEnd,
+        currency: params.currency,
+      }),
+    }),
+
+  /**
+   * Creates a package — so many classes for so much, on any subjects. The
+   * per-class rate is derived from `amount / classes_included`.
+   */
+  createPackage: (body: TuitionPackageCreate) =>
+    post<TuitionPackageOut>('/admin/tuition/packages', body),
+
+  /**
+   * Packages on offer, optionally narrowed to a year or term.
+   *
+   * An UNSCOPED package — no year, no term — appears in every year's and every
+   * term's list, because that is what it is: the offer that stands unless a
+   * narrower one is made. So filtering widens rather than narrows the answer.
+   */
+  packages: (
+    params: { academicYearId?: number; term?: AcademicTerm; includeInactive?: boolean } = {},
+  ) =>
+    get<TuitionPackageOut[]>('/admin/tuition/packages', {
+      params: cleanParams({
+        academic_year_id: params.academicYearId,
+        term: params.term,
+        include_inactive: params.includeInactive,
+      }),
+    }),
+
+  package: (packageId: number) => get<TuitionPackageOut>(`/admin/tuition/packages/${packageId}`),
+
+  updatePackage: (packageId: number, body: TuitionPackageUpdate) =>
+    put<TuitionPackageOut>(`/admin/tuition/packages/${packageId}`, body),
+
+  /** 409 while students are on it — mark it inactive instead, or reassign them. */
+  deletePackage: (packageId: number) => del(`/admin/tuition/packages/${packageId}`),
+
+  /** Who is on a package, current assignments first. */
+  packageStudents: (packageId: number, includeEnded = false) =>
+    get<PackageAssignmentOut[]>(`/admin/tuition/packages/${packageId}/students`, {
+      params: cleanParams({ include_ended: includeEnded || undefined }),
+    }),
+
+  /**
+   * Where a student stands on their package: what they are on and how much of
+   * it they have used this term. `assignment` and `package` are null — not a
+   * 404 — when nothing is assigned yet.
+   */
+  studentPackage: (studentId: number, on?: ApiDate) =>
+    get<PackageStatusOut>(`/admin/tuition/students/${studentId}/package`, {
+      params: cleanParams({ on }),
+    }),
+
+  /**
+   * Puts a student on a package for a term. Only `package_id` is required;
+   * the year, term and dates default from the package and the calendar.
+   * Assigning again for the same year and term replaces the earlier one.
+   */
+  assignPackage: (studentId: number, body: PackageAssignmentCreate) =>
+    put<PackageAssignmentOut>(`/admin/tuition/students/${studentId}/package`, body),
+
+  /** Every package a student has been on, newest first. */
+  studentPackageHistory: (studentId: number, includeEnded = true) =>
+    get<PackageAssignmentOut[]>(`/admin/tuition/students/${studentId}/packages`, {
+      params: cleanParams({ include_ended: includeEnded }),
+    }),
+
+  /**
+   * Takes a student off a package. Ended rather than deleted, so an invoice
+   * already raised against it still reads back to the package that priced it.
+   */
+  endPackageAssignment: (studentId: number, assignmentId: number) =>
+    delWithBody<PackageAssignmentOut>(
+      `/admin/tuition/students/${studentId}/packages/${assignmentId}`,
+    ),
 
   // -------------------------------------------------------- invoices
 
-  /** Prices counted classes. Refuses to overwrite an invoice already issued. */
+  /** Counts the period's classes against the package. Refuses to overwrite an issued invoice. */
   generateInvoice: (body: InvoiceGenerate) =>
     post<InvoiceOut>('/admin/tuition/invoices/generate', body),
 
@@ -614,6 +744,67 @@ export const tuitionTeacherApi = {
 
 export const tuitionStudentApi = {
   mySubjects: () => get<TuitionEnrollmentOut[]>('/tuition/students/my-subjects'),
+
+  /**
+   * My own tuition invoices, newest period first.
+   *
+   * DRAFTS ARE EXCLUDED server-side. A draft is the office's working copy — it
+   * is re-priced on every regeneration and nothing on it is owed yet — so a
+   * student only ever sees an invoice once it has been issued. That means an
+   * empty list is a real answer ("you have not been billed yet"), not a
+   * missing-data state.
+   */
+  myInvoices: (status?: InvoiceStatus) =>
+    get<InvoiceOut[]>('/tuition/students/invoices', { params: cleanParams({ status }) }),
+
+  /** 404 — not 403 — for an invoice belonging to somebody else. */
+  myInvoice: (invoiceId: string) =>
+    get<InvoiceOut>(`/tuition/students/invoices/${encodeURIComponent(invoiceId)}`),
+
+  /**
+   * THE PAY BUTTON, for a tuition invoice. See `myFeesApi.createIntent` for
+   * what each `method` produces — the rules are the same, on this biller.
+   */
+  createIntent: (invoiceId: string, body: PaymentIntentCreate) =>
+    post<PaymentIntentOut>(
+      `/tuition/students/invoices/${encodeURIComponent(invoiceId)}/intents`,
+      body,
+    ),
+
+  /** My attempts on this invoice, newest first. */
+  intents: (invoiceId: string) =>
+    get<PaymentIntentOut[]>(`/tuition/students/invoices/${encodeURIComponent(invoiceId)}/intents`),
+
+  /**
+   * The package I am on, and how many of its classes I have used this term.
+   * The header of the fee page. Nulls, not an error, when nothing is assigned.
+   */
+  myPackage: (on?: ApiDate) =>
+    get<PackageStatusOut>('/tuition/students/package/me', { params: cleanParams({ on }) }),
+
+  /**
+   * THE PAYMENT PAGE. What I owe for a period, fully derived.
+   *
+   * The same computation the office's preview and the invoice generator use,
+   * so this cannot disagree with the bill that follows. The one line carries
+   * the classes it was priced from — "14 classes at 500: 6 English, 5 Maths,
+   * 3 Science" — which is what makes a tuition bill explicable months later.
+   *
+   * The period is REQUIRED: a tuition bill is a count of classes over a window,
+   * so there is no such thing as "what I owe" without saying over what.
+   *
+   * `currency` switches the figures. It is more than a conversion — each
+   * currency carries its own tax and convenience charge, so the total moves by
+   * more than the rate.
+   */
+  myFees: (params: { periodStart: ApiDate; periodEnd: ApiDate; currency?: string }) =>
+    get<TuitionFeeBreakdownOut>('/tuition/students/fees/me', {
+      params: cleanParams({
+        period_start: params.periodStart,
+        period_end: params.periodEnd,
+        currency: params.currency,
+      }),
+    }),
 
   timetable: () => get<TuitionSlotOut[]>('/tuition/students/timetable'),
 

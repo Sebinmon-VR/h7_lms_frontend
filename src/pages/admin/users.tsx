@@ -1,6 +1,6 @@
-import { zodResolver } from '@hookform/resolvers/zod'
 import type { ColumnDef } from '@tanstack/react-table'
 import {
+  CalendarRange,
   Eye,
   KeyRound,
   MoreHorizontal,
@@ -13,14 +13,13 @@ import {
   UserX,
 } from 'lucide-react'
 import * as React from 'react'
-import { useForm } from 'react-hook-form'
+import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { z } from 'zod'
 
-import type { CredentialsIssued, Program, UserOut, UserProfileFields, UserRole } from '@/api/types'
+import type { CredentialsIssued, Program, UserOut, UserProfileFields } from '@/api/types'
 import { ApiError } from '@/api/errors'
 import {
-  useCreateUser,
   useDeactivateUser,
   useGenerateCredentials,
   usePermanentlyDeleteUser,
@@ -28,24 +27,14 @@ import {
   useUpdateUser,
   useUsers,
 } from '@/queries/admin.queries'
-import { ALL_ROLES, ROLES, ROLE_LABEL, isTeachingRole } from '@/lib/constants'
+import { useAcademicYears } from '@/queries/admissions.queries'
+import { ALL_ROLES, ROLE_LABEL, isTeachingRole } from '@/lib/constants'
 import { formatDateTime, formatRelative } from '@/lib/datetime'
 import { PROGRAM_LABEL } from '@/lib/tuition'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
-import { Switch } from '@/components/ui/switch'
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogForm,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -62,7 +51,6 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { DataTable } from '@/components/data/data-table'
 import { ActiveBadge, RoleBadge } from '@/components/domain/badges'
-import { ProfileFieldsSection } from '@/components/domain/profile-fields'
 import { UserCell } from '@/components/domain/user-cell'
 import { BatchProgress, useBatchRunner } from '@/components/feedback/batch-progress'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
@@ -86,7 +74,7 @@ import { UserDetailSheet } from './user-detail'
  * Email is an override, not an input — leaving it blank lets the server derive
  * `firstname.lastname@<domain>` and resolve collisions itself.
  */
-const createSchema = z.object({
+export const createSchema = z.object({
   full_name: z.string().min(2, 'Enter a full name').max(120),
   email: z
     .string()
@@ -103,7 +91,7 @@ const createSchema = z.object({
    */
   programs: z.array(z.enum(['LMS', 'TUITION'])).min(1, 'Pick at least one'),
 })
-type CreateValues = z.infer<typeof createSchema>
+export type CreateValues = z.infer<typeof createSchema>
 
 /**
  * Mirrors the server's address rule for a live hint only.
@@ -112,7 +100,7 @@ type CreateValues = z.infer<typeof createSchema>
  * numeric suffix, and knows the configured domain. This preview says so rather
  * than presenting itself as the final answer.
  */
-function previewEmail(fullName: string): string | null {
+export function previewEmail(fullName: string): string | null {
   const parts = fullName
     .trim()
     .normalize('NFD')
@@ -142,7 +130,7 @@ function previewEmail(fullName: string): string | null {
  * cannot be cleared: an account belonging to no programme reaches nothing, and
  * the API rejects an empty list.
  */
-function ProgramsField({
+export function ProgramsField({
   value,
   onChange,
   error,
@@ -191,202 +179,36 @@ function ProgramsField({
   )
 }
 
-function CreateUserDialog({
-  open,
-  onOpenChange,
-  onCreated,
-}: {
-  open: boolean
-  onOpenChange: (v: boolean) => void
-  /** Lets the page offer to issue credentials straight after creation. */
-  onCreated: (user: UserOut) => void
-}) {
-  const createUser = useCreateUser()
-  const [overrideEmail, setOverrideEmail] = React.useState(false)
-  const [profile, setProfile] = React.useState<UserProfileFields>({})
+/**
+ * The create and edit forms used to live here as dialogs.
+ *
+ * They now own routes — `/admin/users/new` and `/admin/users/:id/edit` — in
+ * `user-form.tsx`, which imports the schemas, the programme picker and
+ * `profileOf` from this module. A user record carries an account, a role,
+ * programme access, contact and address detail, admission or employment
+ * fields and a guardian; a modal could only hold that by collapsing most of
+ * it behind accordions and growing its own scrollbar.
+ */
 
-  const form = useForm<CreateValues>({
-    resolver: zodResolver(createSchema),
-    defaultValues: { full_name: '', email: '', role: 'STUDENT', programs: ['LMS'] },
-  })
-
-  React.useEffect(() => {
-    if (!open) return
-    form.reset({ full_name: '', email: '', role: 'STUDENT', programs: ['LMS'] })
-    setOverrideEmail(false)
-    setProfile({})
-  }, [open, form])
-
-  const localPart = previewEmail(form.watch('full_name') ?? '')
-
-  const onSubmit = async (values: CreateValues) => {
-    const email = values.email.trim()
-    try {
-      // Omit both fields entirely rather than sending empty strings: null is
-      // what tells the server to generate the address, and the admin never
-      // supplies a password at all.
-      const created = await createUser.mutateAsync({
-        ...profile,
-        full_name: values.full_name,
-        role: values.role,
-        programs: values.programs,
-        email: overrideEmail && email ? email : null,
-        password: null,
-      })
-      onOpenChange(false)
-      onCreated(created)
-    } catch (error) {
-      const message = (error as { message?: string })?.message ?? ''
-      if (/already exists/i.test(message)) {
-        setOverrideEmail(true)
-        form.setError('email', { message: 'An account already uses this email.' })
-      } else if (/email domain/i.test(message)) {
-        form.setError('root', {
-          message:
-            'The server has no email domain configured, so it cannot generate an address. Set USER_EMAIL_DOMAIN on the backend, or enter an email manually.',
-        })
-        setOverrideEmail(true)
-      } else {
-        form.setError('root', { message })
-      }
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add a user</DialogTitle>
-          <DialogDescription>
-            Creates the profile and an email address. They cannot sign in until you generate
-            credentials — you will be offered that next. Everything below the role is optional.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
-          <DialogBody className="space-y-4">
-            {form.formState.errors.root && (
-              <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
-                {form.formState.errors.root.message}
-              </p>
-            )}
-
-            <Field id="full_name" label="Full name" required error={form.formState.errors.full_name?.message}>
-              <Input id="full_name" placeholder="Dr. Grace Hopper" {...form.register('full_name')} />
-            </Field>
-
-            {/* Email is generated by default; the override stays collapsed so
-                the common path is name → role → create. */}
-            {overrideEmail ? (
-              <Field
-                id="email"
-                label="Email"
-                error={form.formState.errors.email?.message}
-                hint="Leave empty to let the server generate one from the name."
-              >
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="grace@institution.edu"
-                  {...form.register('email')}
-                />
-              </Field>
-            ) : (
-              <div className="rounded-lg border border-dashed border-border px-3 py-2.5">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">Email address</p>
-                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {localPart ? (
-                        <>
-                          Generated as{' '}
-                          <code className="font-mono text-foreground">{localPart}@…</code> — the
-                          server picks the domain and adds a number if it is taken.
-                        </>
-                      ) : (
-                        'Generated from the full name once you enter one.'
-                      )}
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={() => setOverrideEmail(true)}
-                  >
-                    Set manually
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            <Field id="role" label="Role" required error={form.formState.errors.role?.message}>
-              <Select
-                value={form.watch('role')}
-                // Narrower than UserRole: a new account cannot be created as a
-                // CLASS_TEACHER, because the backend derives that role from
-                // class assignments rather than accepting it as a choice.
-                onValueChange={(v) =>
-                  form.setValue('role', v as CreateValues['role'], { shouldValidate: true })
-                }
-              >
-                <SelectTrigger id="role">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ROLES.map((role) => (
-                    <SelectItem key={role} value={role}>
-                      {ROLE_LABEL[role]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-
-            <ProgramsField
-              value={form.watch('programs')}
-              onChange={(next) => form.setValue('programs', next, { shouldValidate: true })}
-              error={form.formState.errors.programs?.message}
-            />
-
-            <ProfileFieldsSection
-              role={form.watch('role')}
-              value={profile}
-              onChange={(patch) => setProfile((prev) => ({ ...prev, ...patch }))}
-              mode="create"
-            />
-          </DialogBody>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="primary" loading={form.formState.isSubmitting}>
-              Create user
-            </Button>
-          </DialogFooter>
-        </DialogForm>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ---------------------------------------------------------------- edit form
-
-const editSchema = z.object({
+export const editSchema = z.object({
   full_name: z.string().min(2, 'Enter a full name').max(120),
   email: z.string().min(1, 'Email is required').email('Enter a valid email address'),
   is_active: z.boolean(),
-  // CLASS_TEACHER is accepted here but never offered in the select below: the
-  // form has to be able to HOLD a class teacher's existing role, or opening
-  // their row and pressing Save would silently demote them. It is granted and
-  // revoked by assigning classes on Teacher Mappings, not by picking it here.
-  role: z.enum(['ADMIN', 'CLASS_TEACHER', 'TEACHER', 'STUDENT']),
+  // CLASS_TEACHER and PARENT are accepted here but never offered in the select
+  // below: the form has to be able to HOLD the role a user already has, or
+  // opening their row and pressing Save would silently change it.
+  //
+  // CLASS_TEACHER is granted and revoked by assigning classes on Teacher
+  // Mappings. PARENT is granted by creating the account on Families, which
+  // mints the login and its links to children together — a parent with no
+  // links can see nothing, so the role on its own is never what anyone wants.
+  role: z.enum(['ADMIN', 'CLASS_TEACHER', 'TEACHER', 'STUDENT', 'PARENT']),
   programs: z.array(z.enum(['LMS', 'TUITION'])).min(1, 'Pick at least one'),
 })
-type EditValues = z.infer<typeof editSchema>
+export type EditValues = z.infer<typeof editSchema>
 
 /** Pulls just the profile fields off a user, dropping the account columns. */
-function profileOf(user: UserOut): UserProfileFields {
+export function profileOf(user: UserOut): UserProfileFields {
   const {
     id: _id,
     full_name: _name,
@@ -402,204 +224,15 @@ function profileOf(user: UserOut): UserProfileFields {
   return profile
 }
 
-function EditUserDialog({ user, onClose }: { user: UserOut | null; onClose: () => void }) {
-  const updateUser = useUpdateUser()
-  const [profile, setProfile] = React.useState<UserProfileFields>({})
-  /** Holds a pending role change until it is confirmed. */
-  const [confirmRole, setConfirmRole] = React.useState<EditValues | null>(null)
-
-  const form = useForm<EditValues>({
-    resolver: zodResolver(editSchema),
-    defaultValues: { full_name: '', email: '', is_active: true, role: 'STUDENT', programs: ['LMS'] },
-  })
-
-  React.useEffect(() => {
-    if (user) {
-      form.reset({
-        full_name: user.full_name,
-        email: user.email,
-        is_active: user.is_active,
-        role: user.role,
-        // Absent on profiles that predate the tuition module, which read as
-        // school-only — the safe direction, and what the backend assumes too.
-        programs: user.programs?.length ? user.programs : ['LMS'],
-      })
-      setProfile(profileOf(user))
-      setConfirmRole(null)
-    }
-  }, [user, form])
-
-  const save = async (values: EditValues) => {
-    if (!user) return
-    await updateUser.mutateAsync({
-      userId: user.id,
-      body: {
-        ...profile,
-        full_name: values.full_name,
-        email: values.email,
-        is_active: values.is_active,
-        // Only sent when it actually changed — including it unchanged would
-        // still revoke the user's tokens and sign them out for nothing.
-        ...(values.role !== user.role && { role: values.role }),
-        // Replaces the list outright, which is the point: product access has
-        // to be revocable, and a merge would make revoking impossible.
-        programs: values.programs,
-      },
-    })
-    onClose()
-  }
-
-  const onSubmit = async (values: EditValues) => {
-    if (!user) return
-    // A role change signs the user out everywhere, so it gets its own step
-    // rather than riding along with a rename.
-    if (values.role !== user.role) {
-      setConfirmRole(values)
-      return
-    }
-    await save(values)
-  }
-
-  return (
-    <Dialog open={!!user} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Edit user</DialogTitle>
-          <DialogDescription>Changes apply immediately.</DialogDescription>
-        </DialogHeader>
-        <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
-          <DialogBody className="space-y-4">
-            <Field id="edit_name" label="Full name" required error={form.formState.errors.full_name?.message}>
-              <Input id="edit_name" {...form.register('full_name')} />
-            </Field>
-
-            <Field
-              id="edit_email"
-              label="Email"
-              required
-              error={form.formState.errors.email?.message}
-              hint="Emails are not checked for uniqueness on update — take care not to create a duplicate."
-            >
-              <Input id="edit_email" type="email" {...form.register('email')} />
-            </Field>
-
-            <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">
-              <div>
-                <p className="text-sm font-medium">Active</p>
-                <p className="text-xs text-muted-foreground">Inactive accounts cannot sign in.</p>
-              </div>
-              <Switch
-                checked={form.watch('is_active')}
-                onCheckedChange={(v) => form.setValue('is_active', v, { shouldDirty: true })}
-              />
-            </div>
-
-            <Field
-              id="edit_role"
-              label="Role"
-              required
-              hint={
-                user?.role === 'CLASS_TEACHER'
-                  ? 'Changing this signs the user out of every device. “Class teacher” is set by assigning them a class, not chosen here — moving them off it will be undone the next time their assignments change.'
-                  : 'Changing this signs the user out of every device.'
-              }
-            >
-              <Select
-                value={form.watch('role')}
-                onValueChange={(v) => form.setValue('role', v as UserRole, { shouldDirty: true })}
-              >
-                <SelectTrigger id="edit_role">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {/* A class teacher's own role is listed so the form can show
-                      what they actually are. Without it the trigger renders
-                      blank and saving would quietly demote them. */}
-                  {(user?.role === 'CLASS_TEACHER' ? ['CLASS_TEACHER' as const, ...ROLES] : ROLES).map(
-                    (role) => (
-                      <SelectItem key={role} value={role}>
-                        {ROLE_LABEL[role]}
-                      </SelectItem>
-                    ),
-                  )}
-                </SelectContent>
-              </Select>
-            </Field>
-
-            {user?.role === 'CLASS_TEACHER' && (
-              <p className="rounded-lg border border-warning/30 bg-warning/8 px-3 py-2 text-xs text-muted-foreground">
-                This teacher leads at least one class. To stop that, remove their assignment under{' '}
-                <strong>Teacher Mappings → Class teachers</strong> — the backend then drops them back
-                to Teacher on its own.
-              </p>
-            )}
-
-            <ProgramsField
-              value={form.watch('programs')}
-              onChange={(next) => form.setValue('programs', next, { shouldDirty: true })}
-              error={form.formState.errors.programs?.message}
-            />
-
-            {user && (
-              <ProfileFieldsSection
-                role={form.watch('role')}
-                value={profile}
-                onChange={(patch) => setProfile((prev) => ({ ...prev, ...patch }))}
-                mode="edit"
-              />
-            )}
-          </DialogBody>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="primary" loading={form.formState.isSubmitting}>
-              Save changes
-            </Button>
-          </DialogFooter>
-        </DialogForm>
-      </DialogContent>
-
-      {/*
-        A role change re-issues Firebase claims and revokes every token, so the
-        user is signed out wherever they are. That is the right behaviour — a
-        stale token would leave them on the wrong navigation until it expired —
-        but it is not what someone renaming an account expects to happen.
-      */}
-      <ConfirmDialog
-        open={!!confirmRole}
-        onOpenChange={(v) => !v && setConfirmRole(null)}
-        title={
-          confirmRole && user
-            ? `Change ${user.full_name} to ${ROLE_LABEL[confirmRole.role]}?`
-            : 'Change role?'
-        }
-        description={
-          user && confirmRole
-            ? `They are currently ${ROLE_LABEL[user.role]}. Changing this signs them out of every device immediately — they will need to sign in again, and will then see the ${ROLE_LABEL[confirmRole.role]} navigation and permissions.`
-            : undefined
-        }
-        confirmLabel="Change role and sign out"
-        loading={updateUser.isPending}
-        onConfirm={() => {
-          if (!confirmRole) return
-          void save(confirmRole).finally(() => setConfirmRole(null))
-        }}
-      />
-    </Dialog>
-  )
-}
-
-// -------------------------------------------------------------------- page
-
 export default function AdminUsersPage() {
+  const navigate = useNavigate()
   const usersQuery = useUsers()
   const deactivateUser = useDeactivateUser()
   const reactivateUser = useReactivateUser()
-
-  const [createOpen, setCreateOpen] = React.useState(false)
+  // Page-level, for the bulk session-year assignment; the edit dialog holds
+  // its own instance for the single-user save.
+  const bulkUpdateUser = useUpdateUser()
   const [importOpen, setImportOpen] = React.useState(false)
-  const [editing, setEditing] = React.useState<UserOut | null>(null)
   const [deactivating, setDeactivating] = React.useState<UserOut | null>(null)
 
   /**
@@ -637,6 +270,18 @@ export default function AdminUsersPage() {
   const [viewing, setViewing] = React.useState<UserOut | null>(null)
   const [bulkDeactivate, setBulkDeactivate] = React.useState<UserOut[] | null>(null)
   const bulk = useBatchRunner<number>()
+
+  /**
+   * Bulk assignment to a session year.
+   *
+   * Its own runner rather than sharing `bulk`: the two dialogs can both be
+   * open across a render, and one progress list serving both would show the
+   * deactivation's rows under the year dialog's heading.
+   */
+  const [bulkYear, setBulkYear] = React.useState<UserOut[] | null>(null)
+  const [bulkYearId, setBulkYearId] = React.useState<string>('')
+  const yearRunner = useBatchRunner<{ userId: number; yearId: number }>()
+  const academicYears = useAcademicYears({ withCounts: false })
 
   const generateCredentials = useGenerateCredentials()
   const [issuingFor, setIssuingFor] = React.useState<UserOut | null>(null)
@@ -770,7 +415,7 @@ export default function AdminUsersPage() {
                     <Eye />
                     View details
                   </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => setEditing(user)}>
+                  <DropdownMenuItem onSelect={() => navigate(`/admin/users/${user.id}/edit`)}>
                     <Pencil />
                     Edit details
                   </DropdownMenuItem>
@@ -825,8 +470,8 @@ export default function AdminUsersPage() {
             <Button variant="outline" icon={<Upload />} onClick={() => setImportOpen(true)}>
               Import CSV
             </Button>
-            <Button variant="primary" icon={<UserPlus />} onClick={() => setCreateOpen(true)}>
-              Add user
+            <Button asChild variant="primary" icon={<UserPlus />}>
+              <Link to="/admin/users/new">Add user</Link>
             </Button>
           </>
         }
@@ -860,16 +505,37 @@ export default function AdminUsersPage() {
           // Already-inactive accounts have nothing to deactivate, so keeping
           // them selectable would let the count promise work that never happens.
           isSelectable: (user) => user.is_active,
-          render: (selected) => (
-            <Button
-              variant="danger"
-              size="sm"
-              icon={<UserX />}
-              onClick={() => setBulkDeactivate(selected)}
-            >
-              Deactivate {selected.length}
-            </Button>
-          ),
+          render: (selected) => {
+            // Only students have a session year, so the action appears only
+            // when the selection is entirely students — offering it over a
+            // mixed selection would promise work that silently skips rows.
+            const students = selected.filter((u) => u.role === 'STUDENT')
+            return (
+              <>
+                {students.length === selected.length && students.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    icon={<CalendarRange />}
+                    onClick={() => {
+                      setBulkYearId('')
+                      setBulkYear(students)
+                    }}
+                  >
+                    Set session year for {students.length}
+                  </Button>
+                )}
+                <Button
+                  variant="danger"
+                  size="sm"
+                  icon={<UserX />}
+                  onClick={() => setBulkDeactivate(selected)}
+                >
+                  Deactivate {selected.length}
+                </Button>
+              </>
+            )
+          },
         }}
         searchValues={(row) => [row.full_name, row.email, row.role]}
         initialSorting={[{ id: 'name', desc: false }]}
@@ -907,21 +573,14 @@ export default function AdminUsersPage() {
             title="No users yet"
             description="Create the first teacher or student account to get started."
             action={
-              <Button variant="primary" icon={<UserPlus />} onClick={() => setCreateOpen(true)}>
-                Add user
+              <Button asChild variant="primary" icon={<UserPlus />}>
+                <Link to="/admin/users/new">Add user</Link>
               </Button>
             }
           />
         }
       />
 
-      <CreateUserDialog
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        // A new account cannot sign in yet, so go straight to issuing
-        // credentials rather than leaving the admin to find the button.
-        onCreated={(user) => setIssuingFor(user)}
-      />
       <ImportUsersDialog open={importOpen} onOpenChange={setImportOpen} />
 
       <ConfirmDialog
@@ -967,7 +626,6 @@ export default function AdminUsersPage() {
       </ConfirmDialog>
 
       <CredentialsModal credentials={issued} onClose={() => setIssued(null)} />
-      <EditUserDialog user={editing} onClose={() => setEditing(null)} />
 
       <ConfirmDialog
         open={!!bulkDeactivate}
@@ -1008,12 +666,81 @@ export default function AdminUsersPage() {
         )}
       </ConfirmDialog>
 
+      <ConfirmDialog
+        open={!!bulkYear}
+        onOpenChange={(v) => {
+          if (v || yearRunner.running) return
+          setBulkYear(null)
+          yearRunner.reset()
+        }}
+        title={`Set the session year for ${bulkYear?.length ?? 0} students`}
+        description="This decides which fee structure and instalment plan each of them is billed under. It does not move them between classes."
+        confirmLabel={`Assign ${bulkYear?.length ?? 0}`}
+        loading={yearRunner.running}
+        onConfirm={async () => {
+          if (!bulkYear || !bulkYearId) return
+          // No bulk endpoint exists — `PUT /admin/users/{id}` one at a time,
+          // reporting per-row outcomes so a partial failure names who was and
+          // was not moved.
+          const yearId = Number(bulkYearId)
+          const { succeeded, failed } = await yearRunner.run(
+            bulkYear.map((user) => ({
+              key: String(user.id),
+              label: user.full_name,
+              payload: { userId: user.id, yearId },
+            })),
+            ({ userId, yearId: id }) =>
+              bulkUpdateUser.mutateAsync({ userId, body: { academic_year_id: id } }),
+          )
+          if (failed === 0) {
+            toast.success(`${succeeded} students moved`)
+            setBulkYear(null)
+            yearRunner.reset()
+          } else {
+            toast.warning(`${succeeded} moved, ${failed} failed`)
+          }
+        }}
+      >
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <Label htmlFor="bulk-year">Session year</Label>
+            <Select value={bulkYearId} onValueChange={setBulkYearId}>
+              <SelectTrigger id="bulk-year">
+                <SelectValue placeholder="Pick a year…" />
+              </SelectTrigger>
+              <SelectContent>
+                {(academicYears.data ?? []).map((year) => (
+                  <SelectItem key={year.id} value={String(year.id)}>
+                    {year.name}
+                    {year.is_current ? ' · current' : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {academicYears.data?.length === 0 && (
+              <p className="text-xs text-warning">
+                No session years exist yet — create one under Admissions first.
+              </p>
+            )}
+          </div>
+
+          {yearRunner.items.length > 0 && (
+            <BatchProgress
+              items={yearRunner.items}
+              percent={yearRunner.percent}
+              done={yearRunner.done}
+              total={yearRunner.total}
+            />
+          )}
+        </div>
+      </ConfirmDialog>
+
       <UserDetailSheet
         user={viewing}
         onClose={() => setViewing(null)}
         onEdit={(user) => {
           setViewing(null)
-          setEditing(user)
+          navigate(`/admin/users/${user.id}/edit`)
         }}
         onDeactivate={(user) => {
           setViewing(null)

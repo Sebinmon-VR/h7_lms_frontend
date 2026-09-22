@@ -38,7 +38,7 @@ import { FileTypeIcon } from '@/components/domain/file-type-icon'
 import { EmptyState } from '@/components/feedback/states'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
-import { Field } from '@/components/forms/field'
+import { Field, FormError } from '@/components/forms/field'
 import { PageHeader } from '@/components/layout/page-header'
 import { MaterialCard } from '@/pages/teacher/materials'
 
@@ -165,12 +165,8 @@ function AdminUploadDialog({
             Shared with every student in the selected class, whoever it is filed under.
           </DialogDescription>
         </DialogHeader>
-        <DialogBody className="space-y-4">
-          {error && (
-            <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
-              {error}
-            </p>
-          )}
+        <DialogBody className="space-y-5">
+          <FormError message={error} />
 
           <div
             onDragOver={(e) => {
@@ -245,7 +241,7 @@ function AdminUploadDialog({
             />
           </Field>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
             <Field id="admin-material-class" label="Class" required>
               <Combobox
                 id="admin-material-class"
@@ -400,12 +396,8 @@ function EditMaterialDialog({
             upload the new version.
           </DialogDescription>
         </DialogHeader>
-        <DialogBody className="space-y-4">
-          {error && (
-            <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
-              {error}
-            </p>
-          )}
+        <DialogBody className="space-y-5">
+          <FormError message={error} />
 
           <div className="flex items-center gap-3 rounded-lg border border-dashed border-border px-3 py-2.5">
             <FileTypeIcon url={material?.file_url ?? ''} />

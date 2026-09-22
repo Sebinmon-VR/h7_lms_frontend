@@ -69,7 +69,6 @@ function SettingsForm({ program }: { program: Program }) {
       session_horizon_days: data.session_horizon_days,
       student_uploads_need_approval: data.student_uploads_need_approval,
       currency: data.currency,
-      default_session_fee: data.default_session_fee,
       auto_create_meet: data.auto_create_meet,
     })
     setLeadTimes((data.reminder_minutes_before ?? []).join(', '))
@@ -168,7 +167,7 @@ function SettingsForm({ program }: { program: Program }) {
                   />
                 </label>
 
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
                   <Field
                     id={`lead-${program}`}
                     label="How long before"
@@ -318,28 +317,17 @@ function SettingsForm({ program }: { program: Program }) {
                       />
                     </Field>
 
-                    <Field id="currency" label="Currency" hint="Used when a fee plan does not say.">
+                    <Field
+                      id="currency"
+                      label="Currency"
+                      hint="What packages are priced in unless a package says otherwise."
+                    >
                       <Input
                         id="currency"
                         maxLength={8}
                         value={draft.currency ?? ''}
                         onChange={(e) => set('currency', e.target.value)}
-                        placeholder="AED"
-                      />
-                    </Field>
-
-                    <Field
-                      id="fee"
-                      label="Default fee per class"
-                      hint="Used when no fee plan matches."
-                    >
-                      <Input
-                        id="fee"
-                        type="number"
-                        step="0.01"
-                        min={0}
-                        value={draft.default_session_fee ?? ''}
-                        onChange={(e) => set('default_session_fee', num(e.target.value))}
+                        placeholder="INR"
                       />
                     </Field>
                   </div>

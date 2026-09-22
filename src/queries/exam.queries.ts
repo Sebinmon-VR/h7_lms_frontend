@@ -211,6 +211,8 @@ export function useUploadPaper(onProgress?: (percent: number) => void) {
 export function usePublishExam() {
   const write = useExamWriter()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     mutationFn: (examId: number) => examApi.publish(examId),
     onSuccess: (updated) => {
       write(updated)
@@ -223,6 +225,8 @@ export function usePublishExam() {
 export function useGrantConcession() {
   const write = useExamWriter()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     mutationFn: ({ examId, body }: { examId: number; body: TimeConcessionGrant }) =>
       examApi.grantConcession(examId, body),
     onSuccess: (updated, { body }) => {
@@ -268,6 +272,8 @@ export function useReopenSubmission() {
   const qc = useQueryClient()
   const write = useSubmissionWriter()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     mutationFn: ({ examId, studentId }: { examId: number; studentId: number }) =>
       examApi.reopen(examId, studentId),
     onSuccess: (reopened) => {
@@ -282,6 +288,8 @@ export function useReopenSubmission() {
 export function usePublishResults() {
   const qc = useQueryClient()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     mutationFn: (examId: number) => examApi.publishResults(examId),
     onSuccess: (result) => {
       void qc.invalidateQueries({ queryKey: qk.exams.detail(result.exam_id) })
@@ -362,6 +370,8 @@ export function useGenerateReportCards() {
 export function useUpdateReportCard() {
   const write = useCardWriter()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     mutationFn: ({ cardId, body }: { cardId: string; body: ReportCardUpdate }) =>
       examApi.updateReportCard(cardId, body),
     onSuccess: (updated, { body }) => {
@@ -377,6 +387,8 @@ export function useUpdateReportCard() {
 export function useDeleteReportCard() {
   const qc = useQueryClient()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     mutationFn: (cardId: string) => examApi.deleteReportCard(cardId),
     onSuccess: (_void, cardId) => {
       qc.setQueryData<ReportCardOut[]>(qk.exams.reportCards(), (prev) => prev?.filter((c) => c.id !== cardId))
@@ -450,6 +462,8 @@ function useMyScriptWriter() {
 export function useStartExam() {
   const write = useMyScriptWriter()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     mutationFn: (examId: number) => examApi.startExam(examId),
     onSuccess: write,
     onError: (error) => toast.error('Could not start the exam', { description: describe(error) }),
@@ -473,6 +487,8 @@ export function useSaveAnswers() {
 export function useUploadAnswerSheet(onProgress?: (percent: number) => void) {
   const write = useMyScriptWriter()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     mutationFn: ({ examId, file, questionId }: { examId: number; file: File; questionId?: number }) =>
       examApi.uploadAnswerSheet(examId, file, questionId, onProgress),
     onSuccess: (updated, { file }) => {
@@ -492,6 +508,8 @@ export function useSubmitExam() {
   const qc = useQueryClient()
   const write = useMyScriptWriter()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     mutationFn: ({ examId, body }: { examId: number; body?: SubmitIn }) =>
       examApi.submitExam(examId, body),
     onSuccess: (submitted) => {

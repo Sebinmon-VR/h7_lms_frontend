@@ -169,6 +169,8 @@ export function useStorageStatus(enabled = true) {
 export function useStorageTestUpload() {
   const qc = useQueryClient()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     // `cleanup` is required rather than defaulted: leaving a probe file behind
     // is a deliberate choice, never something a caller should fall into.
     mutationFn: (cleanup: boolean) => adminApi.storageTestUpload(cleanup),
@@ -207,6 +209,8 @@ export function useTimetable(includeInactive = false, enabled = true) {
 export function useCreateTimetableEntry() {
   const qc = useQueryClient()
   return useMutation({
+    // Reported in place by the caller, not as a toast.
+    meta: { silent: true },
     mutationFn: ({ body, allowConflicts }: { body: TimetableEntryCreate; allowConflicts?: boolean }) =>
       adminApi.createTimetableEntry(body, allowConflicts),
     onSuccess: () => {
@@ -219,6 +223,8 @@ export function useCreateTimetableEntry() {
 export function useUpdateTimetableEntry() {
   const qc = useQueryClient()
   return useMutation({
+    // Reported in place by the caller, not as a toast.
+    meta: { silent: true },
     mutationFn: ({
       entryId,
       body,
@@ -330,6 +336,8 @@ export function useReminderLog(limit = 50, enabled = true) {
 export function useRunReminders() {
   const qc = useQueryClient()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     mutationFn: () => adminApi.runReminders(),
     onSuccess: (job) => {
       qc.setQueryData(qk.admin.job(job.job_id), job)
@@ -392,6 +400,8 @@ export function useRecordingLog(limit = 50, enabled = true) {
 export function useRunRecordings() {
   const qc = useQueryClient()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     mutationFn: () => adminApi.runRecordings(),
     onSuccess: (job) => {
       qc.setQueryData(qk.admin.job(job.job_id), job)
@@ -493,6 +503,8 @@ export function useRecentJobs(enabled = true) {
 export function useRefreshMonitoring() {
   const qc = useQueryClient()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     mutationFn: () => adminApi.startMonitoringRefresh(),
     onSuccess: (job) => {
       // Seed the job cache so the progress UI has data before the first poll.
@@ -988,6 +1000,8 @@ export function useAdminUpdateMeeting() {
 export function useRegenerateMeetingLink() {
   const qc = useQueryClient()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     mutationFn: (meetingId: number) => adminApi.regenerateMeetingLink(meetingId),
     onSuccess: (updated) => {
       qc.setQueryData<LiveMeetingOut[]>(qk.admin.meetings(), (prev) =>
@@ -1032,6 +1046,8 @@ export function useRegenerateMeetingLink() {
 export function useAdminSyncRecording() {
   const qc = useQueryClient()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     mutationFn: (meetingId: number) => adminApi.syncMeetingRecording(meetingId),
     onSuccess: (updated) => {
       qc.setQueryData<LiveMeetingOut[]>(qk.admin.meetings(), (prev) =>

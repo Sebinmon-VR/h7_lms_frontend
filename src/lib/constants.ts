@@ -13,17 +13,43 @@ import type { AttendanceStatus, UserRole } from '@/api/types'
 export const ROLES: UserRole[] = ['ADMIN', 'TEACHER', 'STUDENT']
 
 /**
- * Every role a user can actually hold — `ROLES` plus the one the backend
+ * Every role a user can actually hold — `ROLES` plus the two the backend
  * assigns on its own. Use this for filters and legends, which must be able to
  * describe what exists, not only what an admin may pick.
+ *
+ * `PARENT` is here for the same reason `CLASS_TEACHER` is: parents exist and
+ * appear in the directory, but they are minted by
+ * `POST /admin/families/parents` — which creates the login AND its links to
+ * children in one call — not by picking a role on the user form. A parent with
+ * no links can see nothing, so offering the role on its own would only ever
+ * produce a broken account.
  */
-export const ALL_ROLES: UserRole[] = ['ADMIN', 'CLASS_TEACHER', 'TEACHER', 'STUDENT']
+export const ALL_ROLES: UserRole[] = [
+  'ADMIN',
+  'CLASS_TEACHER',
+  'TEACHER',
+  'STUDENT',
+  'PARENT',
+]
 
 export const ROLE_LABEL: Record<UserRole, string> = {
   ADMIN: 'Administrator',
   CLASS_TEACHER: 'Class teacher',
   TEACHER: 'Teacher',
   STUDENT: 'Student',
+  PARENT: 'Parent',
+}
+
+/**
+ * A parent is not a pupil and not staff.
+ *
+ * Worth its own predicate because the interesting checks in this app are
+ * "may this user own a teaching record?" and "does this user have a timetable
+ * of their own?", and a parent answers no to both while looking, from a role
+ * string alone, rather like a student.
+ */
+export function isParent(role: UserRole | null | undefined): boolean {
+  return role === 'PARENT'
 }
 
 /**

@@ -46,7 +46,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { DataTable } from '@/components/data/data-table'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
-import { Field } from '@/components/forms/field'
+import { Field, FormError } from '@/components/forms/field'
 import { EmptyState } from '@/components/feedback/states'
 import { EnrollmentStatusBadge } from '@/components/domain/tuition'
 import { UserCell } from '@/components/domain/user-cell'
@@ -204,14 +204,10 @@ function EnrollmentDialog({
         </DialogHeader>
 
         <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
-          <DialogBody className="space-y-4">
-            {form.formState.errors.root && (
-              <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
-                {form.formState.errors.root.message}
-              </p>
-            )}
+          <DialogBody className="space-y-5">
+            <FormError message={form.formState.errors.root?.message} />
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
               <Field
                 id="student"
                 label="Student"
@@ -277,7 +273,7 @@ function EnrollmentDialog({
               />
             </Field>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
               <Field id="grade" label="Level" hint="e.g. Grade 10, A-Level">
                 <Input id="grade" {...form.register('grade_level')} />
               </Field>
@@ -306,7 +302,7 @@ function EnrollmentDialog({
               <Textarea id="syllabus" rows={3} {...form.register('syllabus')} />
             </Field>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
               <Field id="start" label="Starts">
                 <DatePicker
                   id="start"

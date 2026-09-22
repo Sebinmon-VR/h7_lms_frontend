@@ -1,19 +1,23 @@
 import { motion } from 'framer-motion'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 
 import { useAuth } from '@/providers/auth-provider'
 import { cn } from '@/lib/cn'
 import { STORAGE_KEYS } from '@/lib/constants'
 import { usePersistentState } from '@/lib/hooks'
-import { PORTAL_LABEL, navigationFor } from '@/routes/navigation'
+import { PORTAL_LABEL, navigationFor, programForPath } from '@/routes/navigation'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Wordmark, Logo } from './logo'
+import { ProgramSwitcher } from './program-switcher'
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { role, user } = useAuth()
   const [collapsed, setCollapsed] = usePersistentState(STORAGE_KEYS.sidebar, false)
-  const sections = navigationFor(user)
+  const { pathname } = useLocation()
+  // Scoped to the product the current route belongs to, so the menu always
+  // agrees with the switcher sitting above it.
+  const sections = navigationFor(user, programForPath(pathname))
 
   return (
     <aside
@@ -24,6 +28,12 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     >
       <div className={cn('flex h-16 shrink-0 items-center border-b border-border px-4', collapsed && 'justify-center px-0')}>
         {collapsed ? <Logo /> : <Wordmark />}
+      </div>
+
+      {/* Context, directly under the identity it qualifies. Renders nothing
+          for an account with only one product. */}
+      <div className={cn('shrink-0 px-3 pt-3', collapsed && 'px-2')}>
+        <ProgramSwitcher collapsed={collapsed} />
       </div>
 
       <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4" aria-label="Main navigation">

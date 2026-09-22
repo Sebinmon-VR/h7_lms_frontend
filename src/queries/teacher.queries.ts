@@ -419,6 +419,8 @@ export function useDeleteMeeting() {
 export function useSyncMeetingRecording() {
   const qc = useQueryClient()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     mutationFn: (meetingId: number) => teacherApi.syncMeetingRecording(meetingId),
     onSuccess: (updated) => {
       qc.setQueryData<LiveMeetingOut[]>(qk.teacher.meetings(), (prev) =>

@@ -23,6 +23,7 @@ import {
   TriangleAlert,
   UserRound,
   UserRoundCog,
+  Users,
   VideoOff,
   XCircle,
 } from 'lucide-react'
@@ -53,6 +54,10 @@ const ROLE_TONE = {
   CLASS_TEACHER: 'warning',
   TEACHER: 'info',
   STUDENT: 'accent',
+  // Deliberately the quiet one. A parent is a guest in the building: they
+  // appear all over the family and notice screens, and a loud badge on every
+  // row of them reads as a warning rather than as a fact.
+  PARENT: 'neutral',
 } as const
 
 const ROLE_ICON = {
@@ -60,6 +65,7 @@ const ROLE_ICON = {
   CLASS_TEACHER: UserRoundCog,
   TEACHER: GraduationCap,
   STUDENT: UserRound,
+  PARENT: Users,
 } as const
 
 export function RoleBadge({ role, size = 'md' }: { role: UserRole; size?: 'sm' | 'md' }) {

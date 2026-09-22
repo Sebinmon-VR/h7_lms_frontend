@@ -287,7 +287,7 @@ export default function TuitionTeacherStudentsPage() {
                             className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-sm"
                           >
                             <span className="truncate font-medium">
-                              {String(line.subject ?? `Subject ${line.subject_id}`)}
+                              {line.subject_name ?? `Subject ${line.subject_id}`}
                             </span>
                             <span className="text-xs text-muted-foreground">
                               {line.attended ?? 0}/{line.conducted ?? 0} attended

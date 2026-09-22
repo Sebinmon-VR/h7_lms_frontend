@@ -71,7 +71,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
-import { Field } from '@/components/forms/field'
+import { Field, FormError } from '@/components/forms/field'
 import { EmptyState } from '@/components/feedback/states'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { PageHeader } from '@/components/layout/page-header'
@@ -228,12 +228,8 @@ function SlotDialog({
         </DialogHeader>
 
         <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
-          <DialogBody className="space-y-4">
-            {form.formState.errors.root && (
-              <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
-                {form.formState.errors.root.message}
-              </p>
-            )}
+          <DialogBody className="space-y-5">
+            <FormError message={form.formState.errors.root?.message} />
 
             <Field
               id="arrangement"
@@ -257,7 +253,7 @@ function SlotDialog({
               />
             </Field>
 
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-x-4 gap-y-5 sm:grid-cols-3">
               <Field id="day" label="Day" required>
                 <Select
                   value={form.watch('day_of_week')}
@@ -303,7 +299,7 @@ function SlotDialog({
               </Field>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
               <Field id="from" label="From" hint="Defaults to today.">
                 <DatePicker
                   id="from"

@@ -103,7 +103,7 @@ export function DeleteResourceDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <DialogBody className="space-y-4">
+        <DialogBody className="space-y-5">
           {!conflict && description && (
             <p className="text-sm text-muted-foreground">{description}</p>
           )}

@@ -21,12 +21,23 @@ const GENDER_LABEL: Record<string, string> = {
   UNDISCLOSED: 'Not disclosed',
 }
 
+/**
+ * One fact, stacked rather than justified.
+ *
+ * This was a label-left / value-right row with a hairline between each, which
+ * is the shape every generic admin template reaches for and reads as one: on a
+ * wide card the label and its value end up a hand's width apart with nothing
+ * tying them together, and a long address wraps into a ragged right-aligned
+ * block. Stacked in a grid, the pair stays visually one unit at any width.
+ */
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   if (value === null || value === undefined || value === '') return null
   return (
-    <div className="flex items-baseline justify-between gap-4 py-1.5 text-sm">
-      <dt className="shrink-0 text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words text-right">{value}</dd>
+    <div className="min-w-0 space-y-1">
+      <dt className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="break-words text-sm font-medium leading-snug text-foreground">{value}</dd>
     </div>
   )
 }
@@ -42,11 +53,14 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   if (!hasContent) return null
 
   return (
-    <section>
-      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    <section className="rounded-xl border border-border bg-card/40 p-4">
+      <h3 className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         {title}
+        <span className="h-px flex-1 bg-border" aria-hidden />
       </h3>
-      <dl className="divide-y divide-border/60">{children}</dl>
+      {/* Two columns from `sm` up. A profile is a set of short facts, and one
+          column of them on a wide card is mostly empty space. */}
+      <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">{children}</dl>
     </section>
   )
 }
@@ -79,7 +93,7 @@ export function ProfileSummary({ user }: { user: UserOut }) {
   const knowsReminderPreference = user.reminder_opt_in !== undefined
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <Group title="Contact">
         <Row label="Phone" value={user.phone} />
         <Row label="Alternate phone" value={user.alternate_phone} />
@@ -97,6 +111,19 @@ export function ProfileSummary({ user }: { user: UserOut }) {
             value={user.admission_date ? formatDate(user.admission_date) : null}
           />
           <Row label="Blood group" value={user.blood_group} />
+        </Group>
+      )}
+
+      {/* The September profile fields. `academic_year_id` and
+          `admission_category_id` are deliberately absent: they are ids, and
+          this component takes no queries, so it would be rendering
+          "Academic year 1758288000000" at somebody. The three free-text
+          fields below are the half a person can actually read. */}
+      {isStudent && (
+        <Group title="Academic">
+          <Row label="Syllabus" value={user.syllabus} />
+          <Row label="Stream" value={user.academic_stream} />
+          <Row label="Medium" value={user.medium} />
         </Group>
       )}
 
@@ -128,9 +155,10 @@ export function ProfileSummary({ user }: { user: UserOut }) {
       )}
 
       {knowsReminderPreference && (
-        <section>
-          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <section className="rounded-xl border border-border bg-card/40 p-4">
+          <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Reminders
+            <span className="h-px flex-1 bg-border" aria-hidden />
           </h3>
           <Badge tone={remindersOn ? 'success' : 'neutral'} size="sm">
             {remindersOn ? <BellRing /> : <BellOff />}

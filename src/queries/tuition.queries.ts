@@ -1,4 +1,5 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
 import { ApiError } from '@/api/errors'
@@ -11,14 +12,20 @@ import {
 } from '@/api/tuition.api'
 import type {
   ApiDate,
+  AcademicTerm,
   BillingExportView,
-  FeePlanCreate,
-  FeePlanOut,
-  FeePlanUpdate,
+  StudentSubjectAdd,
   InvoiceBatchGenerate,
   InvoiceExportView,
   InvoiceGenerate,
   InvoiceOut,
+  InvoiceStatus,
+  PackageAssignmentCreate,
+  PackageAssignmentOut,
+  PaymentIntentCreate,
+  TuitionPackageCreate,
+  TuitionPackageOut,
+  TuitionPackageUpdate,
   LibraryItemOut,
   LibraryItemUpdate,
   LibraryLinkCreate,
@@ -857,50 +864,244 @@ export function useTuitionTeacherReport(
 // Fees & invoices
 // =====================================================================
 
-export function useFeePlans(enabled = true) {
+/**
+ * Packages on offer, optionally narrowed to a year or term.
+ *
+ * The filters ARE in the key because they are real server-side differences —
+ * but they widen rather than narrow: an unscoped package carries no year and
+ * no term and is returned for every one of them, so the "Term 1 2026-27" list
+ * contains both that term's packages and the standing ones.
+ */
+export function usePackages(
+  params: { academicYearId?: number; term?: AcademicTerm; includeInactive?: boolean } = {},
+  enabled = true,
+) {
   return useQuery({
-    queryKey: qk.tuition.feePlans(),
-    queryFn: tuitionAdminApi.feePlans,
+    queryKey: qk.tuition.packages(params.academicYearId, params.term, params.includeInactive ?? true),
+    queryFn: () => tuitionAdminApi.packages(params),
     staleTime: STALE.reference,
     enabled,
   })
 }
 
-export function useCreateFeePlan() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (body: FeePlanCreate) => tuitionAdminApi.createFeePlan(body),
-    onSuccess: (plan) => {
-      qc.setQueryData<FeePlanOut[]>(qk.tuition.feePlans(), (prev) => (prev ? [...prev, plan] : prev))
-      void qc.invalidateQueries({ queryKey: qk.tuition.feePlans() })
-      toast.success(`Fee plan “${plan.name}” created`)
-    },
+/** Who is on a package. Current assignments first; ended ones only when asked. */
+export function usePackageStudents(packageId: number | null, includeEnded = false) {
+  return useQuery({
+    queryKey: qk.tuition.packageStudents(packageId ?? 0, includeEnded),
+    queryFn: () => tuitionAdminApi.packageStudents(packageId as number, includeEnded),
+    staleTime: STALE.transactional,
+    enabled: packageId != null,
   })
 }
 
-export function useUpdateFeePlan() {
+/**
+ * Where one student stands on their package, as of a date.
+ *
+ * `assignment` and `package` come back NULL for a student on no package. That
+ * is the normal state of somebody admitted this morning, so callers render
+ * "no package yet" rather than treating it as missing data.
+ */
+export function useStudentPackage(studentId: number | null, on?: ApiDate, enabled = true) {
+  return useQuery({
+    queryKey: qk.tuition.studentPackage(studentId ?? 0, on),
+    queryFn: () => tuitionAdminApi.studentPackage(studentId as number, on),
+    staleTime: STALE.transactional,
+    enabled: enabled && studentId != null,
+  })
+}
+
+/** Every package a student has been on, newest first, ended ones included. */
+export function useStudentPackageHistory(studentId: number | null, enabled = true) {
+  return useQuery({
+    queryKey: qk.tuition.studentPackageHistory(studentId ?? 0),
+    queryFn: () => tuitionAdminApi.studentPackageHistory(studentId as number, true),
+    staleTime: STALE.transactional,
+    enabled: enabled && studentId != null,
+  })
+}
+
+/** The signed-in student's own standing on their package. */
+export function useMyPackage(on?: ApiDate, enabled = true) {
+  return useQuery({
+    queryKey: qk.tuition.myPackage(on),
+    queryFn: () => tuitionStudentApi.myPackage(on),
+    staleTime: STALE.transactional,
+    enabled,
+  })
+}
+
+/**
+ * The signed-in tuition student's own invoices.
+ *
+ * Its own key rather than sharing `qk.tuition.invoices(studentId)` — that one
+ * holds the ADMIN list, which includes drafts. A student reading it would see
+ * figures that are not owed and can still change.
+ */
+export function useMyTuitionInvoices(status?: InvoiceStatus, enabled = true) {
+  return useQuery({
+    queryKey: qk.tuition.myInvoices(status),
+    queryFn: () => tuitionStudentApi.myInvoices(status),
+    staleTime: STALE.transactional,
+    enabled,
+  })
+}
+
+/** The signed-in tuition student's attempts on one of their invoices. */
+export function useMyTuitionPaymentIntents(invoiceId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: qk.tuition.myIntents(invoiceId ?? ''),
+    queryFn: () => tuitionStudentApi.intents(invoiceId as string),
+    staleTime: STALE.transactional,
+    enabled: enabled && !!invoiceId,
+  })
+}
+
+/**
+ * The tuition checkout's Pay button. Silent, like the school's: the checkout
+ * renders the outcome itself.
+ */
+export function useStartMyTuitionPayment() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ planId, body }: { planId: number; body: FeePlanUpdate }) =>
-      tuitionAdminApi.updateFeePlan(planId, body),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: qk.tuition.feePlans() })
-      toast.success('Fee plan updated')
+    meta: { silent: true },
+    mutationFn: ({ invoiceId, body }: { invoiceId: string; body: PaymentIntentCreate }) =>
+      tuitionStudentApi.createIntent(invoiceId, body),
+    onSuccess: (intent) => {
+      void qc.invalidateQueries({ queryKey: qk.tuition.myIntents(intent.invoice_id) })
+      void qc.invalidateQueries({ queryKey: qk.tuition.myInvoicesRoot() })
     },
   })
 }
 
 /**
- * Removing a plan does not re-price invoices already issued — those froze
- * their numbers when they were issued, which is the point of issuing them.
+ * The signed-in tuition student's fee breakdown for a period.
+ *
+ * Distinct from `useMyTuitionInvoices`: this is what the period ACCRUED, the
+ * invoice is what was billed. A student looking at an unbilled month sees the
+ * former and nothing in the latter, and both answers are correct.
  */
-export function useDeleteFeePlan() {
+export function useMyTuitionFees(
+  params: { periodStart: ApiDate; periodEnd: ApiDate; currency?: string },
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: qk.tuition.myFees(params.periodStart, params.periodEnd, params.currency),
+    queryFn: () => tuitionStudentApi.myFees(params),
+    staleTime: STALE.transactional,
+    enabled,
+  })
+}
+
+/** The office's preview of the same computation. */
+export function useTuitionFeeBreakdown(
+  studentId: number | null,
+  params: { periodStart: ApiDate; periodEnd: ApiDate; currency?: string },
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: qk.tuition.feeBreakdown(
+      studentId ?? 0,
+      params.periodStart,
+      params.periodEnd,
+      params.currency,
+    ),
+    queryFn: () => tuitionAdminApi.feeBreakdown(studentId as number, params),
+    staleTime: STALE.transactional,
+    enabled: enabled && studentId != null,
+  })
+}
+
+/**
+ * A package change re-prices every DRAFT on its next regeneration and changes
+ * what the student pages show for usage, so the fee subtree goes too. Issued
+ * invoices froze their figures and are untouched — which is the point of
+ * issuing them.
+ */
+function invalidatePackages(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: qk.tuition.packagesRoot() })
+  void qc.invalidateQueries({ queryKey: qk.tuition.studentPackageRoot() })
+  void qc.invalidateQueries({ queryKey: qk.tuition.feesRoot() })
+  void qc.invalidateQueries({ queryKey: ['tuition', 'fee-breakdown'] })
+  void qc.invalidateQueries({ queryKey: ['tuition', 'my-fees'] })
+  void qc.invalidateQueries({ queryKey: ['tuition', 'my-package'] })
+}
+
+export function useCreatePackage() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (planId: number) => tuitionAdminApi.deleteFeePlan(planId),
+    mutationFn: (body: TuitionPackageCreate) => tuitionAdminApi.createPackage(body),
+    onSuccess: (pkg: TuitionPackageOut) => {
+      invalidatePackages(qc)
+      toast.success(`Package “${pkg.name}” created`, {
+        description: `${pkg.classes_included} classes — ${pkg.per_class_amount} ${pkg.currency} a class.`,
+      })
+    },
+  })
+}
+
+export function useUpdatePackage() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ packageId, body }: { packageId: number; body: TuitionPackageUpdate }) =>
+      tuitionAdminApi.updatePackage(packageId, body),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: qk.tuition.feePlans() })
-      toast.success('Fee plan removed')
+      invalidatePackages(qc)
+      toast.success('Package updated')
+    },
+  })
+}
+
+/**
+ * 409 while students are on the package. That is the expected outcome of
+ * deleting something in use, not a crash — no toast fires, and the caller
+ * shows the server's message, which says how many are on it.
+ */
+export function useDeletePackage() {
+  const qc = useQueryClient()
+  return useMutation({
+    meta: { silent: true },
+    mutationFn: (packageId: number) => tuitionAdminApi.deletePackage(packageId),
+    onSuccess: () => {
+      invalidatePackages(qc)
+      toast.success('Package removed')
+    },
+  })
+}
+
+/**
+ * Puts a student on a package for a term. Replaces any assignment for the
+ * same year and term, so the student list on the old package changes too.
+ */
+export function useAssignPackage() {
+  const qc = useQueryClient()
+  return useMutation({
+    meta: { silent: true },
+    mutationFn: ({ studentId, body }: { studentId: number; body: PackageAssignmentCreate }) =>
+      tuitionAdminApi.assignPackage(studentId, body),
+    onSuccess: (assignment: PackageAssignmentOut) => {
+      invalidatePackages(qc)
+      toast.success(
+        `${assignment.student_name ?? 'Student'} is on ${assignment.package_name ?? 'the package'}`,
+        {
+          description: [assignment.academic_year_name, assignment.term_name]
+            .filter(Boolean)
+            .join(' · ') || undefined,
+        },
+      )
+    },
+  })
+}
+
+export function useEndPackageAssignment() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ studentId, assignmentId }: { studentId: number; assignmentId: number }) =>
+      tuitionAdminApi.endPackageAssignment(studentId, assignmentId),
+    onSuccess: () => {
+      invalidatePackages(qc)
+      toast.success('Taken off the package', {
+        description: 'Classes from here on are counted but unpriced until another is assigned.',
+      })
     },
   })
 }
@@ -1132,6 +1333,8 @@ export function useTuitionReminderPreview(enabled = true) {
 export function useRunTuitionReminders() {
   const qc = useQueryClient()
   return useMutation({
+    // Reports its own failure below; the global net would toast twice.
+    meta: { silent: true },
     mutationFn: tuitionAdminApi.runReminders,
     onSuccess: (summary) => {
       void qc.invalidateQueries({ queryKey: qk.tuition.remindersRoot() })
@@ -1302,6 +1505,80 @@ export function useDownloadLibraryItem() {
     mutationFn: (itemId: number) => tuitionLibraryApi.download(itemId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.tuition.library() })
+    },
+  })
+}
+
+// ------------------------------------------- subjects, student-first
+
+/**
+ * One student's tuition subjects — the same enrollments, shaped the way the
+ * office thinks about them.
+ *
+ * Shares no cache entry with `useTuitionEnrollments` on purpose: that one is
+ * the whole programme's list and this is one student's, and deriving the
+ * second from the first would make a single student's screen wait on every
+ * arrangement in the system.
+ */
+export function useStudentSubjects(studentId: number | null, enabled = true) {
+  return useQuery({
+    queryKey: qk.tuition.studentSubjects(studentId ?? 0),
+    queryFn: () => tuitionAdminApi.studentSubjects(studentId as number),
+    staleTime: STALE.reference,
+    enabled: enabled && studentId != null,
+  })
+}
+
+/**
+ * Both writes invalidate the enrollment subtree as well as this student's
+ * list: they ARE enrollments, and the arrangements screen reads the same rows
+ * under a different key.
+ */
+function invalidateStudentSubjects(qc: QueryClient, studentId: number) {
+  void qc.invalidateQueries({ queryKey: qk.tuition.studentSubjects(studentId) })
+  void qc.invalidateQueries({ queryKey: qk.tuition.enrollmentsRoot() })
+}
+
+/**
+ * 409 when the student already has that subject with a teacher on it. No
+ * toast on error — the caller says so against the subject field, because the
+ * fix is to pick a different subject rather than to retry.
+ */
+export function useAddStudentSubject() {
+  const qc = useQueryClient()
+  return useMutation({
+    // Reported in place by the caller, not as a toast.
+    meta: { silent: true },
+    mutationFn: ({ studentId, body }: { studentId: number; body: StudentSubjectAdd }) =>
+      tuitionAdminApi.addStudentSubject(studentId, body),
+    onSuccess: (subject) => {
+      invalidateStudentSubjects(qc, subject.student_id)
+      toast.success(`${subject.subject_name ?? 'Subject'} added`, {
+        description: 'It has no class times yet — add a weekly slot to make it run.',
+      })
+    },
+  })
+}
+
+export function useRemoveStudentSubject() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      studentId,
+      subjectId,
+      hardDelete,
+    }: {
+      studentId: number
+      subjectId: number
+      hardDelete?: boolean
+    }) => tuitionAdminApi.removeStudentSubject(studentId, subjectId, hardDelete),
+    onSuccess: (subject, { hardDelete }) => {
+      invalidateStudentSubjects(qc, subject.student_id)
+      toast.success(hardDelete ? 'Subject removed' : 'Subject cancelled', {
+        description: hardDelete
+          ? undefined
+          : 'The record and its history are kept — classes already taught are unaffected.',
+      })
     },
   })
 }

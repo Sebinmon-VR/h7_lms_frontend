@@ -8,6 +8,7 @@ import { cn } from '@/lib/cn'
 import { ROLES } from '@/lib/constants'
 import { downloadCsv, parseCsvObjects } from '@/lib/csv'
 import { Badge } from '@/components/ui/badge'
+import { FormError } from '@/components/forms/field'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -227,7 +228,7 @@ export function ImportUsersDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <DialogBody className="space-y-4">
+        <DialogBody className="space-y-5">
           {/* ------------------------------------------------- dropzone */}
           {batch.items.length === 0 && (
             <div
@@ -274,11 +275,7 @@ export function ImportUsersDialog({
             </div>
           )}
 
-          {parseError && (
-            <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
-              {parseError}
-            </p>
-          )}
+          <FormError message={parseError} />
 
           {/* --------------------------------------------------- summary */}
           {candidates.length > 0 && batch.items.length === 0 && (

@@ -1,15 +1,16 @@
-import { Check, Copy, ExternalLink, Film, Hourglass, Radio, Video } from 'lucide-react'
+import { Check, Copy, ExternalLink, Film, Hourglass, Radio } from 'lucide-react'
 import * as React from 'react'
 
 import type { LiveMeetingOut } from '@/api/types'
 import { useStudentMeetings } from '@/queries/student.queries'
 import { splitMeetings } from '@/lib/derive'
 import { cn } from '@/lib/cn'
-import { formatCountdown, formatDateTime, meetingPhase } from '@/lib/datetime'
+import { formatDateTime, meetingPhase } from '@/lib/datetime'
 import { resolveFileUrl } from '@/lib/files'
 import { recordingIsPending } from '@/lib/recordings'
 import { subjectName } from '@/lib/select'
 import { subjectLook, toneStyle } from '@/lib/subjects'
+import { ClassTimingBadge, JoinClassButton } from '@/components/domain/live-class'
 import { useCopyToClipboard, useNow } from '@/lib/hooks'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -37,11 +38,10 @@ function StudentMeetingCard({ meeting, now }: { meeting: LiveMeetingOut; now: Da
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <MeetingPhaseBadge phase={phase} />
-              {phase === 'upcoming' && (
-                <span className="text-xs font-semibold text-muted-foreground">
-                  starts in {formatCountdown(meeting.scheduled_time, now)}
-                </span>
-              )}
+              {/* The server's countdown. It knows about the early-join window,
+                  the grace period and whether the teacher has actually
+                  started; `formatCountdown` only knew the scheduled time. */}
+              {phase !== 'past' && <ClassTimingBadge meetingId={meeting.id} />}
             </div>
             <p className="mt-1.5 truncate text-base font-bold">{meeting.title}</p>
             <p className="mt-0.5 text-sm text-muted-foreground">
@@ -55,37 +55,28 @@ function StudentMeetingCard({ meeting, now }: { meeting: LiveMeetingOut; now: Da
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {meeting.meeting_link && phase !== 'past' && (
-            <>
-              <Button
-                asChild
-                variant={phase === 'live' ? 'primary' : 'outline'}
-                size={phase === 'live' ? 'lg' : 'sm'}
-                className={phase === 'live' ? 'animate-pulse-ring' : undefined}
-              >
-                <a href={meeting.meeting_link} target="_blank" rel="noopener noreferrer">
-                  <Video className="size-4" />
-                  {phase === 'live' ? 'Join now!' : 'Open link'}
-                </a>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Copy the link"
-                onClick={() => void copy(meeting.meeting_link as string)}
-              >
-                {copied ? <Check className="text-success" /> : <Copy />}
-              </Button>
-            </>
+          {/* The server's clock, not ours.
+              This used to link straight to `meeting.meeting_link` with the
+              phase worked out from `scheduled_time`, which let a student walk
+              into a room before it opened and disagreed with the server the
+              moment a teacher started late. The button below is bound to
+              `may_join` and fetches the link through `/classes/{id}/join`,
+              which enforces the same rule. */}
+          {phase !== 'past' && (
+            <JoinClassButton
+              meetingId={meeting.id}
+              size={phase === 'live' ? 'lg' : 'sm'}
+            />
           )}
-          {/* A class can legitimately be saved without a link — Meet generation
-              is best-effort. Say so plainly rather than leaving a gap the
-              student reads as a broken page. */}
-          {!meeting.meeting_link && phase !== 'past' && (
-            <span className="inline-flex items-center gap-1.5 rounded-lg border-2 border-dashed border-border px-2.5 py-1.5 text-xs text-muted-foreground">
-              <Hourglass className="size-3.5" />
-              Link coming soon
-            </span>
+          {meeting.meeting_link && phase !== 'past' && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Copy the link"
+              onClick={() => void copy(meeting.meeting_link as string)}
+            >
+              {copied ? <Check className="text-success" /> : <Copy />}
+            </Button>
           )}
           {recording && (
             <Button asChild variant="outline" size="sm">

@@ -31,11 +31,20 @@ export interface DialogContentProps
   hideClose?: boolean
 }
 
+/**
+ * Widths, one notch wider than they were.
+ *
+ * `md` is the default and carries most of the app's forms, several of which
+ * put two fields side by side. At 32rem each column landed under 230px, which
+ * is where a date input starts truncating and a select shows an ellipsis
+ * instead of the option somebody just picked. 36rem gives each column room to
+ * hold its own content.
+ */
 const SIZE: Record<NonNullable<DialogContentProps['size']>, string> = {
   sm: 'max-w-md',
-  md: 'max-w-lg',
-  lg: 'max-w-2xl',
-  xl: 'max-w-4xl',
+  md: 'max-w-xl',
+  lg: 'max-w-3xl',
+  xl: 'max-w-5xl',
 }
 
 export const DialogContent = React.forwardRef<
@@ -59,7 +68,7 @@ export const DialogContent = React.forwardRef<
       {children}
       {!hideClose && (
         <DialogPrimitive.Close
-          className="absolute right-4 top-4 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="absolute right-4 top-4 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
           aria-label="Close"
         >
           <X className="size-4" />
@@ -73,7 +82,10 @@ DialogContent.displayName = 'DialogContent'
 export function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn('flex shrink-0 flex-col gap-1.5 border-b border-border/60 p-5 pr-12', className)}
+      className={cn(
+        'flex shrink-0 flex-col gap-1.5 border-b border-border bg-muted/30 px-6 py-5 pr-14',
+        className,
+      )}
       {...props}
     />
   )
@@ -92,14 +104,18 @@ export function DialogForm({ className, ...props }: React.FormHTMLAttributes<HTM
 }
 
 export function DialogBody({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('min-h-0 flex-1 overflow-y-auto p-5', className)} {...props} />
+  // `space-y-5` as the default rhythm: a form that sets nothing still breathes,
+  // and the pages that want something tighter override it as they always did.
+  return (
+    <div className={cn('min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-6', className)} {...props} />
+  )
 }
 
 export function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={cn(
-        'flex shrink-0 flex-col-reverse gap-2 border-t border-border/60 p-5 py-4 sm:flex-row sm:justify-end',
+        'flex shrink-0 flex-col-reverse gap-2.5 border-t border-border bg-muted/30 px-6 py-4 sm:flex-row sm:justify-end',
         className,
       )}
       {...props}
@@ -125,7 +141,7 @@ export const DialogDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Description
     ref={ref}
-    className={cn('text-sm text-muted-foreground', className)}
+    className={cn('text-sm leading-relaxed text-muted-foreground', className)}
     {...props}
   />
 ))

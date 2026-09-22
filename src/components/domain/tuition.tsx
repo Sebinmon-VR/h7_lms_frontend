@@ -160,7 +160,7 @@ export function SessionCard({
               </Badge>
             )}
             {/* Only ever shown as a negative claim: `is_billable` is null until
-                somebody overrides it, and null means "as the fee plan says". */}
+                somebody overrides it, and null means "as the package says". */}
             {session.is_billable === false && (
               <Badge tone="neutral" size="sm">
                 Not billed

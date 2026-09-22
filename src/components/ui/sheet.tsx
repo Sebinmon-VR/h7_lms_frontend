@@ -53,16 +53,24 @@ export const SheetContent = React.forwardRef<
 SheetContent.displayName = 'SheetContent'
 
 export function SheetHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('flex flex-col gap-1.5 border-b border-border/60 p-5 pr-12', className)} {...props} />
+  return (
+    <div
+      className={cn(
+        'flex flex-col gap-1.5 border-b border-border bg-muted/30 px-6 py-5 pr-14',
+        className,
+      )}
+      {...props}
+    />
+  )
 }
 
 export function SheetBody({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('flex-1 overflow-y-auto p-5', className)} {...props} />
+  return <div className={cn('flex-1 space-y-5 overflow-y-auto px-6 py-6', className)} {...props} />
 }
 
 export function SheetFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn('flex gap-2 border-t border-border/60 p-5 py-4', className)} {...props} />
+    <div className={cn('flex gap-2.5 border-t border-border bg-muted/30 px-6 py-4', className)} {...props} />
   )
 }
 

@@ -76,7 +76,13 @@ export interface FirebaseLmsClaims {
   lms_user_id?: number
 }
 
-const CLAIM_ROLES: readonly UserRole[] = ['ADMIN', 'CLASS_TEACHER', 'TEACHER', 'STUDENT']
+const CLAIM_ROLES: readonly UserRole[] = [
+  'ADMIN',
+  'CLASS_TEACHER',
+  'TEACHER',
+  'STUDENT',
+  'PARENT',
+]
 
 /**
  * The backend re-issues these claims and revokes the account's tokens whenever

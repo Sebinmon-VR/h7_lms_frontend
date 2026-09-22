@@ -60,7 +60,7 @@ export default function TuitionStudentReportsPage() {
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">
-                          {String(line.subject ?? `Subject ${line.subject_id}`)}
+                          {line.subject_name ?? `Subject ${line.subject_id}`}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {line.attended ?? 0} of {line.conducted ?? 0} attended ·{' '}

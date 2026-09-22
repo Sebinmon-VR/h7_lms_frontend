@@ -489,6 +489,13 @@ export function roleHome(user: Pick<UserOut, 'role' | 'programs'> | null): strin
     case 'STUDENT':
       if (lms) return '/student'
       return tuition ? '/tuition/student' : '/profile'
+    // A parent is never programme-scoped, unlike the two above: they have no
+    // product of their own and reach whatever their children are part of. The
+    // switcher is their home, and it is reachable whether they have one child
+    // or six — including none, where it renders the "no children linked yet"
+    // state rather than redirecting somewhere they can do even less.
+    case 'PARENT':
+      return '/parent'
     default:
       return '/login'
   }

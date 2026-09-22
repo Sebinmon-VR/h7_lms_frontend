@@ -63,7 +63,7 @@ import { FiledBy } from '@/components/domain/filed-by'
 import { EmptyState } from '@/components/feedback/states'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
-import { Field } from '@/components/forms/field'
+import { Field, FormError } from '@/components/forms/field'
 import { PageHeader } from '@/components/layout/page-header'
 import { useClassSubjectSelection } from './class-subject-picker'
 import { AdminTeacherNotice, useIsAdminViewingTeacher } from './teacher-guard'
@@ -165,7 +165,7 @@ function UploadDialog({
           <DialogTitle>Upload study material</DialogTitle>
           <DialogDescription>Shared with every student in the selected class.</DialogDescription>
         </DialogHeader>
-        <DialogBody className="space-y-4">
+        <DialogBody className="space-y-5">
           {error && (
             <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">{error}</p>
           )}
@@ -230,7 +230,7 @@ function UploadDialog({
             </div>
           )}
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
             <Field id="material-class" label="Class" required>
               <Combobox
                 id="material-class"
@@ -496,12 +496,8 @@ function EditMaterialDialog({
             upload the new version.
           </DialogDescription>
         </DialogHeader>
-        <DialogBody className="space-y-4">
-          {error && (
-            <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
-              {error}
-            </p>
-          )}
+        <DialogBody className="space-y-5">
+          <FormError message={error} />
 
           <div className="flex items-center gap-3 rounded-lg border border-dashed border-border px-3 py-2.5">
             <FileTypeIcon url={material?.file_url ?? ''} />

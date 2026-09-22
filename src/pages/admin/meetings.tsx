@@ -42,7 +42,7 @@ import {
 } from '@/components/ui/dialog'
 import { EmptyState, ErrorState } from '@/components/feedback/states'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
-import { Field } from '@/components/forms/field'
+import { Field, FormError } from '@/components/forms/field'
 import { PageHeader } from '@/components/layout/page-header'
 import { MeetingCard } from '@/pages/teacher/meetings'
 
@@ -233,12 +233,8 @@ function AdminMeetingDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
-          <DialogBody className="space-y-4">
-            {form.formState.errors.root && (
-              <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
-                {form.formState.errors.root.message}
-              </p>
-            )}
+          <DialogBody className="space-y-5">
+            <FormError message={form.formState.errors.root?.message} />
 
             {editing ? (
               <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5">
@@ -278,7 +274,7 @@ function AdminMeetingDialog({
                   />
                 </Field>
 
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
                   <Field
                     id="admin-meeting-class"
                     label="Class"
