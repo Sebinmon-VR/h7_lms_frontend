@@ -35,6 +35,9 @@ import type { Program, TuitionAssessmentCategory } from './tuition.types'
  */
 export * from './school.types'
 
+/** Online admission requests — the website form and the office's queue for it. */
+export * from './admission-requests.types'
+
 /**
  * `CLASS_TEACHER` is a TEACHER with extra reach, not a separate kind of user.
  * They take periods, own subject mappings and appear on the timetable exactly

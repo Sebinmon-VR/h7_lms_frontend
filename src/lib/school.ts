@@ -1,6 +1,7 @@
 import type { GatewayMethod, PaymentIntentStatus } from '@/api/types'
 import type {
   AcademicYearStatus,
+  AdmissionRequestStatus,
   CalendarEvent,
   CalendarKind,
   ChargeKind,
@@ -60,6 +61,35 @@ export const YEAR_STATUS_HINT: Record<AcademicYearStatus, string> = {
   ACTIVE: 'The year currently being taught.',
   CLOSED: 'Over and settled. Read-only.',
 }
+
+// ============================================================ admission requests
+
+export const REQUEST_STATUSES: AdmissionRequestStatus[] = [
+  'NEW',
+  'UNDER_REVIEW',
+  'WAITLISTED',
+  'ADMITTED',
+  'REJECTED',
+]
+
+export const REQUEST_STATUS_LABEL: Record<AdmissionRequestStatus, string> = {
+  NEW: 'New',
+  UNDER_REVIEW: 'Under review',
+  WAITLISTED: 'Waitlisted',
+  ADMITTED: 'Admitted',
+  REJECTED: 'Declined',
+}
+
+export const REQUEST_STATUS_TONE: Record<AdmissionRequestStatus, Tone> = {
+  NEW: 'primary',
+  UNDER_REVIEW: 'info',
+  WAITLISTED: 'warning',
+  ADMITTED: 'success',
+  REJECTED: 'neutral',
+}
+
+/** Requests still waiting on a decision — the office's actual to-do list. */
+export const OPEN_REQUEST_STATUSES: AdmissionRequestStatus[] = ['NEW', 'UNDER_REVIEW', 'WAITLISTED']
 
 // ====================================================================== families
 

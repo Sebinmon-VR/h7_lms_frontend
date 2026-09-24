@@ -343,6 +343,20 @@ export const qk = {
   },
 
   /**
+   * Online admission requests from the website.
+   *
+   * One unfiltered list entry per programme, filtered by status on the
+   * client: the queue is small and the status chips switch instantly. The
+   * summary is its own entry because a badge wants it without the rows.
+   */
+  admissionRequests: {
+    root: ['admission-requests'] as const,
+    list: (program?: Program) => ['admission-requests', 'list', program ?? 'ALL'] as const,
+    summary: (program?: Program) => ['admission-requests', 'summary', program ?? 'ALL'] as const,
+    detail: (requestId: number) => ['admission-requests', 'detail', requestId] as const,
+  },
+
+  /**
    * Households and parent accounts.
    *
    * `search` stays OUT of the group key: the backend matches it with a Python

@@ -40,6 +40,8 @@ const AdminRecordings = lazy(() => import('@/pages/admin/recordings'))
 // role opens it, because the endpoints behind them are scoped per caller
 // rather than per route.
 const AdminAdmissions = lazy(() => import('@/pages/admin/admissions'))
+// The queue behind the admission form on the school's public website.
+const AdminAdmissionRequests = lazy(() => import('@/pages/admin/admission-requests'))
 const AdminFamilies = lazy(() => import('@/pages/admin/families'))
 const AdminFinance = lazy(() => import('@/pages/admin/finance'))
 const AdminNotices = lazy(() => import('@/pages/admin/notices'))
@@ -226,6 +228,9 @@ export function AppRoutes() {
                   tabs rather than five: the four links of the fee chain are
                   meaningless apart, and an admin sets them up in one sitting. */}
               <Route path="/admin/admissions" element={<AdminAdmissions />} />
+              {/* Its own path rather than /admin/admissions/requests, so the
+                  Admissions sidebar entry does not also light up for it. */}
+              <Route path="/admin/admission-requests" element={<AdminAdmissionRequests />} />
               <Route path="/admin/families" element={<AdminFamilies />} />
               <Route path="/admin/finance" element={<AdminFinance />} />
               <Route path="/admin/notices" element={<AdminNotices />} />

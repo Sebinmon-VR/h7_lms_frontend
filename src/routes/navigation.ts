@@ -16,6 +16,7 @@ import {
   FileText,
   GraduationCap,
   Home,
+  Inbox,
   LayoutDashboard,
   Layers,
   LifeBuoy,
@@ -65,6 +66,12 @@ const ADMIN_NAV: NavSection[] = [
     heading: 'People',
     items: [
       { to: '/admin/users', label: 'Users', icon: Users, description: 'Accounts and roles' },
+      {
+        to: '/admin/admission-requests',
+        label: 'Admission Requests',
+        icon: Inbox,
+        description: 'Applications from the website: review, admit in one step, or decline',
+      },
       {
         to: '/admin/families',
         label: 'Families',
