@@ -1,7 +1,8 @@
-import { Check, Copy, ExternalLink, Film, Hourglass, Radio } from 'lucide-react'
+import { ExternalLink, Film, Hourglass, Radio } from 'lucide-react'
 import * as React from 'react'
 
 import type { LiveMeetingOut } from '@/api/types'
+import { useMyClassRooms } from '@/queries/classes.queries'
 import { useStudentMeetings } from '@/queries/student.queries'
 import { splitMeetings } from '@/lib/derive'
 import { cn } from '@/lib/cn'
@@ -10,8 +11,9 @@ import { resolveFileUrl } from '@/lib/files'
 import { recordingIsPending } from '@/lib/recordings'
 import { subjectName } from '@/lib/select'
 import { subjectLook, toneStyle } from '@/lib/subjects'
-import { ClassTimingBadge, JoinClassButton } from '@/components/domain/live-class'
-import { useCopyToClipboard, useNow } from '@/lib/hooks'
+import { ClassRoomPanel } from '@/components/domain/class-room'
+import { ClassTimingBadge } from '@/components/domain/live-class'
+import { useNow } from '@/lib/hooks'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -21,9 +23,14 @@ import { FunEmpty, FunPageHeader, SubjectTile } from '@/components/fun/fun-ui'
 import { PageHeader } from '@/components/layout/page-header'
 import { AdminStudentNotice, NotEnrolledState, useEnrollmentStatus } from './student-guard'
 
+/**
+ * One period, as information. There is deliberately NO join button here: the
+ * student joins their classroom once for the day (the panel at the top) and
+ * the teachers come to them. A button per period would send them out and back
+ * in for every lesson, which is exactly what the shared room replaced.
+ */
 function StudentMeetingCard({ meeting, now }: { meeting: LiveMeetingOut; now: Date }) {
   const phase = meetingPhase(meeting.scheduled_time, now)
-  const { copied, copy } = useCopyToClipboard()
   const recording = resolveFileUrl(meeting.recording_url)
   const subject = subjectName(meeting)
 
@@ -55,28 +62,11 @@ function StudentMeetingCard({ meeting, now }: { meeting: LiveMeetingOut; now: Da
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {/* The server's clock, not ours.
-              This used to link straight to `meeting.meeting_link` with the
-              phase worked out from `scheduled_time`, which let a student walk
-              into a room before it opened and disagreed with the server the
-              moment a teacher started late. The button below is bound to
-              `may_join` and fetches the link through `/classes/{id}/join`,
-              which enforces the same rule. */}
-          {phase !== 'past' && (
-            <JoinClassButton
-              meetingId={meeting.id}
-              size={phase === 'live' ? 'lg' : 'sm'}
-            />
-          )}
-          {meeting.meeting_link && phase !== 'past' && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Copy the link"
-              onClick={() => void copy(meeting.meeting_link as string)}
-            >
-              {copied ? <Check className="text-success" /> : <Copy />}
-            </Button>
+          {phase === 'live' && (
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-success/10 px-2.5 py-1.5 text-xs font-semibold text-success">
+              <Radio className="size-3.5" />
+              Happening in your classroom
+            </span>
           )}
           {recording && (
             <Button asChild variant="outline" size="sm">
@@ -104,6 +94,8 @@ function StudentMeetingCard({ meeting, now }: { meeting: LiveMeetingOut; now: Da
 export default function StudentMeetingsPage() {
   const enrollment = useEnrollmentStatus()
   const meetingsQuery = useStudentMeetings(!enrollment.isAdmin)
+  // The class's one standing room — where every period of the day happens.
+  const roomsQuery = useMyClassRooms(!enrollment.isAdmin)
   const now = useNow(30_000)
 
   const groups = React.useMemo(
@@ -160,8 +152,19 @@ export default function StudentMeetingsPage() {
         emoji="🎥"
         tone={9}
         title="Live classes"
-        description="Join a class, or watch one back later."
+        description="One classroom link for the whole day. Join when the first class starts, stay through the breaks, and leave after the last one. Your teachers come to you."
       />
+
+      {/* The room comes first: it is the ONLY join a learner makes today. The
+          per-period list below is information — what is on, who is teaching
+          it, and the recordings afterwards. */}
+      {roomsQuery.data && roomsQuery.data.length > 0 && (
+        <div className="mb-6 space-y-3">
+          {roomsQuery.data.map((room) => (
+            <ClassRoomPanel key={room.class_id} access={room} variant="student" />
+          ))}
+        </div>
+      )}
 
       <Tabs defaultValue={groups.live.length > 0 ? 'live' : 'upcoming'}>
         <TabsList>
@@ -178,7 +181,7 @@ export default function StudentMeetingsPage() {
           {renderList(
             groups.live,
             'Nothing on right now',
-            'A class pops up here 10 minutes before it starts.',
+            'A class shows here while it is on. You join it from your classroom above, not from here.',
           )}
         </TabsContent>
         <TabsContent value="upcoming">

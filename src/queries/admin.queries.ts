@@ -30,6 +30,7 @@ import type {
   TimetableEntryUpdate,
   UserCreate,
   UserOut,
+  UserPresenceOut,
   UserRole,
   UserUpdate,
 } from '@/api/types'
@@ -46,6 +47,35 @@ export function useUsers(role?: UserRole) {
     queryFn: () => adminApi.listUsers(role),
     staleTime: STALE.reference,
   })
+}
+
+/**
+ * Who is online. Polled every 30 seconds under its own key, so the dots move
+ * without the whole user list refetching. A user is online when the server
+ * heard from them in the last three minutes.
+ */
+export function useUserPresence(enabled = true) {
+  return useQuery({
+    queryKey: qk.admin.presence(),
+    queryFn: adminApi.listPresence,
+    staleTime: STALE.live,
+    refetchInterval: 30_000,
+    enabled,
+  })
+}
+
+/** The same as a lookup by user id, plus the online headcount. */
+export function usePresenceMap(enabled = true) {
+  const presence = useUserPresence(enabled)
+  return React.useMemo(() => {
+    const byId = new Map<number, UserPresenceOut>()
+    let onlineCount = 0
+    for (const row of presence.data ?? []) {
+      byId.set(row.user_id, row)
+      if (row.is_online) onlineCount += 1
+    }
+    return { byId, onlineCount, isPending: presence.isPending }
+  }, [presence.data, presence.isPending])
 }
 
 /**

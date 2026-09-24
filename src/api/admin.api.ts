@@ -4,7 +4,9 @@ import type {
   AdminStudyMaterialCreate,
   ApiDate,
   ClassRoomCreate,
+  ClassRoomEventOut,
   ClassRoomOut,
+  ClassRoomSetup,
   ClassRoomUpdate,
   ClassTeacherMappingCreate,
   ClassTeacherMappingOut,
@@ -13,6 +15,9 @@ import type {
   IntegrationsHealth,
   JobAccepted,
   JobOut,
+  ClassRoomAttendanceOut,
+  LiveClassBoardRow,
+  UserPresenceOut,
   LiveMeetingOut,
   LiveMeetingUpdate,
   RecordingLogEntry,
@@ -31,6 +36,7 @@ import type {
   SubjectOut,
   SubjectUpdate,
   SystemMonitoringReport,
+  TeacherAccessRepair,
   TeacherMappingCreate,
   TeacherMappingOut,
   TimetableBulkCreate,
@@ -48,6 +54,9 @@ import type {
 export const adminApi = {
   listUsers: (role?: UserRole) =>
     get<UserOut[]>('/admin/users', { params: cleanParams({ role }) }),
+
+  /** Every user's last sign of life, online first. Poll it for the green dots. */
+  listPresence: () => get<UserPresenceOut[]>('/admin/users/presence'),
 
   /**
    * `email` may be omitted — the server derives it from `full_name`. The UI
@@ -115,6 +124,74 @@ export const adminApi = {
    */
   deleteClass: (classId: number, force = false) =>
     del(`/admin/classes/${classId}`, { params: cleanParams({ force: force || undefined }) }),
+
+  /**
+   * Give a class its standing live-class room — the one Meet link every
+   * period of the day happens in. Empty body: a Meet room on the school's
+   * Workspace identity. `owner_id` hosts it on a teacher's calendar instead;
+   * `manual_link` records a link the school already has. A 502 means Meet
+   * refused, and the class now carries `room_status: 'FAILED'` with the reason.
+   */
+  setupClassRoom: (classId: number, body: ClassRoomSetup = {}) =>
+    post<ClassRoomOut>(`/admin/classes/${classId}/room`, body),
+
+  /** Removes the room and deletes its Calendar event; the old link stops working. */
+  clearClassRoom: (classId: number) =>
+    delWithBody<ClassRoomOut>(`/admin/classes/${classId}/room`),
+
+  /**
+   * Puts every teacher of the class on its room's guest list, so Meet lets
+   * them in without asking. Happens on its own as teachers are mapped,
+   * schedule or join; this re-runs it and re-sends the invitations.
+   */
+  inviteClassRoomTeachers: (classId: number) =>
+    post<ClassRoomOut>(`/admin/classes/${classId}/room/guests`),
+
+  /**
+   * Lets anyone with the link into the room without asking, by setting the
+   * Meet space's access type to OPEN. Done on its own when a room is made
+   * and retried by the sweep; a 502 carries Google's reason, including the
+   * exact scope to authorise when the delegation lacks it.
+   */
+  openClassRoom: (classId: number) => post<ClassRoomOut>(`/admin/classes/${classId}/room/open`),
+
+  /**
+   * The same repair for per-session links: adds each teacher to every
+   * future session's Calendar event they are not yet a guest of, once. The
+   * maintenance sweep covers the next two days on its own.
+   */
+  repairTeacherAccess: (notify = false) =>
+    post<TeacherAccessRepair>('/admin/meetings/repair-teacher-access', undefined, {
+      params: cleanParams({ notify: notify || undefined }),
+      timeout: 120_000,
+    }),
+
+  /**
+   * The live board: every class right now — current period, teacher, who has
+   * come in today, live sessions. Classes in session sort first. Poll it; it
+   * is computed on request and carries the room link for an admin.
+   */
+  liveBoard: () => get<LiveClassBoardRow[]>('/admin/live-classes'),
+
+  /** A class's room log, newest first. `todayOnly` false returns the whole history (capped). */
+  liveClassEvents: (classId: number, params: { todayOnly?: boolean; limit?: number } = {}) =>
+    get<ClassRoomEventOut[]>(`/admin/live-classes/${classId}/events`, {
+      params: cleanParams({ today_only: params.todayOnly, limit: params.limit }),
+    }),
+
+  /**
+   * Who Google Meet saw in the room, with join and leave times — the only true
+   * record. Copied by the sweep every few minutes; `sync` asks Meet right now
+   * (slower, and a 502 with Google's reason when the read scope is missing).
+   */
+  liveClassAttendance: (
+    classId: number,
+    params: { onDate?: string | null; sync?: boolean } = {},
+  ) =>
+    get<ClassRoomAttendanceOut[]>(`/admin/live-classes/${classId}/attendance`, {
+      params: cleanParams({ on_date: params.onDate ?? undefined, sync: params.sync || undefined }),
+      timeout: params.sync ? 60_000 : undefined,
+    }),
 
   listSubjects: () => get<SubjectOut[]>('/admin/subjects'),
   createSubject: (body: SubjectCreate) => post<SubjectOut>('/admin/subjects', body),

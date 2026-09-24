@@ -13,4 +13,10 @@ export const authApi = {
     post<TokenResponse>('/auth/login', body, { meta: { skipAuthRedirect: true } }),
 
   me: () => get<UserOut>('/auth/me'),
+
+  /**
+   * A sign of life for the office's "who is online". Sent once a minute while
+   * a tab is visible; the caller swallows failures.
+   */
+  heartbeat: () => post<{ ok: boolean; online_window_seconds: number }>('/auth/heartbeat'),
 }

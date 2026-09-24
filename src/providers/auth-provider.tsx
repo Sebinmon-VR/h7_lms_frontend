@@ -327,6 +327,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(id)
   }, [status, logout])
 
+  // ------------------------------------------------- presence heartbeat
+  // A sign of life once a minute while the tab is visible, so the office's
+  // "who is online" stays true for somebody reading without clicking. Any
+  // failure is swallowed: presence is never worth an error in the user's face.
+  React.useEffect(() => {
+    if (status !== 'authenticated') return
+    const beat = () => {
+      if (document.visibilityState !== 'visible') return
+      void authApi.heartbeat().catch(() => undefined)
+    }
+    beat()
+    const id = window.setInterval(beat, 60_000)
+    document.addEventListener('visibilitychange', beat)
+    return () => {
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', beat)
+    }
+  }, [status])
+
   // ------------------------------------------------------- cross-tab
   React.useEffect(() => {
     const onStorage = (e: StorageEvent) => {

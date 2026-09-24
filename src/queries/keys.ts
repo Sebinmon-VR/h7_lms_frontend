@@ -77,6 +77,8 @@ export const qk = {
     root: ['admin'] as const,
     users: (role?: UserRole) => ['admin', 'users', role ?? 'ALL'] as const,
     usersRoot: () => ['admin', 'users'] as const,
+    /** Who is online; polled, its own key so it never drags the user list along. */
+    presence: () => ['admin', 'presence'] as const,
     classes: () => ['admin', 'classes'] as const,
     subjects: () => ['admin', 'subjects'] as const,
     mappings: () => ['admin', 'mappings'] as const,
@@ -110,6 +112,15 @@ export const qk = {
     recordingPreview: () => ['admin', 'recordings', 'preview'] as const,
     recordingLog: (limit: number) => ['admin', 'recordings', 'log', limit] as const,
     recordingsRoot: () => ['admin', 'recordings'] as const,
+    /** The live board and a class's room log — both polled, both near-zero stale. */
+    liveBoard: () => ['admin', 'live-board'] as const,
+    liveEvents: (classId: number, todayOnly: boolean) =>
+      ['admin', 'live-events', classId, todayOnly] as const,
+    liveEventsRoot: () => ['admin', 'live-events'] as const,
+    /** Meet's own attendance for a class on a day (null date = today). */
+    liveAttendance: (classId: number, onDate: string | null) =>
+      ['admin', 'live-attendance', classId, onDate] as const,
+    liveAttendanceRoot: () => ['admin', 'live-attendance'] as const,
   },
   health: {
     root: ['health'] as const,
@@ -125,6 +136,8 @@ export const qk = {
     classStudentsRoot: () => ['teacher', 'class-students'] as const,
     attendance: () => ['teacher', 'attendance'] as const,
     topics: () => ['teacher', 'topics'] as const,
+    /** Periods of theirs that ended today with nothing logged yet — the end-of-period prompt. */
+    pendingTopics: () => ['teacher', 'topics', 'pending'] as const,
     meetings: () => ['teacher', 'meetings'] as const,
     materials: () => ['teacher', 'materials'] as const,
     grades: () => ['teacher', 'grades'] as const,
@@ -516,6 +529,15 @@ export const qk = {
     timing: (meetingId: number) => ['classes', 'timing', meetingId] as const,
     timingRoot: () => ['classes', 'timing'] as const,
     live: () => ['classes', 'live'] as const,
+
+    /**
+     * The class rooms — one standing Meet room per class. Near-zero stale like
+     * `timing`: each carries "may I enter right now?" and today's clock.
+     */
+    rooms: () => ['classes', 'rooms'] as const,
+    room: (classId: number) => ['classes', 'rooms', classId] as const,
+    /** Who is in the room now; sits under the room key so a join or leave refreshes it. */
+    presence: (classId: number) => ['classes', 'rooms', classId, 'presence'] as const,
 
     extra: (status?: string, mineOnly = false) =>
       ['classes', 'extra', status ?? 'ALL', mineOnly] as const,

@@ -1,4 +1,4 @@
-import { cleanParams, del, get, post, put } from './client'
+import { cleanParams, del, delWithBody, get, post, put } from './client'
 import type {
   ApiDate,
   AttendanceOut,
@@ -13,6 +13,7 @@ import type {
   LiveMeetingCreate,
   LiveMeetingOut,
   LiveMeetingUpdate,
+  PendingTopicOut,
   StudyMaterialCreate,
   StudyMaterialOut,
   StudyMaterialUpdate,
@@ -104,6 +105,36 @@ export const teacherApi = {
   updateTopic: (topicId: number, body: TopicUpdate) =>
     put<TopicOut>(`/teachers/topics/${topicId}`, body),
   deleteTopic: (topicId: number) => del(`/teachers/topics/${topicId}`),
+
+  /** Periods of yours that ended today with nothing logged yet — the dashboard's prompt. */
+  pendingTopics: () => get<PendingTopicOut[]>('/teachers/topics/pending'),
+
+  /**
+   * multipart/form-data; the file field must be named exactly `file`. Notes,
+   * an image or a voice note recorded in the browser. Returns the topic with
+   * its attachments.
+   */
+  addTopicAttachment: (
+    topicId: number,
+    file: File,
+    meta: { kind?: string; caption?: string } = {},
+    onProgress?: (percent: number) => void,
+  ) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (meta.kind) form.append('kind', meta.kind)
+    if (meta.caption) form.append('caption', meta.caption)
+    return post<TopicOut>(`/teachers/topics/${topicId}/attachments`, form, {
+      timeout: 120_000,
+      onUploadProgress: (e) => {
+        if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100))
+      },
+    })
+  },
+
+  /** Removes one attachment and its file; returns the topic. */
+  removeTopicAttachment: (topicId: number, attachmentId: string) =>
+    delWithBody<TopicOut>(`/teachers/topics/${topicId}/attachments/${attachmentId}`),
 
   listMeetings: () => get<LiveMeetingOut[]>('/teachers/meetings'),
 

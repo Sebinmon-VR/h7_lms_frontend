@@ -202,6 +202,23 @@ export default function AdminSchoolSettingsPage() {
 
               <label className="flex items-start justify-between gap-4">
                 <span className="min-w-0">
+                  <span className="text-sm font-medium">One shared room per class</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    On — the default — every class has a single Google Meet room. Students join
+                    it and stay for the day; each subject teacher joins the same room at their
+                    period, and scheduled sessions reuse the class’s link. Rooms are created
+                    automatically about 30 minutes before a class’s first period. Off restores a
+                    separate Meet link per scheduled session. Tuition is not affected.
+                  </span>
+                </span>
+                <Switch
+                  checked={read('class_room_mode') ?? true}
+                  onCheckedChange={(v) => set('class_room_mode', v)}
+                />
+              </label>
+
+              <label className="flex items-start justify-between gap-4 border-t border-border pt-4">
+                <span className="min-w-0">
                   <span className="text-sm font-medium">Open classes automatically</span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">
                     On, a class opens on its timetabled time with no teacher action. Off — the

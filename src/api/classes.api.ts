@@ -3,14 +3,17 @@ import type {
   ApiDate,
   CalendarKind,
   CalendarOut,
+  ClassRoomAccessOut,
   ClassTimingOut,
   ExtraClassCreate,
   ExtraClassDecision,
   ExtraClassOut,
   ExtraClassStatus,
   JoinClassOut,
+  JoinRoomOut,
   LiveClassRow,
   Program,
+  RoomPresenceOut,
 } from './types'
 
 /**
@@ -55,6 +58,39 @@ export const liveClassApi = {
    * `timing.may_join`, so go through `join` rather than following it blind.
    */
   live: () => get<LiveClassRow[]>('/classes/live'),
+
+  // ------------------------------------------------------------- class rooms
+  //
+  // The classroom model: ONE standing Meet room per class. A student joins it
+  // and stays; each subject teacher joins at their period. Sessions still
+  // exist (they are the periods), but their link is the room's.
+
+  /**
+   * The rooms this user belongs to, with today's periods and whether they
+   * may enter right now. A student gets their class, a teacher every class
+   * they teach or lead, an admin all of them.
+   */
+  myRooms: () => get<ClassRoomAccessOut[]>('/classes/rooms/mine'),
+
+  /** One room's clock. Poll it while a page shows the join button. */
+  room: (classId: number) => get<ClassRoomAccessOut>(`/classes/rooms/${classId}`),
+
+  /**
+   * Returns the link ONLY if the caller may enter. 409 with a readable reason
+   * otherwise — the expected outcome of a button that went stale. A teacher
+   * entering a class with no room yet has one created on the way in.
+   */
+  joinRoom: (classId: number) => post<JoinRoomOut>(`/classes/rooms/${classId}/join`),
+
+  /**
+   * Records that the caller has left. The LMS cannot see a Meet tab close, so
+   * this is the person saying so; the class log gains a LEFT_ROOM line and the
+   * returned access reads `in_room: false`. The Meet call itself is untouched.
+   */
+  leaveRoom: (classId: number) => post<ClassRoomAccessOut>(`/classes/rooms/${classId}/leave`),
+
+  /** Who is in the room right now, by name. Teachers of the class and admins; a student gets 403. */
+  presence: (classId: number) => get<RoomPresenceOut>(`/classes/rooms/${classId}/presence`),
 }
 
 /**

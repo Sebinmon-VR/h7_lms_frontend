@@ -3,6 +3,7 @@ import * as React from 'react'
 import { Link } from 'react-router-dom'
 
 import { useAuth } from '@/providers/auth-provider'
+import { useMyClassRooms } from '@/queries/classes.queries'
 import {
   useStudentAttendance,
   useStudentGrades,
@@ -30,6 +31,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ProgressBar } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
+import { JoinRoomButton, LeaveRoomButton, PresenceNote } from '@/components/domain/class-room'
 import { useCelebration } from '@/components/fun/celebrate'
 import { Appear, Pressable, Stagger, WaveDivider } from '@/components/fun/motion'
 import {
@@ -171,6 +173,9 @@ export default function StudentDashboardPage() {
   const materialsQuery = useStudentMaterials(!enrollment.isAdmin)
   const topicsQuery = useStudentTopics(!enrollment.isAdmin)
   const upcomingQuery = useStudentUpcoming(!enrollment.isAdmin)
+  // The class's shared room: the one link the whole day happens in.
+  const roomsQuery = useMyClassRooms(!enrollment.isAdmin)
+  const classRoom = roomsQuery.data?.[0] ?? null
 
   const attendance = React.useMemo(() => attendanceQuery.data ?? [], [attendanceQuery.data])
   const grades = React.useMemo(() => gradesQuery.data ?? [], [gradesQuery.data])
@@ -314,8 +319,9 @@ export default function StudentDashboardPage() {
       </FunHero>
 
       {/* ---------------------------------------------------- what's next
-          The single biggest thing on the page. A learner opening this before
-          school wants one answer: where do I need to be, and when. */}
+          The single biggest thing on the page, right under the greeting. A
+          learner opening this before school wants one answer — where do I
+          need to be, and when — and the button to go there. */}
       {(nextPeriod || upcomingMeeting) && (
         <Appear
           style={toneStyle(
@@ -358,11 +364,20 @@ export default function StudentDashboardPage() {
                   </>
                 )}
               </p>
+              {classRoom && <PresenceNote access={classRoom} className="mt-1" />}
             </div>
 
-            {/* The join button belongs to the MEETING, so it follows the
-                meeting's own phase rather than the banner's. */}
-            {upcomingMeeting?.meeting_link && (
+            {/* The class's shared room, when the school runs one: ONE join for
+                the whole day, open from just before the first period to just
+                after the last, and a Leave button once they are in so their
+                leaving time is recorded. Falls back to the meeting's own link
+                for a class without a room. */}
+            {classRoom ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <JoinRoomButton access={classRoom} size="lg" />
+                <LeaveRoomButton access={classRoom} size="lg" />
+              </div>
+            ) : upcomingMeeting?.meeting_link && (
               <Button
                 asChild
                 variant={meetingLive ? 'primary' : 'outline'}

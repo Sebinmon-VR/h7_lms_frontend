@@ -318,6 +318,57 @@ export interface ClassRoomOut {
   name: string
   code: string
   description: string | null
+  /**
+   * The class's standing live-class room — ONE Google Meet link the whole
+   * class shares, which every subject teacher joins at their period. All
+   * optional: a class whose room is not set up carries none. `room_status`
+   * is NONE, CREATED (a Meet room the LMS made), MANUAL (a pasted link) or
+   * FAILED, with `room_error` saying why.
+   */
+  room_link?: string | null
+  room_provider?: 'GOOGLE_MEET' | 'MANUAL' | string | null
+  room_status?: 'NONE' | 'CREATED' | 'MANUAL' | 'FAILED' | string | null
+  room_error?: string | null
+  room_owner_id?: number | null
+  room_owner_email?: string | null
+  room_auto_record?: boolean | null
+  room_recording_status?: RecordingStatus | string | null
+  /**
+   * Teachers on the room's Calendar guest list — the ones Meet lets in
+   * without asking. Kept in step as teachers are mapped, schedule or join.
+   */
+  room_guest_emails?: string[] | null
+  room_guest_error?: string | null
+  /**
+   * Who may walk in without asking. OPEN means anyone with the link — the
+   * goal, since teachers and students sign into Google with addresses the
+   * LMS cannot invite. Null means Google has not accepted the setting yet
+   * and `room_access_error` says why (usually a missing Meet API scope).
+   */
+  room_access_type?: 'OPEN' | 'TRUSTED' | 'RESTRICTED' | string | null
+  room_access_error?: string | null
+  room_created_at?: ApiDateTime | null
+}
+
+/** Outcome of `POST /admin/meetings/repair-teacher-access`. */
+export interface TeacherAccessRepair {
+  checked: number
+  invited: number
+  already: number
+  skipped: number
+  failed: number
+  failures: { meeting_id: number | null; title?: string | null; error: string }[]
+}
+
+/** Body of `POST /admin/classes/{id}/room`. Everything optional. */
+export interface ClassRoomSetup {
+  /** Host the room on this teacher's calendar (their Drive gets the recordings). */
+  owner_id?: number | null
+  auto_record?: boolean
+  /** Use a link the school already has instead of creating a Meet room. */
+  manual_link?: string | null
+  /** Replace an existing room; its Calendar event is deleted. */
+  replace?: boolean
 }
 
 export interface ClassRoomCreate {
@@ -458,6 +509,26 @@ export interface AttendanceUpdate {
 
 // ------------------------------------------------------------------ topic
 
+export type TopicAttachmentKind = 'NOTE' | 'IMAGE' | 'AUDIO'
+
+/**
+ * A file the teacher attached to a logged topic: notes (any document), an
+ * image, or a voice note recorded in the browser. `file_url` resolves like a
+ * study material's — use resolveFileUrl.
+ */
+export interface TopicAttachmentOut {
+  id: string
+  kind: TopicAttachmentKind | string
+  file_name?: string | null
+  file_url: string
+  content_type?: string | null
+  size_bytes?: number | null
+  storage_provider?: string | null
+  storage_warning?: string | null
+  uploaded_at?: ApiDateTime | null
+  caption?: string | null
+}
+
 export interface TopicOut {
   id: number
   class_id: number
@@ -471,6 +542,25 @@ export interface TopicOut {
   date_covered: ApiDate
   completion_percentage: number
   created_at: ApiDateTime
+  attachments: TopicAttachmentOut[]
+}
+
+/**
+ * A period of the teacher's that ended today with no topic logged against it
+ * yet: GET /teachers/topics/pending, most recent first. The dashboard turns
+ * each into a "log what you covered" prompt with class, subject and date
+ * filled in.
+ */
+export interface PendingTopicOut {
+  class_id: number
+  class_name: string
+  subject_id: number
+  subject_name: string
+  on_date: ApiDate
+  starts_at: ApiDateTime
+  ends_at: ApiDateTime
+  period_label?: string | null
+  minutes_since_end: number
 }
 
 export interface TopicCreate {
@@ -546,14 +636,24 @@ export interface LiveMeetingOut {
    * of them; a class recorded in several parts keeps the rest here.
    */
   recording_files?: RecordingFile[] | null
+  /**
+   * True when the session uses its class's one standing room rather than a
+   * link of its own (`meet_status` is then CLASS_ROOM). Editing or cancelling
+   * the session leaves the room untouched.
+   */
+  uses_class_room?: boolean | null
+  /** OPEN means anyone with the link joins without asking; null means not yet accepted by Google. */
+  meet_access_type?: 'OPEN' | 'TRUSTED' | 'RESTRICTED' | string | null
+  meet_access_error?: string | null
 }
 
 /**
  * MANUAL — a link was supplied by hand; SKIPPED — generation was not requested;
  * CREATED — a Meet link was generated; FAILED — generation was attempted and
- * did not work, and `meet_error` says why.
+ * did not work, and `meet_error` says why; CLASS_ROOM — the session uses the
+ * class's shared room.
  */
-export type MeetStatus = 'CREATED' | 'FAILED' | 'MANUAL' | 'SKIPPED'
+export type MeetStatus = 'CREATED' | 'FAILED' | 'MANUAL' | 'SKIPPED' | 'CLASS_ROOM'
 
 /**
  * Lifecycle of a session's recording.
@@ -930,6 +1030,8 @@ export interface TimetableBulkResult {
  * A recurring entry resolved against one calendar date, with the concrete
  * instants it maps to — so the client never redoes weekday or timezone maths.
  */
+export type PeriodTeacherStatus = 'UPCOMING' | 'IN' | 'LEFT' | 'NOT_YET' | 'ABSENT'
+
 export interface ScheduledPeriod {
   entry: TimetableEntryOut
   on_date: ApiDate
@@ -938,6 +1040,16 @@ export interface ScheduledPeriod {
   /** Negative once the period has begun. Null when not computable. */
   starts_in_minutes: number | null
   is_current: boolean
+  /**
+   * Set on periods that come back with a class room (`/classes/rooms/...`):
+   * how the period's teacher turned up, from the LMS log. `waiting_minutes`
+   * is how long students sat without them — the arrival delay, or the time
+   * so far for a running period nobody has come to.
+   */
+  teacher_joined_at?: ApiDateTime | null
+  teacher_left_at?: ApiDateTime | null
+  teacher_status?: PeriodTeacherStatus | string | null
+  waiting_minutes?: number | null
 }
 
 // ------------------------------------------------------------- reminders

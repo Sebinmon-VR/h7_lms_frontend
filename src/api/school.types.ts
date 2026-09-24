@@ -21,7 +21,7 @@
  * through the same five states.
  */
 
-import type { ApiDate, ApiDateTime, UserRole } from './types'
+import type { ApiDate, ApiDateTime, ScheduledPeriod, UserRole } from './types'
 import type { InvoiceStatus, Program } from './tuition.types'
 
 // ==================================================================== admissions
@@ -1450,6 +1450,199 @@ export interface LiveClassRow {
   subject_id?: number | null
   meeting_link?: string | null
   timing: ClassTimingOut
+}
+
+/**
+ * A class's standing room, as one person sees it right now.
+ *
+ * The school runs ONE Google Meet room per class: students join it and stay,
+ * and each subject teacher joins at their period. `may_join` is the single
+ * flag a join button binds to — for a student it is true for the WHOLE school
+ * day, from `day_opens_at` (a little before the first period) to
+ * `day_closes_at` (a little after the last), breaks included, or while any
+ * scheduled session is live; a teacher or admin may always enter. Show
+ * `join_blocked_reason` verbatim when it is false. `room_link` is present
+ * only when the caller may enter.
+ */
+export interface ClassRoomAccessOut {
+  class_id: number
+  class_name: string
+  class_code?: string | null
+  has_room: boolean
+  room_provider?: 'GOOGLE_MEET' | 'MANUAL' | string | null
+  room_status?: 'NONE' | 'CREATED' | 'MANUAL' | 'FAILED' | string | null
+  room_error?: string | null
+  room_recording_status?: string | null
+  /** Whether the school shares rooms per class at all (the admin setting). */
+  class_room_mode: boolean
+  is_host: boolean
+  now: ApiDateTime
+  may_join: boolean
+  join_blocked_reason?: string | null
+  current_period?: ScheduledPeriod | null
+  next_period?: ScheduledPeriod | null
+  periods_today: ScheduledPeriod[]
+  /**
+   * The day's window: a student joins once at `day_opens_at` and stays until
+   * `day_closes_at`. Null when nothing is timetabled today.
+   */
+  day_opens_at?: ApiDateTime | null
+  day_closes_at?: ApiDateTime | null
+  /**
+   * The caller's own window: a teacher may enter only around THEIR period
+   * (the current one, else the next), a student for the day, an admin always
+   * (null). `my_*_period` are a teacher's own periods in this class.
+   */
+  window_opens_at?: ApiDateTime | null
+  window_closes_at?: ApiDateTime | null
+  my_current_period?: ScheduledPeriod | null
+  my_next_period?: ScheduledPeriod | null
+  /** The caller is this class's class teacher and gets the whole-day window. */
+  leads_class?: boolean
+  /** Admins may always enter; every other host is bound to their own periods. */
+  is_admin?: boolean
+  /** Scheduled sessions of this class that are live right now. */
+  live_meeting_ids: number[]
+  /**
+   * The caller's own last movement today. `in_room` is true when that last
+   * word was a join. The LMS cannot see a Meet tab close, so a leave is the
+   * person saying so through the Leave button (`POST /rooms/{id}/leave`).
+   */
+  my_last_action?: ClassRoomEventAction | string | null
+  my_last_at?: ApiDateTime | null
+  in_room: boolean
+  room_link?: string | null
+}
+
+export interface JoinRoomOut {
+  class_id: number
+  class_name: string
+  room_link?: string | null
+  access: ClassRoomAccessOut
+}
+
+/**
+ * One user's last sign of life (`GET /admin/users/presence`). `is_online`
+ * means the server heard from them in the last three minutes: any request,
+ * or the heartbeat an open tab sends once a minute. A user with no row has
+ * not signed in since tracking began.
+ */
+export interface UserPresenceOut {
+  user_id: number
+  last_seen_at?: ApiDateTime | null
+  is_online: boolean
+}
+
+export interface RoomPresenceRow {
+  user_id: number
+  name: string
+  in_room: boolean
+  last_action?: ClassRoomEventAction | string | null
+  last_at?: ApiDateTime | null
+}
+
+/**
+ * Who is in a class's room right now, by name, from the LMS log: in when
+ * their last word today was a join, out when it was a leave. Teachers of the
+ * class and admins only (`GET /classes/rooms/{id}/presence`).
+ */
+export interface RoomPresenceOut {
+  class_id: number
+  class_name: string
+  now: ApiDateTime
+  enrolled_count: number
+  in_count: number
+  /** Everyone enrolled, those in the room first, then by name. */
+  students: RoomPresenceRow[]
+  teachers_in: RoomPresenceRow[]
+  meet_attendance_synced_at?: ApiDateTime | null
+}
+
+/**
+ * What the LMS recorded about a class's room: a join it handed a link out
+ * for, a leave somebody told it about, a period a teacher opened or closed, a
+ * room made or removed. Google Meet's own record of who was in the call, and
+ * when, is `ClassRoomAttendanceOut`.
+ */
+export type ClassRoomEventAction =
+  | 'JOINED_ROOM'
+  | 'LEFT_ROOM'
+  | 'JOINED_SESSION'
+  | 'STARTED'
+  | 'ENDED'
+  | 'ROOM_CREATED'
+  | 'ROOM_REPLACED'
+  | 'ROOM_LINK_SET'
+  | 'ROOM_CLEARED'
+
+export interface ClassRoomEventOut {
+  id?: number | null
+  class_id: number
+  meeting_id?: number | null
+  user_id?: number | null
+  user_name?: string | null
+  role?: UserRole | string | null
+  action: ClassRoomEventAction | string
+  detail?: string | null
+  at: ApiDateTime
+}
+
+export interface LiveSessionOut {
+  meeting_id: number
+  title?: string | null
+  subject_name?: string | null
+  teacher_name?: string | null
+  timing: ClassTimingOut
+}
+
+/**
+ * One class on the admin's live board. `students_joined_today` is everyone
+ * the LMS saw come in; `students_in_now` / `teachers_in_now` are those whose
+ * last word today was a join rather than a leave.
+ */
+export interface LiveClassBoardRow extends ClassRoomAccessOut {
+  enrolled_count: number
+  students_joined_today: number
+  teachers_joined_today: string[]
+  /** A teacher came in since the current period opened, or is in now. */
+  teacher_present: boolean
+  students_in_now: string[]
+  teachers_in_now: string[]
+  live_sessions: LiveSessionOut[]
+  last_event?: ClassRoomEventOut | null
+  is_live: boolean
+  /** When Meet's attendance record was last copied, or why it cannot be yet. */
+  room_attendance_synced_at?: ApiDateTime | null
+  room_attendance_error?: string | null
+}
+
+/**
+ * One participant of one Meet conference in a class's room, as Google
+ * recorded it: when they joined and left, in sessions. Meet gives a display
+ * name, not an email, so `matched_user_*` is the LMS's best match by name and
+ * is empty for a guest it cannot place.
+ */
+export interface ClassRoomAttendanceOut {
+  id?: string | null
+  class_id: number
+  date: ApiDate
+  conference_record?: string | null
+  conference_start_at?: ApiDateTime | null
+  conference_end_at?: ApiDateTime | null
+  /** Meet's resource name for this participant in this conference. */
+  participant?: string | null
+  display_name?: string | null
+  user_kind?: 'SIGNED_IN' | 'ANONYMOUS' | 'PHONE' | string | null
+  matched_user_id?: number | null
+  matched_user_name?: string | null
+  matched_role?: UserRole | string | null
+  sessions: { joined_at?: ApiDateTime | null; left_at?: ApiDateTime | null }[]
+  first_joined_at?: ApiDateTime | null
+  last_left_at?: ApiDateTime | null
+  /** The latest session has no end time: they are in the call right now. */
+  still_in: boolean
+  minutes: number
+  synced_at?: ApiDateTime | null
 }
 
 // =============================================================== extra classes

@@ -13,7 +13,7 @@ import {
 import * as React from 'react'
 import { Link } from 'react-router-dom'
 
-import type { UserOut } from '@/api/types'
+import type { LiveClassBoardRow, UserOut } from '@/api/types'
 import { useAuth } from '@/providers/auth-provider'
 import {
   useClasses,
@@ -23,16 +23,20 @@ import {
   useSubjects,
   useUsers,
 } from '@/queries/admin.queries'
+import { useLiveBoard } from '@/queries/classes.queries'
 import { isTeachingRole } from '@/lib/constants'
+import { cn } from '@/lib/cn'
 import { provisioningAlerts, signupsOverTime } from '@/lib/derive'
-import { formatRelative } from '@/lib/datetime'
+import { formatRelative, formatTime } from '@/lib/datetime'
 import { greeting } from '@/lib/format'
+import { subjectName } from '@/lib/select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AreaTrend, DonutBreakdown } from '@/components/charts/charts'
 import { ChartCard, useChartPalette } from '@/components/charts/chart-card'
+import { JoinRoomButton } from '@/components/domain/class-room'
 import { StatCard } from '@/components/domain/stat-card'
 import { RoleBadge } from '@/components/domain/badges'
 import { UserCell } from '@/components/domain/user-cell'
@@ -45,6 +49,109 @@ const QUICK_ACTIONS = [
   { to: '/admin/mappings', label: 'Map a teacher', icon: Link2 },
   { to: '/admin/enrollments', label: 'Enroll students', icon: GraduationCap },
 ]
+
+function LiveNowRow({ row }: { row: LiveClassBoardRow }) {
+  const current = row.current_period
+  const session = row.live_sessions.find((s) => s.timing.is_live) ?? row.live_sessions[0] ?? null
+  const title = current
+    ? subjectName(current.entry)
+    : (session?.title ?? session?.subject_name ?? 'Live session')
+  const teacher = current
+    ? (current.entry.teacher?.full_name ?? 'Teacher to be confirmed')
+    : (session?.teacher_name ?? 'Teacher')
+  const ends = current
+    ? `until ${formatTime(current.ends_at)}`
+    : session?.timing.minutes_remaining != null
+      ? `${Math.max(0, Math.round(session.timing.minutes_remaining))} min left`
+      : ''
+  const teacherIn = row.teachers_in_now.length > 0 || row.teacher_present
+
+  return (
+    <li className="flex items-center justify-between gap-3 rounded-xl border border-success/30 bg-success/5 px-4 py-3">
+      <div className="min-w-0">
+        <p className="truncate font-semibold">
+          {row.class_name} <span className="font-normal text-muted-foreground">· {title}</span>
+        </p>
+        <p className="truncate text-xs text-muted-foreground">
+          {teacher}
+          {ends ? ` · ${ends}` : ''} · {row.students_in_now.length} of {row.enrolled_count} students in ·{' '}
+          <span className={teacherIn ? 'text-success' : 'text-warning'}>
+            {teacherIn ? 'teacher in' : 'teacher not in yet'}
+          </span>
+        </p>
+      </div>
+      <JoinRoomButton access={row} size="sm" />
+    </li>
+  )
+}
+
+/**
+ * The live classes, right under the greeting. A school day is happening while
+ * the office reads this, so what is in session, who is teaching it and how
+ * many are in belongs above the setup tiles. Polled with the live board.
+ */
+function LiveNowStrip() {
+  const board = useLiveBoard()
+  const rows = board.data ?? []
+  const live = rows.filter((r) => r.is_live)
+  const upcoming = rows
+    .filter((r) => !r.is_live && r.next_period)
+    .sort((a, b) => (a.next_period?.starts_at ?? '').localeCompare(b.next_period?.starts_at ?? ''))
+  const studentsIn = live.reduce((n, r) => n + r.students_in_now.length, 0)
+  const nextUp = upcoming[0]?.next_period ?? null
+
+  if (board.isPending) return <Skeleton className="mb-5 h-24 rounded-2xl" />
+  // The board page reports its own failure; the dashboard stays quiet about it.
+  if (board.isError) return null
+
+  return (
+    <Card className={cn('mb-5', live.length > 0 ? 'border-success/40 shadow-glow' : 'border-border')}>
+      <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <CardTitle className="text-base">Live now</CardTitle>
+          <Badge tone={live.length > 0 ? 'success' : 'neutral'} dot={live.length > 0}>
+            {live.length > 0 ? `${live.length} in session` : 'No class in session'}
+          </Badge>
+          {studentsIn > 0 && (
+            <Badge tone="accent">
+              <Users />
+              {studentsIn} students in
+            </Badge>
+          )}
+        </div>
+        <Button asChild variant="ghost" size="sm">
+          <Link to="/admin/live-classes">
+            Live classes board
+            <ArrowRight className="size-4" />
+          </Link>
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {live.length > 0 ? (
+          <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {live.map((row) => (
+              <LiveNowRow key={row.class_id} row={row} />
+            ))}
+          </ul>
+        ) : nextUp ? (
+          <p className="text-sm text-muted-foreground">
+            Next:{' '}
+            <span className="font-medium text-foreground">
+              {upcoming[0].class_name} · {subjectName(nextUp.entry)}
+            </span>{' '}
+            at {formatTime(nextUp.starts_at)}
+            {upcoming.length > 1
+              ? `, then ${upcoming.length - 1} more ${upcoming.length - 1 === 1 ? 'class' : 'classes'} today`
+              : ''}
+            .
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">Nothing more on the timetable today.</p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
 
 export default function AdminDashboardPage() {
   const { user } = useAuth()
@@ -161,6 +268,8 @@ export default function AdminDashboardPage() {
           ))}
         </div>
       </HeroHeader>
+
+      <LiveNowStrip />
 
       {/* ------------------------------------------------------------ tiles */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">

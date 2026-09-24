@@ -42,6 +42,8 @@ const AdminRecordings = lazy(() => import('@/pages/admin/recordings'))
 const AdminAdmissions = lazy(() => import('@/pages/admin/admissions'))
 // The queue behind the admission form on the school's public website.
 const AdminAdmissionRequests = lazy(() => import('@/pages/admin/admission-requests'))
+// The live board: every class room right now, with a way in and its activity log.
+const AdminLiveClasses = lazy(() => import('@/pages/admin/live-classes'))
 const AdminFamilies = lazy(() => import('@/pages/admin/families'))
 const AdminFinance = lazy(() => import('@/pages/admin/finance'))
 const AdminNotices = lazy(() => import('@/pages/admin/notices'))
@@ -218,6 +220,7 @@ export function AppRoutes() {
               <Route path="/admin/enrollments" element={<AdminEnrollments />} />
               <Route path="/admin/reports" element={<AdminReports />} />
               <Route path="/admin/meetings" element={<AdminMeetings />} />
+              <Route path="/admin/live-classes" element={<AdminLiveClasses />} />
               <Route path="/admin/materials" element={<AdminMaterials />} />
               <Route path="/admin/integrations" element={<AdminIntegrations />} />
               <Route path="/admin/timetable" element={<AdminTimetable />} />

@@ -27,6 +27,7 @@ import {
   NotebookPen,
   PlaneTakeoff,
   Plug,
+  Radio,
   Receipt,
   Settings2,
   ShieldCheck,
@@ -131,6 +132,12 @@ const ADMIN_NAV: NavSection[] = [
   {
     heading: 'Content',
     items: [
+      {
+        to: '/admin/live-classes',
+        label: 'Live Classes',
+        icon: Radio,
+        description: 'Every class room right now: who is teaching, who has come in, and a way in',
+      },
       {
         to: '/admin/meetings',
         label: 'Meetings',

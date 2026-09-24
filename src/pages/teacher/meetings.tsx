@@ -32,6 +32,7 @@ import {
   useTeacherMeetings,
   useUpdateMeeting,
 } from '@/queries/teacher.queries'
+import { useMyClassRooms } from '@/queries/classes.queries'
 import { splitMeetings } from '@/lib/derive'
 import { formatCountdown, formatDateTime, meetingPhase } from '@/lib/datetime'
 import { MAX_UPLOAD_BYTES, formatFileSize, resolveFileUrl } from '@/lib/files'
@@ -66,6 +67,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { MeetStatusBadge, MeetingPhaseBadge, RecordingStatusBadge } from '@/components/domain/badges'
+import { ClassRoomPanel } from '@/components/domain/class-room'
 import { JoinClassButton, TeacherClassControls } from '@/components/domain/live-class'
 import { FiledBy } from '@/components/domain/filed-by'
 import { EmptyState, ErrorState } from '@/components/feedback/states'
@@ -128,6 +130,11 @@ function MeetingFormDialog({
   const updateMeeting = useUpdateMeeting()
   const selection = useClassSubjectSelection(mappingsQuery.data)
 
+  // The classroom model: when the school shares one room per class, a new
+  // session borrows the class's link and the Meet switches below are moot.
+  const roomsQuery = useMyClassRooms(open)
+  const roomMode = roomsQuery.data?.[0]?.class_room_mode ?? false
+
   const [uploading, setUploading] = React.useState(false)
   const [uploadPercent, setUploadPercent] = React.useState(0)
   const [uploadError, setUploadError] = React.useState<string | null>(null)
@@ -170,12 +177,14 @@ function MeetingFormDialog({
   const classId = form.watch('class_id')
   const autoCreateMeet = form.watch('auto_create_meet')
   const manualLink = (form.watch('meeting_link') ?? '').trim()
+  const selectedRoom = roomsQuery.data?.find((r) => String(r.class_id) === classId) ?? null
 
   /**
    * A manually supplied link makes the backend skip Meet generation entirely,
    * so the two controls are mutually exclusive rather than merely related.
+   * Under the classroom model nothing is generated per session at all.
    */
-  const meetGenerationActive = !editing && autoCreateMeet && !manualLink
+  const meetGenerationActive = !editing && !roomMode && autoCreateMeet && !manualLink
 
   const subjects = React.useMemo(() => {
     const map = new Map<number, { id: number; name: string; code: string }>()
@@ -268,7 +277,9 @@ function MeetingFormDialog({
               ? editing.google_event_id
                 ? 'Changing the title or time updates the Google Calendar event, so every invited student sees it on their own calendar.'
                 : 'This meeting has no Calendar event behind it, so changes stay inside the LMS.'
-              : 'A Google Meet link and calendar invitations can be created automatically for the whole class.'}
+              : roomMode
+                ? 'Every period happens in the class’s shared room, so there is no new link to make — just say which class, which subject and when.'
+                : 'A Google Meet link and calendar invitations can be created automatically for the whole class.'}
           </DialogDescription>
         </DialogHeader>
         <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
@@ -355,8 +366,24 @@ function MeetingFormDialog({
               </Field>
             </div>
 
+            {/* ------------------------------------------- the class room */}
+            {!editing && roomMode && (
+              <div className="flex items-start gap-3 rounded-lg border border-primary/25 bg-primary/8 p-3.5 text-sm">
+                <Video className="mt-0.5 size-4 shrink-0 text-primary" />
+                <div>
+                  <p className="font-medium">This period uses the class’s shared room</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {selectedRoom?.has_room
+                      ? 'Students are already in it between periods; you join the same link when yours comes round.'
+                      : 'The room is created the moment you schedule this, and every later period of the class uses it too.'}{' '}
+                    Paste a link below only to hold this one session somewhere else.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* ------------------------------------------- Meet generation */}
-            {!editing && (
+            {!editing && !roomMode && (
               <div className="space-y-3 rounded-lg border border-border bg-surface p-3.5">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -438,9 +465,11 @@ function MeetingFormDialog({
               label="Meeting link"
               error={form.formState.errors.meeting_link?.message}
               hint={
-                meetGenerationActive
-                  ? 'Leave empty to let Google Meet generate one. Anything entered here is used instead.'
-                  : 'Google Meet, Zoom or Teams URL.'
+                roomMode && !editing
+                  ? 'Leave empty to use the class room. Anything entered here is used instead, for this session only.'
+                  : meetGenerationActive
+                    ? 'Leave empty to let Google Meet generate one. Anything entered here is used instead.'
+                    : 'Google Meet, Zoom or Teams URL.'
               }
             >
               <Input id="meeting-link" placeholder="https://meet.google.com/abc-defg-hij" {...form.register('meeting_link')} />
@@ -566,6 +595,22 @@ export function MeetingCard({
                 <TooltipContent>
                   Backed by a Google Calendar event. Editing or cancelling here updates every
                   invited student&rsquo;s calendar.
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {/* Held in the class's one standing room rather than a link of
+                its own. Editing or cancelling this session leaves the room
+                alone, which is why the Calendar badge above does not show. */}
+            {meeting.meet_status === 'CLASS_ROOM' && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <MeetStatusBadge status="CLASS_ROOM" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Held in the class&rsquo;s shared room &mdash; the same link every period of the
+                  day uses. Students stay in it between periods; you rejoin at yours.
                 </TooltipContent>
               </Tooltip>
             )}
@@ -755,6 +800,9 @@ export default function TeacherMeetingsPage() {
   const [editing, setEditing] = React.useState<LiveMeetingOut | null>(null)
   const [cancelling, setCancelling] = React.useState<LiveMeetingOut | null>(null)
   const now = useNow(30_000)
+  // The rooms of the classes this teacher teaches: one link each, rejoined
+  // at every period.
+  const roomsQuery = useMyClassRooms(!isAdmin)
 
   const openCreate = () => {
     setEditing(null)
@@ -767,6 +815,7 @@ export default function TeacherMeetingsPage() {
   }
 
   const groups = React.useMemo(() => splitMeetings(meetingsQuery.data ?? [], now), [meetingsQuery.data, now])
+  const rooms = roomsQuery.data ?? []
 
   if (isAdmin) {
     return (
@@ -814,13 +863,32 @@ export default function TeacherMeetingsPage() {
     <>
       <PageHeader
         title="Meetings"
-        description="Schedule live classes, share join links, and watch back what was recorded."
+        description={
+          rooms.some((r) => r.class_room_mode)
+            ? 'Each class has one room for the whole day. Schedule your periods, rejoin the room when each comes round, and watch back what was recorded.'
+            : 'Schedule live classes, share join links, and watch back what was recorded.'
+        }
         actions={
           <Button variant="primary" icon={<Plus />} onClick={openCreate}>
             Schedule meeting
           </Button>
         }
       />
+
+      {/* The rooms first: they are what a teacher opens at the start of a
+          period. The session list below is the schedule and the recordings. */}
+      {rooms.length > 0 && (
+        <div className={rooms.length > 1 ? 'mb-6 grid gap-3 lg:grid-cols-2' : 'mb-6'}>
+          {rooms.map((room) => (
+            <ClassRoomPanel
+              key={room.class_id}
+              access={room}
+              variant="teacher"
+              compact={rooms.length > 2}
+            />
+          ))}
+        </div>
+      )}
 
       <Tabs defaultValue={groups.live.length > 0 ? 'live' : 'upcoming'}>
         <TabsList>

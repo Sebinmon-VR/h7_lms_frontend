@@ -6,9 +6,11 @@ import { z } from 'zod'
 
 import type { TopicOut } from '@/api/types'
 import {
+  useAddTopicAttachment,
   useCreateTopic,
   useDeleteTopic,
   useMyClasses,
+  useRemoveTopicAttachment,
   useTeacherTopics,
   useUpdateTopic,
 } from '@/queries/teacher.queries'
@@ -43,6 +45,11 @@ import {
 import { FiledBy } from '@/components/domain/filed-by'
 import { EmptyState } from '@/components/feedback/states'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
+import {
+  AttachmentList,
+  AttachmentPicker,
+  type PendingAttachment,
+} from '@/components/forms/attachment-picker'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field, FormError } from '@/components/forms/field'
 import { PageHeader } from '@/components/layout/page-header'
@@ -59,23 +66,54 @@ const schema = z.object({
 })
 type FormValues = z.infer<typeof schema>
 
+/** Values the dashboard's "class over" prompt hands in, so the form opens filled. */
+export type TopicPreset = {
+  class_id: number
+  subject_id: number
+  date_covered?: string
+}
+
 /**
  * Logs a topic, or edits one when `editing` is set. Class and subject are
  * fixed on edit — `TopicUpdate` does not accept them.
+ *
+ * Attachments (notes, images, voice notes) are uploaded AFTER the topic is
+ * saved, one by one, because the topic has to exist to hang them on. If one
+ * fails the dialog stays open on the saved topic with the failed files still
+ * listed, so a retry uploads only those and never logs the topic twice.
  */
-function TopicFormDialog({
+export function TopicFormDialog({
   open,
   onOpenChange,
   editing,
+  preset = null,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   editing: TopicOut | null
+  preset?: TopicPreset | null
 }) {
   const mappingsQuery = useMyClasses()
+  const topicsQuery = useTeacherTopics()
   const createTopic = useCreateTopic()
   const updateTopic = useUpdateTopic()
+  const addAttachment = useAddTopicAttachment()
+  const removeAttachment = useRemoveTopicAttachment()
   const selection = useClassSubjectSelection(mappingsQuery.data)
+
+  // The topic this dialog is working on once it exists: the one being edited,
+  // or the one a first submit created. Read live from the cache so an
+  // attachment removed a moment ago is gone from the list.
+  const [saved, setSaved] = React.useState<TopicOut | null>(null)
+  const targetId = editing?.id ?? saved?.id ?? null
+  const target =
+    targetId == null
+      ? null
+      : (topicsQuery.data?.find((t) => t.id === targetId) ?? editing ?? saved)
+
+  const [pending, setPending] = React.useState<PendingAttachment[]>([])
+  const [uploadNote, setUploadNote] = React.useState<string | null>(null)
+  const [removingId, setRemovingId] = React.useState<string | null>(null)
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -91,6 +129,9 @@ function TopicFormDialog({
 
   React.useEffect(() => {
     if (!open) return
+    setSaved(null)
+    setPending([])
+    setUploadNote(null)
     form.reset(
       editing
         ? {
@@ -102,17 +143,17 @@ function TopicFormDialog({
             completion_percentage: editing.completion_percentage,
           }
         : {
-            class_id: selection.classId ? String(selection.classId) : '',
-            subject_id: selection.subjectId ? String(selection.subjectId) : '',
+            class_id: preset ? String(preset.class_id) : selection.classId ? String(selection.classId) : '',
+            subject_id: preset ? String(preset.subject_id) : selection.subjectId ? String(selection.subjectId) : '',
             topic_title: '',
             description: '',
-            date_covered: todayApiDate(),
+            date_covered: preset?.date_covered ?? todayApiDate(),
             completion_percentage: 100,
           },
     )
     // Only re-seed when the dialog opens or the target changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, editing])
+  }, [open, editing, preset])
 
   const classId = form.watch('class_id')
 
@@ -129,25 +170,27 @@ function TopicFormDialog({
 
   const onSubmit = async (values: FormValues) => {
     const description = values.description?.trim() ?? ''
+    let topicId = target?.id ?? null
 
     try {
-      if (editing) {
+      if (target) {
         // Only changed fields — an empty update body is a 400.
         const patch = {
-          ...(values.topic_title !== editing.topic_title && { topic_title: values.topic_title }),
-          ...(description !== (editing.description ?? '') && { description }),
-          ...(values.date_covered !== editing.date_covered && { date_covered: values.date_covered }),
-          ...(values.completion_percentage !== editing.completion_percentage && {
+          ...(values.topic_title !== target.topic_title && { topic_title: values.topic_title }),
+          ...(description !== (target.description ?? '') && { description }),
+          ...(values.date_covered !== target.date_covered && { date_covered: values.date_covered }),
+          ...(values.completion_percentage !== target.completion_percentage && {
             completion_percentage: values.completion_percentage,
           }),
         }
-        if (Object.keys(patch).length === 0) {
+        if (Object.keys(patch).length > 0) {
+          await updateTopic.mutateAsync({ topicId: target.id, body: patch })
+        } else if (pending.length === 0) {
           onOpenChange(false)
           return
         }
-        await updateTopic.mutateAsync({ topicId: editing.id, body: patch })
       } else {
-        await createTopic.mutateAsync({
+        const created = await createTopic.mutateAsync({
           class_id: Number(values.class_id),
           subject_id: Number(values.subject_id),
           topic_title: values.topic_title,
@@ -155,14 +198,51 @@ function TopicFormDialog({
           date_covered: values.date_covered,
           completion_percentage: values.completion_percentage,
         })
+        setSaved(created)
+        topicId = created.id
       }
-      onOpenChange(false)
     } catch (error) {
       form.setError('root', {
         message:
           (error as { message?: string })?.message ??
-          `Could not ${editing ? 'update' : 'log'} the topic.`,
+          `Could not ${target ? 'update' : 'log'} the topic.`,
       })
+      return
+    }
+
+    // The files, one at a time, once the topic exists to hang them on.
+    const failed: { item: PendingAttachment; reason: string }[] = []
+    for (const item of pending) {
+      setUploadNote(`Uploading ${item.file.name}…`)
+      try {
+        await addAttachment.mutateAsync({ topicId: topicId as number, file: item.file, kind: item.kind })
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
+      } catch (error) {
+        failed.push({ item, reason: (error as { message?: string })?.message ?? 'upload failed' })
+      }
+    }
+    setUploadNote(null)
+
+    if (failed.length > 0) {
+      setPending(failed.map((f) => f.item))
+      form.setError('root', {
+        message: `The topic is saved, but ${failed.length === 1 ? 'one attachment' : `${failed.length} attachments`} did not upload: ${failed
+          .map((f) => `${f.item.file.name} (${f.reason})`)
+          .join('; ')}. Try again to upload just those.`,
+      })
+      return
+    }
+    setPending([])
+    onOpenChange(false)
+  }
+
+  const removeExisting = async (attachmentId: string) => {
+    if (!target) return
+    setRemovingId(attachmentId)
+    try {
+      await removeAttachment.mutateAsync({ topicId: target.id, attachmentId })
+    } finally {
+      setRemovingId(null)
     }
   }
 
@@ -262,13 +342,41 @@ function TopicFormDialog({
                 />
               </Field>
             </div>
+
+            <Field
+              id="topic-attachments"
+              label="Notes, images and voice"
+              hint="Students see these with the topic in their syllabus. Notes can be any document; a voice note is recorded right here."
+            >
+              <div className="space-y-3">
+                {target && target.attachments.length > 0 && (
+                  <AttachmentList
+                    attachments={target.attachments}
+                    removingId={removingId}
+                    onRemove={(a) => void removeExisting(a.id)}
+                  />
+                )}
+                <AttachmentPicker
+                  value={pending}
+                  onChange={setPending}
+                  disabled={form.formState.isSubmitting}
+                />
+                {uploadNote && <p className="text-xs text-muted-foreground">{uploadNote}</p>}
+              </div>
+            </Field>
           </DialogBody>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {saved ? 'Done' : 'Cancel'}
             </Button>
             <Button type="submit" variant="primary" loading={form.formState.isSubmitting}>
-              {editing ? 'Save changes' : 'Log topic'}
+              {target
+                ? pending.length > 0
+                  ? `Save & upload ${pending.length} ${pending.length === 1 ? 'file' : 'files'}`
+                  : 'Save changes'
+                : pending.length > 0
+                  ? `Log topic & upload ${pending.length} ${pending.length === 1 ? 'file' : 'files'}`
+                  : 'Log topic'}
             </Button>
           </DialogFooter>
         </DialogForm>
@@ -316,6 +424,7 @@ function TopicTimeline({
                     {topic.description && (
                       <p className="mt-1 text-sm text-muted-foreground">{topic.description}</p>
                     )}
+                    <AttachmentList attachments={topic.attachments ?? []} compact className="mt-2" />
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <Badge tone="accent" size="sm">
                         {subjectName(topic)}

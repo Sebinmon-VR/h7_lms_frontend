@@ -1,13 +1,19 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
   BookOpen,
+  Check,
+  Copy,
+  ExternalLink,
   Layers,
+  LinkIcon,
   MoreHorizontal,
   Pencil,
   Plus,
+  RefreshCw,
   Trash2,
   UserMinus,
   Users,
+  Video,
   X,
 } from 'lucide-react'
 import * as React from 'react'
@@ -25,8 +31,16 @@ import {
   useMappings,
   useUpdateClass,
 } from '@/queries/admin.queries'
+import {
+  useClearClassRoom,
+  useInviteRoomTeachers,
+  useOpenClassRoom,
+  useSetupClassRoom,
+} from '@/queries/classes.queries'
 import { classStats } from '@/lib/derive'
 import { countLabel } from '@/lib/format'
+import { useCopyToClipboard } from '@/lib/hooks'
+import { recordingLabel } from '@/lib/recordings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -194,6 +208,260 @@ function ClassFormDialog({
   )
 }
 
+/**
+ * The class's standing live-class room.
+ *
+ * One Google Meet link per class: students join it and stay, and every
+ * subject teacher joins the same room at their period. A room is created on
+ * its own the first time a period is scheduled, so this section is for
+ * setting one up ahead of time, choosing a link the school already has,
+ * repairing a failed one, or removing it.
+ */
+function RoomSection({ klass }: { klass: ClassRoomOut }) {
+  const setup = useSetupClassRoom()
+  const clear = useClearClassRoom()
+  const invite = useInviteRoomTeachers()
+  const openRoom = useOpenClassRoom()
+  const { copied, copy } = useCopyToClipboard()
+  const [linkOpen, setLinkOpen] = React.useState(false)
+  const [link, setLink] = React.useState('')
+  const [confirming, setConfirming] = React.useState<'replace' | 'remove' | null>(null)
+
+  React.useEffect(() => {
+    setLinkOpen(false)
+    setLink('')
+    setConfirming(null)
+  }, [klass.id])
+
+  const busy = setup.isPending || clear.isPending
+  const hasRoom = !!klass.room_link
+  const isMeet = klass.room_provider === 'GOOGLE_MEET'
+
+  const saveLink = async () => {
+    const value = link.trim()
+    if (!/^https?:\/\//i.test(value)) return
+    try {
+      await setup.mutateAsync({ classId: klass.id, body: { manual_link: value } })
+      setLinkOpen(false)
+      setLink('')
+    } catch {
+      /* reported by the mutation */
+    }
+  }
+
+  return (
+    <section>
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Live-class room
+      </h3>
+
+      {hasRoom ? (
+        <div className="space-y-3 rounded-lg border border-border p-3">
+          <div className="flex items-center gap-2">
+            <Video className="size-4 shrink-0 text-primary" />
+            <a
+              href={klass.room_link as string}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="min-w-0 flex-1 truncate text-sm font-medium hover:underline"
+            >
+              {klass.room_link}
+            </a>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Copy the room link"
+              onClick={() => void copy(klass.room_link as string)}
+            >
+              {copied ? <Check className="text-success" /> : <Copy />}
+            </Button>
+            <Button asChild variant="ghost" size="icon-sm" aria-label="Open the room">
+              <a href={klass.room_link as string} target="_blank" rel="noopener noreferrer">
+                <ExternalLink />
+              </a>
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge tone={isMeet ? 'primary' : 'neutral'} size="sm">
+              {isMeet ? 'Google Meet' : 'External link'}
+            </Badge>
+            {klass.room_owner_email && (
+              <Badge tone="outline" size="sm">
+                Hosted by {klass.room_owner_email}
+              </Badge>
+            )}
+            {isMeet && klass.room_recording_status && (
+              <Badge
+                tone={klass.room_recording_status === 'ARMED' ? 'success' : 'warning'}
+                size="sm"
+              >
+                {recordingLabel(klass.room_recording_status)}
+              </Badge>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Every period of this class happens here. Students join once and stay; each teacher
+            joins at their period.
+          </p>
+          {isMeet && (
+            <div
+              className={
+                klass.room_access_type === 'OPEN'
+                  ? 'rounded-md border border-success/30 bg-success/8 px-3 py-2 text-xs'
+                  : 'rounded-md border border-warning/40 bg-warning/8 px-3 py-2 text-xs'
+              }
+            >
+              {klass.room_access_type === 'OPEN' ? (
+                <p>
+                  <span className="font-medium text-success">Open to anyone with the link.</span>{' '}
+                  <span className="text-muted-foreground">
+                    Teachers and students join without asking, whatever Google account they use.
+                  </span>
+                </p>
+              ) : (
+                <>
+                  <p className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium">
+                      Not open yet — people outside the school domain are asked to join.
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      loading={openRoom.isPending}
+                      disabled={busy}
+                      onClick={() => openRoom.mutate(klass.id)}
+                    >
+                      Open to anyone
+                    </Button>
+                  </p>
+                  {klass.room_access_error && (
+                    <p className="mt-1 text-muted-foreground">{klass.room_access_error}</p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+          {isMeet && (
+            <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
+              <p className="flex flex-wrap items-center justify-between gap-2">
+                <span>
+                  <Users className="mr-1 inline size-3.5 text-muted-foreground" />
+                  {countLabel(klass.room_guest_emails?.length ?? 0, 'teacher')} on the guest list
+                  <span className="text-muted-foreground"> · by their LMS address</span>
+                </span>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  loading={invite.isPending}
+                  disabled={busy}
+                  onClick={() => invite.mutate(klass.id)}
+                >
+                  <RefreshCw />
+                  Invite teachers
+                </Button>
+              </p>
+              {klass.room_guest_error && (
+                <p className="mt-1 text-danger">Guest list not updated: {klass.room_guest_error}</p>
+              )}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2 border-t border-border pt-3">
+            {isMeet && (
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => setConfirming('replace')}>
+                <RefreshCw />
+                New Meet room
+              </Button>
+            )}
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => setLinkOpen((v) => !v)}>
+              <LinkIcon />
+              Use a different link
+            </Button>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirming('remove')}>
+              <Trash2 />
+              Remove
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3 rounded-lg border border-dashed border-border p-3">
+          {klass.room_status === 'FAILED' && klass.room_error ? (
+            <p className="rounded-md border border-danger/30 bg-danger/8 px-3 py-2 text-xs text-danger">
+              Google Meet could not create the room: {klass.room_error}
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No room yet. The system creates one about 30 minutes before the class&rsquo;s first
+              period of the day, and a teacher scheduling or joining a period creates it sooner.
+              You can also set it up now.
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              loading={setup.isPending && !linkOpen}
+              disabled={busy}
+              onClick={() => setup.mutate({ classId: klass.id, body: {} })}
+            >
+              <Video />
+              Create Google Meet room
+            </Button>
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => setLinkOpen((v) => !v)}>
+              <LinkIcon />
+              Use a link I have
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {linkOpen && (
+        <div className="mt-2 flex items-center gap-2">
+          <Input
+            placeholder="https://meet.google.com/… or a Zoom / Teams link"
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void saveLink()
+            }}
+          />
+          <Button
+            size="sm"
+            loading={setup.isPending}
+            disabled={!/^https?:\/\//i.test(link.trim())}
+            onClick={() => void saveLink()}
+          >
+            Save
+          </Button>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={confirming === 'replace'}
+        onOpenChange={(v) => !v && setConfirming(null)}
+        title="Create a new Meet room for this class?"
+        description="The current link stops working and its Calendar event is deleted. Every period from now on uses the new room, and students see the new link the next time they open the app."
+        confirmLabel="Create new room"
+        loading={setup.isPending}
+        onConfirm={() =>
+          setup.mutate(
+            { classId: klass.id, body: { replace: true } },
+            { onSettled: () => setConfirming(null) },
+          )
+        }
+      />
+      <ConfirmDialog
+        open={confirming === 'remove'}
+        onOpenChange={(v) => !v && setConfirming(null)}
+        title="Remove this class's room?"
+        description="The link stops working. A new room is created on its own the next time a period is scheduled for the class."
+        confirmLabel="Remove room"
+        destructive
+        loading={clear.isPending}
+        onConfirm={() => clear.mutate(klass.id, { onSettled: () => setConfirming(null) })}
+      />
+    </section>
+  )
+}
+
 function ClassDetailSheet({ klass, onClose }: { klass: ClassRoomOut | null; onClose: () => void }) {
   const enrollmentsQuery = useEnrollments(!!klass)
   const mappingsQuery = useMappings(!!klass)
@@ -225,6 +493,8 @@ function ClassDetailSheet({ klass, onClose }: { klass: ClassRoomOut | null; onCl
             {klass?.description && (
               <p className="text-sm text-muted-foreground">{klass.description}</p>
             )}
+
+            {klass && <RoomSection klass={klass} />}
 
             <section>
               <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -397,11 +667,18 @@ export default function AdminClassesPage() {
     [classesQuery.data],
   )
 
+  // The sheet reads the LIVE row, not the object captured on click, so a room
+  // created or removed from inside it shows up without closing and reopening.
+  const selectedLive = React.useMemo(
+    () => (selected ? (classesQuery.data?.find((c) => c.id === selected.id) ?? selected) : null),
+    [selected, classesQuery.data],
+  )
+
   return (
     <>
       <PageHeader
         title="Classes"
-        description="Class sections students are enrolled into and teachers are assigned to."
+        description="Class sections students are enrolled into and teachers are assigned to. Each class has one live-class room that every period of the day happens in."
         actions={
           <Button variant="primary" icon={<Plus />} onClick={openCreate}>
             New class
@@ -487,6 +764,17 @@ export default function AdminClassesPage() {
                       <BookOpen className="size-3.5" />
                       {countLabel(stat?.subjectCount ?? 0, 'subject')}
                     </span>
+                    {klass.room_link ? (
+                      <span className="inline-flex items-center gap-1.5 text-success">
+                        <Video className="size-3.5" />
+                        Room ready
+                      </span>
+                    ) : klass.room_status === 'FAILED' ? (
+                      <span className="inline-flex items-center gap-1.5 text-danger">
+                        <Video className="size-3.5" />
+                        Room failed
+                      </span>
+                    ) : null}
                   </div>
                 </Card>
               )
@@ -501,7 +789,7 @@ export default function AdminClassesPage() {
         editing={editing}
         existingCodes={existingCodes}
       />
-      <ClassDetailSheet klass={selected} onClose={() => setSelected(null)} />
+      <ClassDetailSheet klass={selectedLive} onClose={() => setSelected(null)} />
 
       <DeleteResourceDialog
         open={!!deleting}

@@ -23,6 +23,7 @@ import {
   useDeactivateUser,
   useGenerateCredentials,
   usePermanentlyDeleteUser,
+  usePresenceMap,
   useReactivateUser,
   useUpdateUser,
   useUsers,
@@ -227,6 +228,8 @@ export function profileOf(user: UserOut): UserProfileFields {
 export default function AdminUsersPage() {
   const navigate = useNavigate()
   const usersQuery = useUsers()
+  // Who is online right now: the green-or-red dot on every avatar below.
+  const presence = usePresenceMap()
   const deactivateUser = useDeactivateUser()
   const reactivateUser = useReactivateUser()
   // Page-level, for the bulk session-year assignment; the edit dialog holds
@@ -335,13 +338,21 @@ export default function AdminUsersPage() {
         id: 'name',
         header: 'User',
         accessorFn: (row) => row.full_name,
-        cell: ({ row }) => (
-          <UserCell
-            name={row.original.full_name}
-            email={row.original.email}
-            inactive={!row.original.is_active}
-          />
-        ),
+        cell: ({ row }) => {
+          const seen = presence.byId.get(row.original.id)
+          return (
+            <UserCell
+              name={row.original.full_name}
+              email={row.original.email}
+              inactive={!row.original.is_active}
+              presence={
+                presence.isPending
+                  ? null
+                  : { online: !!seen?.is_online, lastSeenAt: seen?.last_seen_at ?? null }
+              }
+            />
+          )
+        },
       },
       {
         id: 'role',
@@ -443,7 +454,7 @@ export default function AdminUsersPage() {
         },
       },
     ],
-    [reactivateUser, onErase],
+    [reactivateUser, onErase, presence],
   )
 
   const counts = React.useMemo(() => {
@@ -478,6 +489,9 @@ export default function AdminUsersPage() {
       >
         <div className="flex flex-wrap gap-2">
           <Badge tone="neutral">{counts.total} total</Badge>
+          <Badge tone={presence.onlineCount > 0 ? 'success' : 'neutral'} dot={presence.onlineCount > 0}>
+            {presence.onlineCount} online now
+          </Badge>
           <Badge tone="primary">
             <ShieldCheck />
             {counts.admins} admins

@@ -9,6 +9,7 @@ import { subjectLook, toneStyle } from '@/lib/subjects'
 import { ProgressBar } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorState } from '@/components/feedback/states'
+import { AttachmentList } from '@/components/forms/attachment-picker'
 import {
   FunEmpty,
   FunPageHeader,
@@ -149,6 +150,8 @@ export default function StudentSyllabusPage() {
                                 {subject}
                                 {topic.teacher ? ` · ${topic.teacher.full_name}` : ''}
                               </p>
+                              {/* The teacher's notes, board photos and voice recap. */}
+                              <AttachmentList attachments={topic.attachments ?? []} compact className="mt-2" />
                             </div>
                             <div className="w-20 shrink-0">
                               <p className="mb-1 text-right text-xs font-bold tabular-nums">

@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Disc, Plus, Radio, TriangleAlert, Video } from 'lucide-react'
+import { Disc, Plus, Radio, TriangleAlert, UserCheck, Video } from 'lucide-react'
 import * as React from 'react'
 import { useForm } from 'react-hook-form'
 import { Link } from 'react-router-dom'
@@ -19,6 +19,8 @@ import {
   useTeachingStaff,
   useUsers,
 } from '@/queries/admin.queries'
+import { useRepairTeacherAccess } from '@/queries/classes.queries'
+import { useProgramSettings } from '@/queries/tuition.queries'
 import { splitMeetings } from '@/lib/derive'
 import { useNow } from '@/lib/hooks'
 import { buildDirectory, teacherName } from '@/lib/select'
@@ -101,6 +103,10 @@ function AdminMeetingDialog({
   const mappingsQuery = useMappings()
   const createMeeting = useAdminCreateMeeting()
   const updateMeeting = useAdminUpdateMeeting()
+  // The classroom model: one shared room per class, so a new session borrows
+  // the class's link and nothing is generated per session.
+  const lmsSettings = useProgramSettings('LMS', open)
+  const roomMode = lmsSettings.data?.class_room_mode === true
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -133,7 +139,8 @@ function AdminMeetingDialog({
   const classId = form.watch('class_id')
   const autoCreateMeet = form.watch('auto_create_meet')
   const manualLink = (form.watch('meeting_link') ?? '').trim()
-  const meetGenerationActive = !editing && autoCreateMeet && !manualLink
+  const meetGenerationActive = !editing && !roomMode && autoCreateMeet && !manualLink
+  const selectedClass = (classesQuery.data ?? []).find((c) => String(c.id) === classId) ?? null
 
   /**
    * Narrowed to what the chosen teacher is actually assigned to teach.
@@ -229,7 +236,9 @@ function AdminMeetingDialog({
               ? editing.google_event_id
                 ? 'Changing the title or time updates the Google Calendar event on the owning teacher’s calendar, so every invited student sees it.'
                 : 'This meeting has no Calendar event behind it, so changes stay inside the LMS.'
-              : 'The session is filed under the chosen teacher, and the Calendar event is created on their calendar.'}
+              : roomMode
+                ? 'The session is filed under the chosen teacher and happens in the class’s shared room — no new Meet link is created.'
+                : 'The session is filed under the chosen teacher, and the Calendar event is created on their calendar.'}
           </DialogDescription>
         </DialogHeader>
         <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
@@ -373,7 +382,26 @@ function AdminMeetingDialog({
               </Field>
             </div>
 
-            {!editing && (
+            {!editing && roomMode && (
+              <div className="flex items-start gap-3 rounded-lg border border-primary/25 bg-primary/8 p-3.5 text-sm">
+                <Video className="mt-0.5 size-4 shrink-0 text-primary" />
+                <div>
+                  <p className="font-medium">This period uses the class’s shared room</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {selectedClass?.room_link
+                      ? `${selectedClass.name} already has its room; the session simply happens in it.`
+                      : 'The room is created the moment this is scheduled, and every later period of the class uses it too.'}{' '}
+                    Rooms are managed under{' '}
+                    <Link to="/admin/classes" className="font-medium text-primary hover:underline">
+                      Classes
+                    </Link>
+                    . Paste a link below only to hold this one session somewhere else.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {!editing && !roomMode && (
               <div className="space-y-3 rounded-lg border border-border bg-surface p-3.5">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -462,9 +490,11 @@ function AdminMeetingDialog({
               label="Meeting link"
               error={form.formState.errors.meeting_link?.message}
               hint={
-                meetGenerationActive
-                  ? 'Leave empty to let Google Meet generate one. Anything entered here is used instead.'
-                  : 'Google Meet, Zoom or Teams URL.'
+                roomMode && !editing
+                  ? 'Leave empty to use the class room. Anything entered here is used instead, for this session only.'
+                  : meetGenerationActive
+                    ? 'Leave empty to let Google Meet generate one. Anything entered here is used instead.'
+                    : 'Google Meet, Zoom or Teams URL.'
               }
             >
               <Input
@@ -494,6 +524,7 @@ export default function AdminMeetingsPage() {
   const deleteMeeting = useAdminDeleteMeeting()
   const regenerate = useRegenerateMeetingLink()
   const collectRecording = useAdminSyncRecording()
+  const repairAccess = useRepairTeacherAccess()
 
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<LiveMeetingOut | null>(null)
@@ -585,9 +616,23 @@ export default function AdminMeetingsPage() {
         title="Meetings"
         description="Every live session across all teachers. Schedule on a teacher's behalf, or repair one that lost its link."
         actions={
-          <Button variant="primary" icon={<Plus />} onClick={openCreate}>
-            Schedule meeting
-          </Button>
+          <>
+            {/* Teachers outside the Workspace domain were never on their own
+                sessions' guest lists, so Meet made them ask to join. New
+                sessions invite them; this covers the ones already scheduled. */}
+            <Button
+              variant="outline"
+              icon={<UserCheck />}
+              loading={repairAccess.isPending}
+              onClick={() => repairAccess.mutate(false)}
+              title="Add each teacher to their upcoming sessions' guest lists so Meet lets them in without asking"
+            >
+              Fix teacher access
+            </Button>
+            <Button variant="primary" icon={<Plus />} onClick={openCreate}>
+              Schedule meeting
+            </Button>
+          </>
         }
       >
         {teacherOptions.length > 1 && (

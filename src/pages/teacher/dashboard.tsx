@@ -2,6 +2,7 @@ import {
   ArrowRight,
   CalendarCheck,
   ClipboardList,
+  Hourglass,
   Layers,
   Library,
   Upload,
@@ -12,18 +13,22 @@ import {
 import * as React from 'react'
 import { Link } from 'react-router-dom'
 
+import type { ClassRoomAccessOut, PendingTopicOut, ScheduledPeriod } from '@/api/types'
 import { useAuth } from '@/providers/auth-provider'
+import { useMyClassRooms } from '@/queries/classes.queries'
 import {
   useClassRosters,
   useMyClasses,
   useMyLedClasses,
+  usePendingTopics,
   useTeacherAttendance,
   useTeacherMaterials,
   useTeacherMeetings,
   useTeacherTopics,
 } from '@/queries/teacher.queries'
 import { attendanceTrend, missingAttendanceToday, splitMeetings } from '@/lib/derive'
-import { formatDayLabel, todayApiDate } from '@/lib/datetime'
+import { cn } from '@/lib/cn'
+import { formatDayLabel, formatTime, todayApiDate } from '@/lib/datetime'
 import { greeting } from '@/lib/format'
 import { subjectName, className as classNameOf } from '@/lib/select'
 import { useNow } from '@/lib/hooks'
@@ -33,16 +38,243 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Skeleton } from '@/components/ui/skeleton'
 import { AreaTrend } from '@/components/charts/charts'
 import { ChartCard } from '@/components/charts/chart-card'
+import {
+  ARRIVAL_TONE,
+  JoinRoomButton,
+  LeaveRoomButton,
+  PresenceNote,
+  RoomPresenceList,
+  arrivalText,
+  formatMinutes,
+  minutesBetween,
+} from '@/components/domain/class-room'
 import { StatCard } from '@/components/domain/stat-card'
 import { EmptyState } from '@/components/feedback/states'
 import { HeroHeader } from '@/components/layout/page-header'
 import { MeetingCard } from './meetings'
 import { AdminTeacherNotice, useIsAdminViewingTeacher } from './teacher-guard'
+import { TopicFormDialog } from './topics'
+
+/** A period today in a room this teacher belongs to; `mine` when it is theirs to teach. */
+type TeachingSpot = { room: ClassRoomAccessOut; period: ScheduledPeriod; mine: boolean }
+
+/**
+ * The teacher's counterpart to the student's "join your classroom" banner,
+ * and the first thing on the page: the live class. Their own period when it
+ * is on; otherwise a colleague's period in a class they teach, which is still
+ * their class in session; otherwise their next period. Students are already
+ * sitting in the room, so the teacher is the one who arrives and leaves per
+ * period, and Leave is here too.
+ */
+function TeachingNowCard({
+  current,
+  next,
+  roomCount,
+  now,
+}: {
+  current: TeachingSpot | null
+  next: TeachingSpot | null
+  roomCount: number
+  now: Date
+}) {
+  const spot = current ?? next
+  if (!spot) return null
+  const { room, period } = spot
+  const live = current != null
+  const size = live ? 'lg' : 'md'
+  const teacher = period.entry.teacher?.full_name ?? 'Teacher to be confirmed'
+  const arrival = live && spot.mine ? arrivalText(period) : null
+
+  return (
+    <Card className={cn('mb-5', live ? 'border-success/40 shadow-glow' : 'border-primary/30')}>
+      <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            {live && spot.mine ? (
+              <Badge tone="success" dot>
+                Your period is on now
+              </Badge>
+            ) : live ? (
+              <Badge tone="info" dot>
+                Class in session
+              </Badge>
+            ) : (
+              <Badge tone="primary">
+                <Hourglass />
+                Your next period
+              </Badge>
+            )}
+            {room.in_room && (
+              <Badge tone="neutral" size="sm">
+                You are in the room
+              </Badge>
+            )}
+          </div>
+          <p className="mt-1.5 text-lg font-semibold">
+            {room.class_name} · {subjectName(period.entry)}
+            {live && !spot.mine ? <span className="font-normal text-muted-foreground"> · {teacher}</span> : null}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            {live && spot.mine
+              ? `Started ${formatTime(period.starts_at)} · ${formatMinutes(minutesBetween(period.starts_at, now))} in · ends ${formatTime(period.ends_at)}`
+              : live
+                ? `Until ${formatTime(period.ends_at)}`
+                : `${formatTime(period.starts_at)} – ${formatTime(period.ends_at)} · the room opens for you at ${formatTime(room.window_opens_at ?? period.starts_at)}`}
+            {' · '}
+            {live && !spot.mine
+              ? next
+                ? `your next period is ${next.room.class_name} · ${subjectName(next.period.entry)} at ${formatTime(next.period.starts_at)}`
+                : 'no period of yours is left today'
+              : 'the class sits in its shared room all day; you join it for your period'}
+            {roomCount > 1 ? ` · you teach in ${roomCount} rooms today` : ''}
+          </p>
+          {arrival && (
+            <p className={cn('mt-1 text-xs font-medium', ARRIVAL_TONE[arrival.tone])}>
+              {arrival.tone === 'warning' && !room.in_room ? 'Students are waiting: ' : ''}
+              {arrival.text}
+            </p>
+          )}
+          <PresenceNote access={room} className="mt-1.5" />
+          {/* The live list of who is actually in, while their period runs. */}
+          {live && spot.mine && <RoomPresenceList classId={room.class_id} compact className="mt-3" />}
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {/* Join and Leave belong to the teacher's OWN period; a colleague's
+              class in session is information, not a door. */}
+          {spot.mine && (
+            <>
+              <JoinRoomButton access={room} size={size} />
+              <LeaveRoomButton access={room} size={size} />
+            </>
+          )}
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/teacher/meetings">
+              All rooms
+              <ArrowRight className="size-4" />
+            </Link>
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+const DISMISSED_KEY = 'h7:topic-prompts-dismissed'
+
+function pendingKey(p: PendingTopicOut): string {
+  return `${p.on_date}:${p.class_id}:${p.subject_id}`
+}
+
+/** "Not now" choices, kept per browser for today only; a new day starts clean. */
+function useDismissedPrompts(today: string) {
+  const [dismissed, setDismissed] = React.useState<Set<string>>(() => {
+    try {
+      const raw = window.localStorage.getItem(DISMISSED_KEY)
+      const parsed = raw ? (JSON.parse(raw) as string[]) : []
+      return new Set(parsed.filter((k) => k.startsWith(today)))
+    } catch {
+      return new Set()
+    }
+  })
+  const dismiss = (key: string) => {
+    setDismissed((prev) => {
+      const next = new Set(prev)
+      next.add(key)
+      try {
+        window.localStorage.setItem(DISMISSED_KEY, JSON.stringify([...next]))
+      } catch {
+        // Browser storage can be unavailable; the prompt simply returns next visit.
+      }
+      return next
+    })
+  }
+  return { dismissed, dismiss }
+}
+
+/**
+ * The bell has gone: which topic did you cover? One row per period of the
+ * teacher's that ended today with nothing logged, most recent first. "Log
+ * the topic" opens the syllabus form with class, subject and date filled in.
+ */
+function PendingTopicsCard({ onLog }: { onLog: (pending: PendingTopicOut) => void }) {
+  const pending = usePendingTopics()
+  const { dismissed, dismiss } = useDismissedPrompts(todayApiDate())
+  const items = (pending.data ?? []).filter((p) => !dismissed.has(pendingKey(p)))
+  if (items.length === 0) return null
+
+  return (
+    <Card className="mb-5 border-warning/40">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">Class over — what did you cover?</CardTitle>
+        <CardDescription>
+          Log it while it is fresh. Students see it as syllabus progress, and you can attach
+          notes, photos of the board or a voice recap.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {items.map((p) => (
+          <div
+            key={pendingKey(p)}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-sm"
+          >
+            <div className="min-w-0">
+              <p className="font-medium">
+                {p.class_name} · {p.subject_name}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {formatTime(p.starts_at)} – {formatTime(p.ends_at)} · ended{' '}
+                {p.minutes_since_end < 1 ? 'just now' : `${formatMinutes(p.minutes_since_end)} ago`}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button size="sm" variant="primary" onClick={() => onLog(p)}>
+                <ClipboardList />
+                Log the topic
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => dismiss(pendingKey(p))}>
+                Not now
+              </Button>
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  )
+}
 
 export default function TeacherDashboardPage() {
   const { user } = useAuth()
   const isAdmin = useIsAdminViewingTeacher()
   const now = useNow(60_000)
+  const [logging, setLogging] = React.useState<PendingTopicOut | null>(null)
+
+  // The rooms this teacher teaches in, with today's periods. Polled, so the
+  // banner below moves from "next" to "on now" without a reload.
+  const roomsQuery = useMyClassRooms(!isAdmin)
+  const teaching = React.useMemo(() => {
+    const rooms = roomsQuery.data ?? []
+    const nowMs = now.getTime()
+    const isOn = (period: ScheduledPeriod) =>
+      period.is_current ||
+      (new Date(period.starts_at).getTime() <= nowMs && nowMs < new Date(period.ends_at).getTime())
+    const all: TeachingSpot[] = rooms.flatMap((room) =>
+      room.periods_today.map((period) => ({
+        room,
+        period,
+        mine: user != null && period.entry.teacher_id === user.id,
+      })),
+    )
+    const mine = all.filter((spot) => spot.mine)
+    // The live class: their own period if it is on, else any period on now in
+    // a class they teach — it is their class in session either way.
+    const current = mine.find(({ period }) => isOn(period)) ?? all.find(({ period }) => isOn(period)) ?? null
+    const next =
+      mine
+        .filter(({ period }) => new Date(period.starts_at).getTime() > nowMs)
+        .sort((a, b) => a.period.starts_at.localeCompare(b.period.starts_at))[0] ?? null
+    const roomCount = new Set(mine.map(({ room }) => room.class_id)).size
+    return { current, next, roomCount }
+  }, [roomsQuery.data, user, now])
 
   const mappingsQuery = useMyClasses(!isAdmin)
   const attendanceQuery = useTeacherAttendance(!isAdmin)
@@ -111,7 +343,7 @@ export default function TeacherDashboardPage() {
     <>
       <HeroHeader
         eyebrow="Teaching"
-        title={`${greeting()}, ${user?.full_name?.split(' ').slice(-1)[0] ?? 'there'}`}
+        title={`${greeting()}, ${user?.full_name?.trim().split(/\s+/)[0] ?? 'there'}`}
         description="Here is what needs doing today."
         actions={
           <Button asChild variant="primary">
@@ -167,6 +399,23 @@ export default function TeacherDashboardPage() {
           </Button>
         </div>
       </HeroHeader>
+
+      {/* The live class, right under the greeting: when a teacher opens the
+          dashboard mid-morning, the room they need to be in is the point of
+          the visit. */}
+      {roomsQuery.isPending ? (
+        <Skeleton className="mb-5 h-24 rounded-2xl" />
+      ) : (
+        <TeachingNowCard
+          current={teaching.current}
+          next={teaching.next}
+          roomCount={teaching.roomCount}
+          now={now}
+        />
+      )}
+
+      {/* ------------------------------------------- the period just finished */}
+      <PendingTopicsCard onLog={setLogging} />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard index={0} label="Classes you teach" value={mappings.length} icon={Layers} tone="primary" />
@@ -308,6 +557,19 @@ export default function TeacherDashboardPage() {
           ))}
         </div>
       )}
+
+      {/* The syllabus form, opened from the "class over" prompt with the
+          class, subject and date already filled in. */}
+      <TopicFormDialog
+        open={!!logging}
+        onOpenChange={(v) => !v && setLogging(null)}
+        editing={null}
+        preset={
+          logging
+            ? { class_id: logging.class_id, subject_id: logging.subject_id, date_covered: logging.on_date }
+            : null
+        }
+      />
     </>
   )
 }

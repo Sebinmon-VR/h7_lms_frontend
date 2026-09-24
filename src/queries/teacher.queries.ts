@@ -97,6 +97,61 @@ export function useTeacherTopics(enabled = true) {
   })
 }
 
+/**
+ * Periods of the teacher's that ended today with nothing logged. Polled, so
+ * the prompt appears within a minute of the bell; logging a topic refetches
+ * it through the topics key it sits under.
+ */
+export function usePendingTopics(enabled = true) {
+  return useQuery({
+    queryKey: qk.teacher.pendingTopics(),
+    queryFn: teacherApi.pendingTopics,
+    staleTime: STALE.live,
+    refetchInterval: 60_000,
+    enabled,
+  })
+}
+
+function replaceTopic(qc: ReturnType<typeof useQueryClient>, updated: TopicOut) {
+  qc.setQueryData<TopicOut[]>(qk.teacher.topics(), (prev) =>
+    prev?.map((t) => (t.id === updated.id ? updated : t)),
+  )
+  void qc.invalidateQueries({ queryKey: qk.teacher.topics() })
+}
+
+/** Attach notes, an image or a voice note to a topic. Silent on success: the dialog shows the list. */
+export function useAddTopicAttachment() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      topicId,
+      file,
+      kind,
+      caption,
+      onProgress,
+    }: {
+      topicId: number
+      file: File
+      kind?: string
+      caption?: string
+      onProgress?: (percent: number) => void
+    }) => teacherApi.addTopicAttachment(topicId, file, { kind, caption }, onProgress),
+    onSuccess: (updated) => replaceTopic(qc, updated),
+  })
+}
+
+export function useRemoveTopicAttachment() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ topicId, attachmentId }: { topicId: number; attachmentId: string }) =>
+      teacherApi.removeTopicAttachment(topicId, attachmentId),
+    onSuccess: (updated) => {
+      replaceTopic(qc, updated)
+      toast.success('Attachment removed')
+    },
+  })
+}
+
 export function useTeacherMeetings(enabled = true) {
   return useQuery({
     queryKey: qk.teacher.meetings(),

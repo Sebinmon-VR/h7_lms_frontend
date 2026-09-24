@@ -145,6 +145,14 @@ export function MeetingPhaseBadge({ phase }: { phase: 'live' | 'upcoming' | 'pas
  * fall back to their previous "No link" wording there.
  */
 export function MeetStatusBadge({ status }: { status: string }) {
+  if (status === 'CLASS_ROOM') {
+    return (
+      <Badge tone="primary" size="sm">
+        <Users />
+        Class room
+      </Badge>
+    )
+  }
   if (status === 'FAILED') {
     return (
       <Badge tone="danger" size="sm">

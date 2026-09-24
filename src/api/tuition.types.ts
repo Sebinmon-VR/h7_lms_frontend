@@ -1350,6 +1350,11 @@ export interface ProgramSettingsUpdate {
   student_uploads_need_approval?: boolean
   currency?: string
   auto_create_meet?: boolean
+  /**
+   * LMS only. One standing Meet room per class that every subject teacher
+   * joins at their period, instead of a fresh link per scheduled session.
+   */
+  class_room_mode?: boolean
 
   /**
    * Read-only library, in two independent halves. With uploads off the upload
