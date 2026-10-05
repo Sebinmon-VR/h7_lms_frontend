@@ -1,4 +1,5 @@
 import type { DayOfWeek, ScheduledPeriod, TimetableEntryOut } from '@/api/types'
+import { wallClockToLocal } from '@/lib/timezone'
 
 /**
  * Weekly timetable helpers.
@@ -79,6 +80,41 @@ export function formatPeriodRange(entry: {
 /** Whole minutes a period lasts. */
 export function periodLengthMinutes(entry: { start_time: string; end_time: string }): number {
   return Math.max(0, minutesOfDay(entry.end_time) - minutesOfDay(entry.start_time))
+}
+
+/** The next calendar date falling on `day`, today included. */
+export function nextDateFor(day: DayOfWeek, from: Date = new Date()): Date {
+  const wanted = DAYS.indexOf(day)
+  const current = (from.getDay() + 6) % 7
+  const date = new Date(from.getFullYear(), from.getMonth(), from.getDate())
+  date.setDate(date.getDate() + ((wanted - current + 7) % 7))
+  return date
+}
+
+export interface LocalPeriodRange {
+  /** "10:30–11:15" on the viewer's clock. */
+  range: string
+  /** Non-zero when the viewer's calendar day differs from the school's for this period. */
+  dayShift: number
+}
+
+/**
+ * A period's times on the viewer's own clock: the one exception to "never
+ * convert wall-clock strings", and it goes through the school zone
+ * explicitly rather than through `new Date("09:00")`.
+ *
+ * Worked out for the next date the period falls on, so a zone that observes
+ * DST converts against the right offset for the week the viewer is looking at.
+ */
+export function localPeriodRange(
+  entry: Pick<TimetableEntryOut, 'day_of_week' | 'start_time' | 'end_time'>,
+  schoolZone: string,
+): LocalPeriodRange | null {
+  const on = nextDateFor(entry.day_of_week)
+  const start = wallClockToLocal(entry.start_time, schoolZone, on)
+  const end = wallClockToLocal(entry.end_time, schoolZone, on)
+  if (!start || !end) return null
+  return { range: `${start.time}–${end.time}`, dayShift: start.dayShift }
 }
 
 /**

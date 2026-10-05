@@ -565,8 +565,8 @@ export function useMarkTuitionAttendance() {
 }
 
 /**
- * With a body, sets an explicit link. Without one, asks the backend to create
- * a Google Meet for this class — which is why `body` is optional.
+ * With a body, sets an explicit link. Without one, asks the backend to give
+ * this class a room inside the LMS — which is why `body` is optional.
  */
 export function useSetTuitionMeetingLink(scope: Exclude<TuitionScope, 'student'>) {
   return useSessionMutation(

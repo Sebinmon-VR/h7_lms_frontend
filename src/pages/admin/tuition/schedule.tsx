@@ -319,14 +319,14 @@ function SlotDialog({
             <Field
               id="link"
               label="Standing meeting link"
-              hint="A Zoom or Teams room used for every class. Leave blank to give each class its own Meet."
+              hint="A Zoom or Teams room used for every class. Leave blank to give each class its own room in the LMS."
             >
               <Input id="link" placeholder="https://…" {...form.register('meeting_link')} />
             </Field>
 
             <label className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
               <span className="text-sm">
-                Create a Google Meet for each class
+                Create a class room in the LMS for each class
                 <span className="block text-xs text-muted-foreground">
                   Ignored when a standing link is set above.
                 </span>
@@ -443,7 +443,7 @@ function SlotRow({
         ) : slot.auto_create_meet ? (
           <Badge tone="outline" size="sm">
             <Video />
-            Meet per class
+            LMS room per class
           </Badge>
         ) : null}
         {slot.conflicts.length > 0 && (

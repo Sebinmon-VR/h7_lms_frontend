@@ -81,7 +81,7 @@ export function usePresenceMap(enabled = true) {
 /**
  * Everyone who may own a teaching record — both `TEACHER` and `CLASS_TEACHER`.
  *
- * This exists because `/admin/users?role=` is a real Firestore `==` query, so
+ * This exists because `/admin/users?role=` is a real exact-match query, so
  * asking for `TEACHER` returns only the plain ones. Every teacher picker in the
  * app used to do exactly that, which meant promoting someone to class teacher
  * silently removed them from the subject-mapping, timetable, meeting and
@@ -160,7 +160,7 @@ export function useAdminMaterials(enabled = true) {
 /**
  * Integration health.
  *
- * The probing variant makes real network calls to Google, so it is neither
+ * The probing variant makes real network calls to Azure, so it is neither
  * refetched on focus nor treated as fresh for long — an admin opens this page
  * precisely when they suspect something has changed, and a stale "all healthy"
  * would be worse than a short wait.
@@ -360,7 +360,7 @@ export function useReminderLog(limit = 50, enabled = true) {
 }
 
 /**
- * Triggers a sweep now. Safe to press twice — the Firestore claim means an
+ * Triggers a sweep now. Safe to press twice — the database claim means an
  * already-sent reminder is skipped no matter who asks for the sweep.
  */
 export function useRunReminders() {
@@ -397,7 +397,7 @@ export function useRecordingStatus(enabled = true) {
 
 /**
  * Deliberately NOT auto-fetched, for the same reason as the reminder preview:
- * it asks Meet about every finished session to answer, which is a question an
+ * it checks every finished session to answer, which is a question an
  * admin asks on purpose rather than background data.
  */
 export function useRecordingPreview() {
@@ -420,8 +420,8 @@ export function useRecordingLog(limit = 50, enabled = true) {
 }
 
 /**
- * Runs a collection sweep now. Safe to press twice — the Firestore claim on
- * each (meeting, recording) pair means an already-filed video is skipped
+ * Runs a collection sweep now. Safe to press twice — the database claim on
+ * each recording means an already-filed video is skipped
  * whoever asks for the sweep.
  *
  * The meeting lists are invalidated because a successful sweep writes
@@ -571,7 +571,7 @@ export function useCreateUser() {
  * Optimistic — renaming and the active toggle are where latency is felt.
  *
  * A role change is a much heavier operation than the rest of this body: the
- * backend re-issues Firebase claims and revokes every token, signing the user
+ * backend revokes every token, signing the user
  * out wherever they are. Callers must confirm before including `role`; this
  * hook reports it plainly afterwards rather than letting it pass as an
  * ordinary field edit.
@@ -669,17 +669,14 @@ export function usePermanentlyDeleteUser() {
       void qc.invalidateQueries({ queryKey: qk.student.root })
       markMonitoringStale()
 
-      // An orphaned Firebase login is a real operational loose end, not a
-      // detail to bury — say so instead of reporting a clean success.
-      if (!result.firebase_auth_deleted) {
-        toast.warning('Profile deleted, but the login may remain', {
-          description: `${result.detail} The Firebase account could not be removed and may need clearing by hand.`,
-          duration: 12_000,
-        })
-        return
-      }
+      // `login_deleted: false` means the stored password could not be removed.
+      // Harmless — the profile it belonged to is gone — so it is still a
+      // success, just worded honestly.
       toast.success(`${result.full_name ?? 'User'} permanently deleted`, {
-        description: result.detail,
+        description:
+          result.login_deleted === false
+            ? `${result.detail} The stored password could not be removed, but it can no longer be used.`
+            : result.detail,
         duration: 8_000,
       })
     },
@@ -950,7 +947,7 @@ function invalidateMeetings(qc: ReturnType<typeof useQueryClient>) {
 }
 
 /**
- * Reports the outcome of Meet generation honestly.
+ * Reports the outcome of room creation honestly.
  *
  * A meeting saved without a link is a SUCCESS on the backend — the schedule is
  * kept either way — so this never surfaces as an error. `meet_error` carries
@@ -958,35 +955,33 @@ function invalidateMeetings(qc: ReturnType<typeof useQueryClient>) {
  */
 function reportMeetOutcome(created: LiveMeetingOut) {
   if (created.meet_status === 'FAILED' || (!created.meeting_link && created.meet_status !== 'MANUAL' && created.meet_status !== 'SKIPPED')) {
-    toast.warning('Scheduled without a Meet link', {
+    toast.warning('Scheduled without a class room', {
       description:
         created.meet_error ??
-        'Google Meet could not generate a link. The meeting is saved — check Admin → Integrations, then use “Retry Meet link”.',
+        'The live-class room could not be created. The meeting is saved — check Admin → Integrations, then use “Give this session a working room”.',
       duration: 10_000,
     })
     return
   }
-  // The link works but Meet refused to arm recording — a partial success, and
+  // The room works but recording could not be switched on — a partial success, and
   // one nobody would notice until the class was over and no video appeared.
   if (created.recording_status === 'ARM_FAILED') {
     toast.warning('Scheduled, but it will not record itself', {
       description:
         created.recording_error ??
-        'Google Meet would not switch automatic recording on for this session. Check Admin → Recordings for what is missing.',
+        'Automatic recording could not be switched on for this session. Check Admin → Recordings for what is missing.',
       duration: 10_000,
     })
     return
   }
-  if (created.google_event_id) {
-    toast.success('Meeting scheduled', {
-      description:
-        created.recording_status === 'ARMED'
-          ? 'The enrolled students have been invited, and the session will record itself.'
-          : 'A Google Calendar invitation has been sent to the enrolled students.',
-    })
-    return
-  }
-  toast.success('Meeting scheduled')
+  toast.success('Meeting scheduled', {
+    description:
+      created.meet_status === 'MANUAL' || !created.meeting_link
+        ? undefined
+        : created.recording_status === 'ARMED'
+          ? 'The class meets in the LMS, and it will be recorded when the teacher joins.'
+          : 'The class meets in the LMS.',
+  })
 }
 
 export function useAdminCreateMeeting() {
@@ -1011,17 +1006,14 @@ export function useAdminUpdateMeeting() {
         prev?.map((m) => (m.id === updated.id ? updated : m)),
       )
       invalidateMeetings(qc)
-      toast.success('Meeting updated', {
-        description: updated.google_event_id
-          ? 'The Google Calendar event was updated for every invited student.'
-          : undefined,
-      })
+      toast.success('Meeting updated')
     },
   })
 }
 
 /**
- * Retries Meet generation for a meeting saved without a link.
+ * Gives a session a working LMS room — one saved without a link, or one still
+ * carrying an old Google Meet link.
  *
  * A 502 here means the retry failed for the same class of reason as the
  * original attempt, and the server has already recorded that on the meeting —
@@ -1037,20 +1029,17 @@ export function useRegenerateMeetingLink() {
       qc.setQueryData<LiveMeetingOut[]>(qk.admin.meetings(), (prev) =>
         prev?.map((m) => (m.id === updated.id ? updated : m)),
       )
-      toast.success('Meet link created', {
+      toast.success('This session now has a working room', {
         description:
-          // The regenerated conference is a different space, so recording had
-          // to be armed again on it — worth saying, since that can fail on its
-          // own while the link itself is fine.
           updated.recording_status === 'ARM_FAILED'
-            ? 'The class has been invited, but automatic recording could not be switched on for the new conference.'
+            ? 'The class meets in the LMS, but automatic recording could not be switched on.'
             : updated.recording_status === 'ARMED'
-              ? 'The class has been invited, and the session will record itself.'
-              : 'The session now has a link and the class has been invited.',
+              ? 'The class meets in the LMS, and it will be recorded when the teacher joins.'
+              : 'The class meets in the LMS.',
       })
     },
     onError: (error) => {
-      toast.error('Still could not create a Meet link', {
+      toast.error('Still could not give this session a room', {
         description:
           error instanceof ApiError
             ? error.message
@@ -1069,8 +1058,8 @@ export function useRegenerateMeetingLink() {
  *
  * Same endpoint semantics as the teacher's, without the ownership scoping: an
  * admin can chase any teacher's session. Pressing it early is harmless — the
- * Firestore claim means an already-filed video is never filed twice — so the
- * ordinary "Meet has not published it yet" answer is reported as information
+ * database claim means an already-filed video is never filed twice — so the
+ * ordinary "the video is not ready yet" answer is reported as information
  * rather than as a failure.
  */
 export function useAdminSyncRecording() {
@@ -1111,12 +1100,8 @@ export function useAdminDeleteMeeting() {
     onError: (_error, _meetingId, context) => {
       if (context?.snapshot) qc.setQueryData(qk.admin.meetings(), context.snapshot)
     },
-    onSuccess: (_data, _meetingId, context) => {
-      toast.success('Meeting cancelled', {
-        description: context?.removed?.google_event_id
-          ? 'The Google Calendar event was deleted and attendees were notified.'
-          : undefined,
-      })
+    onSuccess: () => {
+      toast.success('Meeting cancelled')
     },
     onSettled: () => {
       invalidateMeetings(qc)
@@ -1175,8 +1160,15 @@ export function useAdminUpdateMaterial() {
 export function useAdminDeleteMaterial() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ materialId, keepFile }: { materialId: number; keepFile?: boolean }) =>
-      adminApi.deleteMaterial(materialId, keepFile),
+    /** `classVideo`: a published recording, which the server only unpublishes. */
+    mutationFn: ({
+      materialId,
+      keepFile,
+    }: {
+      materialId: number
+      keepFile?: boolean
+      classVideo?: boolean
+    }) => adminApi.deleteMaterial(materialId, keepFile),
     onMutate: async ({ materialId }) => {
       await qc.cancelQueries({ queryKey: qk.admin.materials() })
       const snapshot = qc.getQueryData<StudyMaterialOut[]>(qk.admin.materials())
@@ -1188,12 +1180,20 @@ export function useAdminDeleteMaterial() {
     onError: (_error, _vars, context) => {
       if (context?.snapshot) qc.setQueryData(qk.admin.materials(), context.snapshot)
     },
-    onSuccess: () => {
+    onSuccess: (_data, { classVideo }) => {
       markMonitoringStale()
-      toast.success('Material deleted')
+      toast.success(
+        classVideo
+          ? 'Removed from the class library — the video is kept in Recordings'
+          : 'Material deleted',
+      )
     },
-    onSettled: () => {
+    onSettled: (_data, _error, { classVideo }) => {
       invalidateMaterials(qc)
+      if (classVideo) {
+        void qc.invalidateQueries({ queryKey: qk.teacher.recordings() })
+        void qc.invalidateQueries({ queryKey: qk.admin.meetings() })
+      }
     },
   })
 }

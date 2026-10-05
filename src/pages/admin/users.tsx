@@ -218,7 +218,6 @@ export function profileOf(user: UserOut): UserProfileFields {
     is_active: _active,
     created_at: _created,
     updated_at: _updated,
-    firebase_uid: _uid,
     programs: _programs,
     ...profile
   } = user
@@ -325,7 +324,7 @@ export default function AdminUsersPage() {
       const apiError = error instanceof ApiError ? error : null
       toast.error(
         apiError?.status === 503
-          ? 'Firebase Auth could not be reached. Nothing was changed — try again.'
+          ? 'The sign-in service could not be reached. Nothing was changed — try again.'
           : (apiError?.message ?? 'Could not generate credentials.'),
       )
       setIssuingFor(null)
@@ -645,7 +644,7 @@ export default function AdminUsersPage() {
         open={!!bulkDeactivate}
         onOpenChange={(v) => !v && !bulk.running && setBulkDeactivate(null)}
         title={`Deactivate ${bulkDeactivate?.length ?? 0} accounts?`}
-        description="Each account's Firebase sign-in is disabled and its sessions revoked. History is kept, and any of them can be reactivated individually."
+        description="Each account's sign-in is blocked and it is signed out everywhere. History is kept, and any of them can be reactivated individually."
         confirmLabel={`Deactivate ${bulkDeactivate?.length ?? 0}`}
         destructive
         loading={bulk.running}
@@ -770,7 +769,7 @@ export default function AdminUsersPage() {
         open={!!deactivating}
         onOpenChange={(v) => !v && setDeactivating(null)}
         title={`Deactivate ${deactivating?.full_name ?? 'this user'}?`}
-        description="Their Firebase sign-in is disabled and any active session is revoked immediately. Attendance, grades and other records are kept, and you can reactivate the account at any time."
+        description="Their sign-in is blocked and they are signed out everywhere immediately. Attendance, grades and other records are kept, and you can reactivate the account at any time."
         confirmLabel="Deactivate"
         destructive
         loading={deactivateUser.isPending}
@@ -796,7 +795,7 @@ export default function AdminUsersPage() {
         description={
           blockedBy
             ? undefined
-            : 'This erases the profile and the Firebase login. It cannot be undone. Deactivating instead keeps their history intact and can be reversed at any time.'
+            : 'This erases the profile and its login. It cannot be undone. Deactivating instead keeps their history intact and can be reversed at any time.'
         }
         confirmLabel={blockedBy ? 'Delete the user and all of it' : 'Delete permanently'}
         destructive

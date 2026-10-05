@@ -10,7 +10,6 @@ import { ApiError } from '@/api/errors'
 import { roleHome, useAuth } from '@/providers/auth-provider'
 import { DEMO_ACCOUNTS } from '@/lib/constants'
 import { IS_DEV } from '@/lib/env'
-import { firebaseAuthMessage } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,7 +23,7 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>
 
 export default function LoginPage() {
-  const { login, sendPasswordReset, usesFirebase } = useAuth()
+  const { login, sendPasswordReset } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [showPassword, setShowPassword] = React.useState(false)
@@ -38,11 +37,7 @@ export default function LoginPage() {
 
   const from = (location.state as { from?: string } | null)?.from
 
-  /**
-   * Sign-in now fails in two different vocabularies: Firebase `auth/*` codes
-   * for the credential itself, and the backend's HTTP errors for the LMS
-   * profile behind it. Both have to read as one sentence to the user.
-   */
+  /** The backend's refusal, as one sentence for the person at the keyboard. */
   const describeSignInFailure = (error: unknown): string => {
     const apiError = error instanceof ApiError ? error : null
     if (apiError) {
@@ -52,16 +47,13 @@ export default function LoginPage() {
       if (apiError.isInactiveAccount) {
         return 'This account has been deactivated. Contact an administrator.'
       }
-      if (apiError.isPasswordLoginUnavailable) {
-        return 'Password sign-in is not enabled on this server. Configure Firebase for this site, or ask an administrator for access.'
-      }
       if (apiError.isUnauthorized) {
         return 'That email and password combination is not recognised.'
       }
-      if (apiError.isNetwork) return apiError.message
+      // 429 after too many attempts carries its own "try again in N minutes".
       return apiError.message
     }
-    return firebaseAuthMessage(error)
+    return (error as Error)?.message ?? 'Could not sign in.'
   }
 
   const onSubmit = async (values: FormValues) => {
@@ -75,9 +67,9 @@ export default function LoginPage() {
   }
 
   /**
-   * Always reports success, even for an address with no account. Firebase
-   * behaves the same way, and confirming which emails are registered would
-   * turn this form into an account-enumeration oracle.
+   * Always reports success, even for an address with no account: the server
+   * answers the same either way, because confirming which emails are
+   * registered would turn this form into an account-enumeration oracle.
    */
   const onForgotPassword = async () => {
     const email = form.getValues('email').trim()
@@ -90,11 +82,8 @@ export default function LoginPage() {
     setFormError(null)
     setResetBusy(true)
     try {
-      await sendPasswordReset(email)
-      toast.success('Password reset email sent', {
-        description: `If an account exists for ${email}, a reset link is on its way.`,
-        duration: 8_000,
-      })
+      const detail = await sendPasswordReset(email)
+      toast.success('Check your email', { description: detail, duration: 10_000 })
     } catch (error) {
       setFormError((error as Error)?.message ?? 'Could not send a reset email.')
     } finally {
@@ -127,12 +116,8 @@ export default function LoginPage() {
         </div>
       )}
 
-      {/* Email and password only.
-          Accounts are provisioned by an administrator, who generates the
-          password and emails it — so a Google button would offer a route that
-          most users' accounts are not set up for. Sign-in still runs through
-          the Firebase SDK, which keeps the token refreshing in the background
-          rather than expiring hard after an hour. */}
+      {/* Email and password only. Accounts are provisioned by an
+          administrator, who generates the password and emails it. */}
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
         <div className="space-y-2">
           <Label htmlFor="email" required>
@@ -156,17 +141,15 @@ export default function LoginPage() {
             <Label htmlFor="password" required>
               Password
             </Label>
-            {usesFirebase && (
-              <button
-                type="button"
-                onClick={onForgotPassword}
-                disabled={resetBusy}
-                className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
-              >
-                {resetBusy && <MailCheck className="size-3.5" />}
-                Forgot password?
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={onForgotPassword}
+              disabled={resetBusy}
+              className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
+            >
+              {resetBusy && <MailCheck className="size-3.5" />}
+              Forgot password?
+            </button>
           </div>
           <Input
             id="password"

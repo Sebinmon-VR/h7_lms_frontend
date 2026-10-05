@@ -136,7 +136,7 @@ export function MeetingPhaseBadge({ phase }: { phase: 'live' | 'upcoming' | 'pas
 }
 
 /**
- * Why a meeting does or does not have a Meet link.
+ * Why a meeting does or does not have a class room.
  *
  * Only rendered when the link is genuinely missing or genuinely failed —
  * `CREATED` needs no badge (the join button says it), and `MANUAL` is the
@@ -157,7 +157,7 @@ export function MeetStatusBadge({ status }: { status: string }) {
     return (
       <Badge tone="danger" size="sm">
         <TriangleAlert />
-        Meet link failed
+        Room not ready
       </Badge>
     )
   }
@@ -187,6 +187,7 @@ const RECORDING_TONE: Record<
   NOT_REQUESTED: { tone: 'neutral', Icon: VideoOff },
   ARMED: { tone: 'info', Icon: Disc },
   ARM_FAILED: { tone: 'warning', Icon: TriangleAlert },
+  RECORDING: { tone: 'danger', Icon: Radio },
   WAITING: { tone: 'warning', Icon: Hourglass },
   STORED: { tone: 'success', Icon: Film },
   UNAVAILABLE: { tone: 'neutral', Icon: CircleSlash },
@@ -197,7 +198,7 @@ const RECORDING_TONE: Record<
  * Where a session's recording has got to.
  *
  * Every stage here is a legitimate outcome — a class nobody joined is never
- * recorded, and a finished one takes minutes to publish — so the neutral tones
+ * recorded, and a finished one takes minutes to prepare — so the neutral tones
  * are as important as the red one. Null status means the row predates the
  * feature, which is unknown rather than broken: nothing is rendered.
  */

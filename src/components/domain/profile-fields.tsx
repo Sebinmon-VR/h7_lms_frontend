@@ -290,7 +290,7 @@ export function ProfileFieldsSection({
   const flat = layout === 'page'
 
   // Empty string is normalised to null so an untouched input never writes ""
-  // into Firestore — two blank admission numbers would otherwise read as a
+  // into the database — two blank admission numbers would otherwise read as a
   // genuine uniqueness collision.
   const set = (key: keyof UserProfileFields) => (raw: string) =>
     onChange({ [key]: raw.trim() === '' ? null : raw } as UserProfileFields)

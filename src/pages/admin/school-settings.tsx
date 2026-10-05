@@ -204,11 +204,11 @@ export default function AdminSchoolSettingsPage() {
                 <span className="min-w-0">
                   <span className="text-sm font-medium">One shared room per class</span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">
-                    On — the default — every class has a single Google Meet room. Students join
-                    it and stay for the day; each subject teacher joins the same room at their
-                    period, and scheduled sessions reuse the class’s link. Rooms are created
-                    automatically about 30 minutes before a class’s first period. Off restores a
-                    separate Meet link per scheduled session. Tuition is not affected.
+                    On — the default — every class has a single class room in the LMS. Students
+                    join it and stay for the day; each subject teacher joins the same room at their
+                    period, and scheduled sessions reuse the class’s room. Rooms are created
+                    automatically about 30 minutes before a class’s first period. Off gives each
+                    scheduled session a room of its own. Tuition is not affected.
                   </span>
                 </span>
                 <Switch

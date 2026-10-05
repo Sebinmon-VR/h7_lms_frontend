@@ -147,7 +147,7 @@ export const PRIVACY_POLICY: LegalDocument = {
           'Guardian details: guardian name, phone, email and relationship to the student.',
           'Staff records: employee ID, designation, qualification, specialisation, date of joining and years of experience.',
           'Academic records: attendance, examination marks, syllabus topics covered, timetable periods, subject assignments and class-teacher assignments.',
-          'Content: study materials uploaded by teachers, and links to scheduled live classes.',
+          'Content: study materials uploaded by teachers, and scheduled live classes — including, where the school has switched recording on, recordings of those classes and a log of when each person joined and left.',
           'Administrative notes recorded by the school about a user. These are internal to the school and are never shown to the person they describe.',
         ]),
         p(
@@ -191,13 +191,11 @@ export const PRIVACY_POLICY: LegalDocument = {
           'We use the following providers to run the service. They process data on our behalf under contract and may not use it for their own purposes:',
         ),
         ul([
-          'Google Firebase Authentication — verifies sign-in and issues session tokens.',
-          'Google Cloud Firestore — stores the school\'s records.',
-          'Google Cloud Storage — stores uploaded study materials.',
-          'Google Calendar and Google Meet — create and host live classes, where the school has enabled it.',
-          'Microsoft Azure — hosts the application server, in the India South Central region.',
+          'Microsoft Azure SQL Database — stores the school\'s records and account sign-in details.',
+          'Microsoft Azure Blob Storage — stores uploaded study materials and class recordings.',
+          'Microsoft Azure Communication Services — hosts live video classes inside the app, records them where the school has enabled it, and delivers credential and reminder emails.',
+          'Microsoft Azure App Service and Azure Static Web Apps — host the application server and website, in the India South Central region.',
           'Expo — delivers app updates and, if reminders are enabled, push notifications.',
-          'An email provider — delivers credentials and reminder emails.',
         ]),
         p(
           'Some of these providers operate infrastructure outside your country. Where personal data is transferred across a border, it is done under the provider\'s contractual safeguards and only to the extent needed to run the service.',
@@ -262,7 +260,7 @@ export const PRIVACY_POLICY: LegalDocument = {
       heading: 'Security',
       blocks: [
         p(
-          'Sign-in is handled by Google Firebase Authentication; the app never stores your password. Traffic between the app and the server is encrypted in transit. Access inside the app is enforced by role on the server, not merely hidden in the interface.',
+          'Passwords are never stored in readable form — only as a salted one-way hash that cannot be turned back into the password. Traffic between the app and the server is encrypted in transit. Access inside the app is enforced by role on the server, not merely hidden in the interface.',
         ),
         p(
           'No system is perfectly secure. If a breach affects your data, we will notify your school without undue delay so the school can meet its own notification duties.',
@@ -379,7 +377,7 @@ export const TERMS_OF_USE: LegalDocument = {
       heading: 'Live classes and third-party services',
       blocks: [
         p(
-          'Live classes may run on Google Meet, and files may be stored in Google Cloud Storage. Those services have their own terms, which apply to you when you use them through the app.',
+          'Live classes run inside the app on Microsoft Azure Communication Services, and files are stored in Microsoft Azure Blob Storage. If your school shares a link to an outside meeting service instead, that service has its own terms, which apply to you when you use it.',
         ),
       ],
     },

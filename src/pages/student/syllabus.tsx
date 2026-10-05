@@ -1,9 +1,12 @@
+import { Film } from 'lucide-react'
 import * as React from 'react'
+import { Link } from 'react-router-dom'
 
-import { useStudentTopics } from '@/queries/student.queries'
+import { useStudentMaterials, useStudentTopics } from '@/queries/student.queries'
 import { syllabusProgress } from '@/lib/derive'
 import { formatDate, formatDayLabel } from '@/lib/datetime'
 import { formatPercent } from '@/lib/format'
+import { isClassVideo } from '@/lib/materials'
 import { subjectName } from '@/lib/select'
 import { subjectLook, toneStyle } from '@/lib/subjects'
 import { ProgressBar } from '@/components/ui/progress'
@@ -23,9 +26,21 @@ import { AdminStudentNotice, NotEnrolledState, useEnrollmentStatus } from './stu
 export default function StudentSyllabusPage() {
   const enrollment = useEnrollmentStatus()
   const topicsQuery = useStudentTopics(!enrollment.isAdmin)
+  // Only to know which subjects have class videos to point at; shares the
+  // Library's cache, so it costs nothing once either page has loaded.
+  const materialsQuery = useStudentMaterials(!enrollment.isAdmin)
 
   const topics = React.useMemo(() => topicsQuery.data ?? [], [topicsQuery.data])
   const progress = React.useMemo(() => syllabusProgress(topics, (t) => subjectName(t)), [topics])
+
+  /** Published class recordings per subject id. */
+  const videoCounts = React.useMemo(() => {
+    const counts = new Map<number, number>()
+    for (const m of materialsQuery.data ?? []) {
+      if (isClassVideo(m)) counts.set(m.subject_id, (counts.get(m.subject_id) ?? 0) + 1)
+    }
+    return counts
+  }, [materialsQuery.data])
 
   const grouped = React.useMemo(() => {
     const map = new Map<string, typeof topics>()
@@ -105,6 +120,15 @@ export default function StudentSyllabusPage() {
                       <p className="mt-0.5 text-2xs text-muted-foreground">
                         Last {formatDayLabel(subject.lastCoveredDate).toLowerCase()}
                       </p>
+                    )}
+                    {(videoCounts.get(subject.subjectId) ?? 0) > 0 && (
+                      <Link
+                        to={`/student/materials?subject=${subject.subjectId}&tab=videos`}
+                        className="mt-1.5 inline-flex items-center gap-1 rounded-full border-2 border-[hsl(var(--tile)/0.35)] bg-[hsl(var(--tile)/0.12)] px-2 py-0.5 text-2xs font-bold text-[hsl(var(--tile))] transition-colors hover:bg-[hsl(var(--tile)/0.22)]"
+                      >
+                        <Film className="size-3" />
+                        Class videos ({videoCounts.get(subject.subjectId)})
+                      </Link>
                     )}
                   </div>
                 </div>

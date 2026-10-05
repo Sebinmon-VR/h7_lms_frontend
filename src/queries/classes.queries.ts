@@ -145,8 +145,8 @@ export function useRoomPresence(classId: number | null, enabled = true) {
 }
 
 /**
- * Leaving the room. The LMS cannot see a Meet tab close, so this is the
- * person saying so: it stamps a LEFT_ROOM line with the time and hands back
+ * Leaving the room. The in-LMS call does this on hang-up; the Leave button
+ * says so explicitly. It stamps a LEFT_ROOM line with the time and hands back
  * their access, which now reads `in_room: false`.
  */
 export function useLeaveClassRoom() {
@@ -175,7 +175,8 @@ function invalidateRooms(qc: QueryClient) {
 
 /**
  * Admin: create, replace or hand-set a class's room. Reports its own failure:
- * a 502 carries Google's reason, which the generic toast would flatten.
+ * a 502 carries the live-class service's reason, which the generic toast
+ * would flatten.
  */
 export function useSetupClassRoom() {
   const qc = useQueryClient()
@@ -195,7 +196,7 @@ export function useSetupClassRoom() {
             updated.room_status === 'MANUAL'
               ? 'Every period of this class now uses the link you pasted.'
               : updated.room_recording_status === 'ARM_FAILED'
-                ? 'The room works, but Meet would not switch automatic recording on for it.'
+                ? 'The room works, but automatic recording could not be switched on for it.'
                 : 'Every period of this class now happens in this room.',
           duration: 8_000,
         },
@@ -222,90 +223,6 @@ export function useClearClassRoom() {
         description:
           'The old link no longer works. A new room is created on the next scheduled period.',
       })
-    },
-  })
-}
-
-/**
- * Admin: put the class's teachers on the room's guest list (and re-send the
- * invitations). Reports its own failure — Google's reason is the useful part.
- */
-export function useInviteRoomTeachers() {
-  const qc = useQueryClient()
-  return useMutation({
-    meta: { silent: true },
-    mutationFn: (classId: number) => adminApi.inviteClassRoomTeachers(classId),
-    onSuccess: (updated: ClassRoomOut) => {
-      qc.setQueryData<ClassRoomOut[]>(qk.admin.classes(), (prev) =>
-        prev?.map((c) => (c.id === updated.id ? updated : c)),
-      )
-      invalidateRooms(qc)
-      const count = updated.room_guest_emails?.length ?? 0
-      toast.success(`${count} teacher${count === 1 ? '' : 's'} on the guest list`, {
-        description: 'They can join the room without asking. Each has a Calendar invitation.',
-      })
-    },
-    onError: (error) => {
-      toast.error(error instanceof ApiError ? error.message : 'Could not update the guest list.', {
-        duration: 10_000,
-      })
-    },
-  })
-}
-
-/**
- * Admin: let anyone with the link into the room without asking. Reports its
- * own failure because Google's reason is the actionable part — it names the
- * Meet API scope to authorise.
- */
-export function useOpenClassRoom() {
-  const qc = useQueryClient()
-  return useMutation({
-    meta: { silent: true },
-    mutationFn: (classId: number) => adminApi.openClassRoom(classId),
-    onSuccess: (updated: ClassRoomOut) => {
-      qc.setQueryData<ClassRoomOut[]>(qk.admin.classes(), (prev) =>
-        prev?.map((c) => (c.id === updated.id ? updated : c)),
-      )
-      invalidateRooms(qc)
-      toast.success('Room is open to anyone with the link', {
-        description: 'Teachers and students join without asking, whatever account they use.',
-      })
-    },
-    onError: (error) => {
-      toast.error('Google would not open the room', {
-        description: error instanceof ApiError ? error.message : undefined,
-        duration: 15_000,
-      })
-    },
-  })
-}
-
-/** Admin: invite teachers to every future per-session link they are not yet a guest of. */
-export function useRepairTeacherAccess() {
-  const qc = useQueryClient()
-  return useMutation({
-    meta: { silent: true },
-    mutationFn: (notify: boolean) => adminApi.repairTeacherAccess(notify),
-    onSuccess: (result) => {
-      void qc.invalidateQueries({ queryKey: qk.admin.meetings() })
-      if (result.failed > 0) {
-        toast.warning(`Invited ${result.invited}, but ${result.failed} could not be updated`, {
-          description: result.failures[0]?.error,
-          duration: 12_000,
-        })
-      } else if (result.invited > 0) {
-        toast.success(`Teachers added to ${result.invited} upcoming session${result.invited === 1 ? '' : 's'}`, {
-          description: 'They can join those sessions without asking.',
-        })
-      } else {
-        toast.info('Nothing to fix', {
-          description: `Every upcoming session already lets its teacher in (${result.checked} checked).`,
-        })
-      }
-    },
-    onError: (error) => {
-      toast.error(error instanceof ApiError ? error.message : 'The repair could not run.')
     },
   })
 }
@@ -338,10 +255,9 @@ export function useClassRoomEvents(classId: number | null, todayOnly = true, ena
 }
 
 /**
- * Admin: who Google Meet saw in a class's room today, with join and leave
- * times. Empty until Meet has something to say (it reports a few minutes
- * behind) or the school has authorised the read scope — the board row's
- * `room_attendance_error` explains the latter.
+ * Admin: who was in a class's room today, with join and leave times, built
+ * from the LMS's own join/leave log (the in-LMS call writes it on connect and
+ * hang-up). Rebuilt by the sweep every few minutes.
  */
 export function useClassRoomAttendance(
   classId: number | null,
@@ -357,7 +273,7 @@ export function useClassRoomAttendance(
   })
 }
 
-/** Admin: ask Meet for the room's attendance right now rather than waiting for the sweep. */
+/** Admin: rebuild the room's attendance from the join/leave log now rather than waiting for the sweep. */
 export function useSyncClassRoomAttendance() {
   const qc = useQueryClient()
   return useMutation({
@@ -368,8 +284,8 @@ export function useSyncClassRoomAttendance() {
       void qc.invalidateQueries({ queryKey: qk.admin.liveBoard() })
       toast.success(
         rows.length === 0
-          ? 'Meet has nobody on record for this room yet'
-          : `Meet reports ${rows.length} ${rows.length === 1 ? 'participant' : 'participants'}`,
+          ? 'Nobody has joined this room yet'
+          : `${rows.length} ${rows.length === 1 ? 'person' : 'people'} joined this room`,
       )
     },
   })
@@ -478,7 +394,7 @@ export function useDecideExtraClass() {
 
 /**
  * Creates the actual class, and this is the step that can fail — a timetable
- * clash or a Meet error, after a human has already approved it.
+ * clash or a room error, after a human has already approved it.
  *
  * An explicit error toast here rather than the usual silence, because the
  * failure leaves a visible APPROVED-but-unscheduled request the admin has to

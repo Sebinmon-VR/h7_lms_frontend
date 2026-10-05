@@ -682,7 +682,8 @@ export const tuitionTeacherApi = {
 
   /**
    * With a body, sets an explicit link. WITHOUT one, asks the backend to
-   * create a Google Meet for this class — which is why the argument is
+   * give this class a room inside the LMS (`/call/tuition/{id}`) — which is
+   * why the argument is
    * optional rather than required.
    */
   setMeetingLink: (sessionId: string | number, body?: MeetingLinkUpdate) =>

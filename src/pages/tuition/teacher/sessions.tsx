@@ -348,8 +348,8 @@ export default function TuitionTeacherSessionsPage() {
   /**
    * Joining goes through the server, not the stored link.
    *
-   * `POST .../meeting-link` with no body asks the backend to create the Meet
-   * on demand, and returns the class with a link to open. Opening a link we
+   * `POST .../meeting-link` with no body asks the backend to give the class a
+   * room in the LMS (`/call/tuition/{id}`) on demand, and returns the class with a link to open. Opening a link we
    * already had would skip the record of the teacher having arrived.
    */
   const openMeeting = (session: TuitionSessionOut) => {

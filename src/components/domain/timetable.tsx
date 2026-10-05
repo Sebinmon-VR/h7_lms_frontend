@@ -1,9 +1,9 @@
-import { CalendarClock, CalendarOff, Clock, MapPin, TriangleAlert, User } from 'lucide-react'
+import { CalendarClock, CalendarOff, Clock, Globe, MapPin, TriangleAlert, User } from 'lucide-react'
 import * as React from 'react'
 
 import type { DayOfWeek, ScheduledPeriod, TimetableEntryOut } from '@/api/types'
 import { cn } from '@/lib/cn'
-import { formatDayLabel, formatTime } from '@/lib/datetime'
+import { formatDayLabel, parseApiDateTime } from '@/lib/datetime'
 import { subjectName, className as classNameOf, teacherName } from '@/lib/select'
 import {
   DAY_LABEL,
@@ -13,10 +13,19 @@ import {
   formatStartsIn,
   groupByDate,
   groupByDay,
+  localPeriodRange,
   periodLengthMinutes,
   visibleDays,
 } from '@/lib/timetable'
+import {
+  BROWSER_ZONE,
+  formatTimeInZone,
+  formatWallClockInZone,
+  sameClock,
+  zoneAbbreviation,
+} from '@/lib/timezone'
 import { subjectStyle } from '@/lib/subjects'
+import { useSchoolTimezone } from '@/providers/auth-provider'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -33,14 +42,172 @@ import { FunEmpty, SubjectTile } from '@/components/fun/fun-ui'
 
 export type TimetableScope = 'admin' | 'teacher' | 'student'
 
+/**
+ * Which clock, or clocks, a role sees its periods on.
+ *
+ * The timetable is written in school time, but a student in Kochi and a
+ * teacher in Dubai both open it, and "09:00" with no zone is a different
+ * moment to each. So students see their own clock only: the one on their
+ * wall, which is what "when is my class" means to them. Teachers see their
+ * own clock with the school's beside it, each labelled, because they keep
+ * the school's day on its time and their own on theirs. Admins see school
+ * time, which is what they wrote and what the printed timetable says.
+ *
+ * When the viewer's clock agrees with the school's, or the school zone is not
+ * known yet, there is one clock to show and nothing to label.
+ */
+export interface ClockView {
+  mode: 'school' | 'local' | 'both'
+  /** Null until the profile has loaded, or when the token stood in for it. */
+  schoolZone: string | null
+  localZone: string | null
+  /** True when the viewer's clock reads differently from the school's. */
+  differs: boolean
+  schoolLabel: string
+  localLabel: string
+}
+
+export function useClockView(scope: TimetableScope): ClockView {
+  const schoolZone = useSchoolTimezone()
+  return React.useMemo(() => {
+    const localZone = BROWSER_ZONE
+    const differs = !!schoolZone && !!localZone && !sameClock(schoolZone, localZone)
+    let mode: ClockView['mode'] = 'school'
+    if (differs && scope === 'student') mode = 'local'
+    if (differs && scope === 'teacher') mode = 'both'
+    return {
+      mode,
+      schoolZone,
+      localZone,
+      differs,
+      schoolLabel: schoolZone ? zoneAbbreviation(schoolZone) : '',
+      localLabel: localZone ? zoneAbbreviation(localZone) : '',
+    }
+  }, [scope, schoolZone])
+}
+
+/**
+ * One line saying which clock the page is on, shown only when it could be
+ * misread: a viewer in the school's own zone needs no such note.
+ */
+export function ClockNote({ scope, className }: { scope: TimetableScope; className?: string }) {
+  const clock = useClockView(scope)
+  if (!clock.differs) return null
+  const text =
+    clock.mode === 'local'
+      ? `All times are in your local time (${clock.localLabel}).`
+      : clock.mode === 'both'
+        ? `Times are on your clock (${clock.localLabel}), with school time (${clock.schoolLabel}) beside each.`
+        : `Times are in school time (${clock.schoolLabel}).`
+  return (
+    <p className={cn('flex items-center gap-1.5 text-xs text-muted-foreground', className)}>
+      <Globe className="size-3.5 shrink-0" />
+      {text}
+    </p>
+  )
+}
+
+/** "IST" / "GST" beside a time. */
+function ZoneTag({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <span className={cn('text-2xs font-medium tracking-wide text-muted-foreground/70', className)}>
+      {children}
+    </span>
+  )
+}
+
+/**
+ * A recurring period's time line, on whichever clocks the viewer gets.
+ *
+ * Falls back to the wall-clock string as written whenever a conversion is not
+ * possible, so an unknown zone degrades to the plain timetable rather than a
+ * blank card.
+ */
+function PeriodTimes({ entry, clock }: { entry: TimetableEntryOut; clock: ClockView }) {
+  const school = formatPeriodRange(entry)
+  const local =
+    clock.mode !== 'school' && clock.schoolZone ? localPeriodRange(entry, clock.schoolZone) : null
+  const primary = local ? local.range : school
+  const primaryLabel = local && clock.mode === 'both' ? clock.localLabel : null
+  // A viewer far enough away that the period lands on another calendar day
+  // still sees it in the school's weekday column, with the shift spelled out.
+  const shifted =
+    local && local.dayShift !== 0 ? (local.dayShift > 0 ? 'next day' : 'day before') : null
+
+  return (
+    <>
+      <p className="mt-1 flex flex-wrap items-center gap-x-1 text-xs font-semibold text-muted-foreground">
+        <Clock className="size-3" />
+        <span className="tabular-nums">{primary}</span>
+        {primaryLabel && <ZoneTag>{primaryLabel}</ZoneTag>}
+        {shifted && <span className="font-normal text-muted-foreground/70">({shifted})</span>}
+        <span className="font-normal text-muted-foreground/60">· {periodLengthMinutes(entry)}m</span>
+      </p>
+      {local && clock.mode === 'both' && (
+        <p className="mt-0.5 flex items-center gap-x-1 pl-4 text-2xs text-muted-foreground/80">
+          <span className="tabular-nums">{school}</span>
+          <ZoneTag>{clock.schoolLabel}</ZoneTag>
+        </p>
+      )}
+    </>
+  )
+}
+
+/**
+ * A resolved period's instants, on whichever clocks the viewer gets.
+ *
+ * `starts_at` / `ends_at` are real instants, so "school time" here is a
+ * formatting choice rather than a conversion; the viewer's clock is what
+ * `Date` gives by default.
+ */
+function PeriodInstants({
+  period,
+  clock,
+  compact,
+}: {
+  period: ScheduledPeriod
+  clock: ClockView
+  compact?: boolean
+}) {
+  const start = parseApiDateTime(period.starts_at)
+  const end = parseApiDateTime(period.ends_at)
+  // Admins read school time; students their own; teachers their own first.
+  const primaryZone = clock.mode === 'school' ? clock.schoolZone : null
+  const schoolZone = clock.mode === 'both' ? clock.schoolZone : null
+  const schoolStart = schoolZone && start ? formatWallClockInZone(start, schoolZone) : null
+  const schoolEnd = schoolZone && end ? formatWallClockInZone(end, schoolZone) : null
+
+  return (
+    <div className={cn('shrink-0 text-center', compact ? '' : schoolZone ? 'w-24' : 'w-16')}>
+      <p className="text-sm font-bold tabular-nums">
+        {start ? formatTimeInZone(start, primaryZone) : '—'}
+        {schoolZone && <ZoneTag className="ml-1">{clock.localLabel}</ZoneTag>}
+      </p>
+      {!compact && (
+        <p className="text-2xs text-muted-foreground tabular-nums">
+          {end ? formatTimeInZone(end, primaryZone) : '—'}
+        </p>
+      )}
+      {schoolStart && (
+        <p className="text-2xs text-muted-foreground/80 tabular-nums">
+          {compact ? schoolStart : `${schoolStart}–${schoolEnd ?? '—'}`}
+          <ZoneTag className="ml-1">{clock.schoolLabel}</ZoneTag>
+        </p>
+      )}
+    </div>
+  )
+}
+
 function PeriodCard({
   entry,
   scope,
+  clock,
   clashing,
   onClick,
 }: {
   entry: TimetableEntryOut
   scope: TimetableScope
+  clock: ClockView
   clashing?: boolean
   onClick?: (entry: TimetableEntryOut) => void
 }) {
@@ -82,13 +249,7 @@ function PeriodCard({
         )}
       </div>
 
-      <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-muted-foreground">
-        <Clock className="size-3" />
-        {formatPeriodRange(entry)}
-        <span className="font-normal text-muted-foreground/60">
-          · {periodLengthMinutes(entry)}m
-        </span>
-      </p>
+      <PeriodTimes entry={entry} clock={clock} />
 
       <div className="mt-1.5 flex flex-wrap items-center gap-1">
         {scope !== 'student' && (
@@ -147,6 +308,7 @@ export function TimetableWeek({
   onSelect?: (entry: TimetableEntryOut) => void
   emptyDescription?: string
 }) {
+  const clock = useClockView(scope)
   const grid = React.useMemo(() => groupByDay(entries), [entries])
   const days = React.useMemo(() => visibleDays(grid), [grid])
   const clashes = React.useMemo(() => {
@@ -202,6 +364,7 @@ export function TimetableWeek({
                   key={entry.id}
                   entry={entry}
                   scope={scope}
+                  clock={clock}
                   clashing={clashes.has(entry.id)}
                   onClick={onSelect}
                 />
@@ -243,6 +406,7 @@ export function ScheduledPeriodRow({
   const { entry } = period
   const subject = subjectName(entry)
   const playful = scope !== 'admin'
+  const clock = useClockView(scope)
 
   return (
     <div
@@ -256,14 +420,7 @@ export function ScheduledPeriodRow({
     >
       {/* Compact drops the end time and the fixed 4rem column: in a sidebar
           that width is the difference between "Mathematics" and "Mathem…". */}
-      <div className={cn('shrink-0 text-center', compact ? '' : 'w-16')}>
-        <p className="text-sm font-bold tabular-nums">{formatTime(period.starts_at)}</p>
-        {!compact && (
-          <p className="text-2xs text-muted-foreground tabular-nums">
-            {formatTime(period.ends_at)}
-          </p>
-        )}
-      </div>
+      <PeriodInstants period={period} clock={clock} compact={compact} />
 
       {playful && <SubjectTile subject={subject} size="sm" />}
 

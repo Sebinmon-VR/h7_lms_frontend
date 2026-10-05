@@ -1,10 +1,12 @@
 import { API_ORIGIN } from './env'
 
 /**
- * `file_url` is polymorphic: an absolute GCS URL when cloud storage is on,
- * a root-relative "/uploads/..." path when the backend falls back to local
- * storage. The backend also writes raw filenames (spaces, unicode) straight
- * into the path, so segments need encoding.
+ * `file_url` is usually a root-relative path on the API — "/files/..." for
+ * school storage (Azure Blob, served through the backend) or "/uploads/..."
+ * when the backend falls back to local disk — and occasionally an absolute
+ * URL on old records. Recording videos (`recording_url`, `recording_files[]`)
+ * follow the same rule. The backend writes raw filenames (spaces, unicode)
+ * straight into the path, so segments need encoding.
  */
 export function encodePathSegments(path: string): string {
   return path
@@ -119,9 +121,11 @@ export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 /** Human name for a `storage_provider` value. */
 export const STORAGE_LABEL: Record<string, string> = {
-  GCS: 'Cloud Storage',
-  DRIVE: 'Google Drive',
+  AZURE_BLOB: 'Azure Storage',
   LOCAL: 'Server disk',
+  // Legacy values on old records; those files were lost with Google.
+  GCS: 'Google (retired)',
+  DRIVE: 'Google (retired)',
 }
 
 export function storageLabel(provider: string | null | undefined): string {

@@ -36,7 +36,6 @@ import type {
   SubjectOut,
   SubjectUpdate,
   SystemMonitoringReport,
-  TeacherAccessRepair,
   TeacherMappingCreate,
   TeacherMappingOut,
   TimetableBulkCreate,
@@ -71,8 +70,8 @@ export const adminApi = {
    * user would otherwise still be unable to sign in — so callers must refetch
    * the row rather than assume `is_active` is unchanged.
    *
-   * A 503 means Firebase Auth was unreachable and nothing was modified, so a
-   * retry is safe.
+   * A 503 means the sign-in store was unreachable and nothing was modified,
+   * so a retry is safe.
    */
   generateCredentials: (userId: number, options: GenerateCredentialsRequest = {}) =>
     post<CredentialsIssued>(`/admin/users/${userId}/generate-credentials`, {
@@ -84,8 +83,8 @@ export const adminApi = {
   updateUser: (userId: number, body: UserUpdate) => put<UserOut>(`/admin/users/${userId}`, body),
 
   /**
-   * Soft delete — sets `is_active: false`, disables the linked Firebase account
-   * and revokes its sessions. History keeps resolving, and `reactivateUser`
+   * Soft delete — sets `is_active: false`, blocks sign-in and revokes every
+   * session. History keeps resolving, and `reactivateUser`
    * fully reverses it.
    *
    * Returns 200 WITH A BODY. This used to be a bare 204, so anything branching
@@ -94,7 +93,7 @@ export const adminApi = {
   deactivateUser: (userId: number) => delWithBody<UserDeleted>(`/admin/users/${userId}`),
 
   /**
-   * Irreversible. Erases the profile AND the Firebase Auth account.
+   * Irreversible. Erases the profile AND its stored password.
    *
    * Refuses with 409 while any record still references the user, listing what
    * and how many. `force` deletes those records too — enrollments, attendance,
@@ -108,7 +107,7 @@ export const adminApi = {
       params: cleanParams({ permanent: true, force: force || undefined }),
     }),
 
-  /** Re-enables a deactivated account and its Firebase credential. */
+  /** Re-enables a deactivated account and its sign-in. */
   reactivateUser: (userId: number) => post<UserOut>(`/admin/users/${userId}/reactivate`),
 
   listClasses: () => get<ClassRoomOut[]>('/admin/classes'),
@@ -126,45 +125,19 @@ export const adminApi = {
     del(`/admin/classes/${classId}`, { params: cleanParams({ force: force || undefined }) }),
 
   /**
-   * Give a class its standing live-class room — the one Meet link every
-   * period of the day happens in. Empty body: a Meet room on the school's
-   * Workspace identity. `owner_id` hosts it on a teacher's calendar instead;
-   * `manual_link` records a link the school already has. A 502 means Meet
-   * refused, and the class now carries `room_status: 'FAILED'` with the reason.
+   * Give a class its standing live-class room — the one room every period of
+   * the day happens in. Empty body: a room inside the LMS (Azure
+   * Communication Services), whose `room_link` is the relative app path
+   * `/call/class/{id}`. `manual_link` records a link the school already has.
+   * A 502 means the live-class service refused, and the class now carries
+   * `room_status: 'FAILED'` with the reason.
    */
   setupClassRoom: (classId: number, body: ClassRoomSetup = {}) =>
     post<ClassRoomOut>(`/admin/classes/${classId}/room`, body),
 
-  /** Removes the room and deletes its Calendar event; the old link stops working. */
+  /** Removes the room; the old link stops working. */
   clearClassRoom: (classId: number) =>
     delWithBody<ClassRoomOut>(`/admin/classes/${classId}/room`),
-
-  /**
-   * Puts every teacher of the class on its room's guest list, so Meet lets
-   * them in without asking. Happens on its own as teachers are mapped,
-   * schedule or join; this re-runs it and re-sends the invitations.
-   */
-  inviteClassRoomTeachers: (classId: number) =>
-    post<ClassRoomOut>(`/admin/classes/${classId}/room/guests`),
-
-  /**
-   * Lets anyone with the link into the room without asking, by setting the
-   * Meet space's access type to OPEN. Done on its own when a room is made
-   * and retried by the sweep; a 502 carries Google's reason, including the
-   * exact scope to authorise when the delegation lacks it.
-   */
-  openClassRoom: (classId: number) => post<ClassRoomOut>(`/admin/classes/${classId}/room/open`),
-
-  /**
-   * The same repair for per-session links: adds each teacher to every
-   * future session's Calendar event they are not yet a guest of, once. The
-   * maintenance sweep covers the next two days on its own.
-   */
-  repairTeacherAccess: (notify = false) =>
-    post<TeacherAccessRepair>('/admin/meetings/repair-teacher-access', undefined, {
-      params: cleanParams({ notify: notify || undefined }),
-      timeout: 120_000,
-    }),
 
   /**
    * The live board: every class right now — current period, teacher, who has
@@ -180,9 +153,9 @@ export const adminApi = {
     }),
 
   /**
-   * Who Google Meet saw in the room, with join and leave times — the only true
-   * record. Copied by the sweep every few minutes; `sync` asks Meet right now
-   * (slower, and a 502 with Google's reason when the read scope is missing).
+   * Who was in the room, with join and leave times, built from the LMS's own
+   * join/leave log (the in-LMS call writes it on connect and hang-up).
+   * Rebuilt by the sweep every few minutes; `sync` rebuilds it right now.
    */
   liveClassAttendance: (
     classId: number,
@@ -230,7 +203,7 @@ export const adminApi = {
 
   /**
    * SIGNS THE TEACHER OUT. Promotes them to `CLASS_TEACHER` and re-issues their
-   * Firebase claims, which revokes their existing tokens so the class-teacher
+   * revokes their existing tokens so the class-teacher
    * screens appear at once rather than whenever the old token happened to
    * expire. Their subject mappings, periods and records are untouched.
    *
@@ -274,10 +247,8 @@ export const adminApi = {
   listMeetings: () => get<LiveMeetingOut[]>('/admin/meetings'),
 
   /**
-   * `teacher_id` files the session under that teacher AND creates the Calendar
-   * event on THEIR calendar. Omitting it schedules under the acting admin,
-   * whose calendar may not be delegated — which is the usual reason an admin's
-   * own meeting comes back with `meet_status: 'FAILED'`.
+   * `teacher_id` files the session under that teacher; omitting it schedules
+   * under the acting admin.
    *
    * As on the teacher route, a 201 with a null `meeting_link` is a success.
    */
@@ -287,17 +258,18 @@ export const adminApi = {
     put<LiveMeetingOut>(`/admin/meetings/${meetingId}`, body),
 
   /**
-   * Retries Meet generation for a meeting saved without a link — the repair
-   * path for sessions scheduled while Calendar was misconfigured.
+   * Gives a session a working LMS room — for one saved without a link, or one
+   * that still carries an old Google Meet link from before the move to the
+   * LMS's own rooms.
    *
-   * 400 if the meeting already has a link or has no scheduled time; 502 if
-   * generation failed again, with the reason as the detail. The 502 still
+   * 400 if the meeting already has a working link or has no scheduled time;
+   * 502 if creating the room failed again, with the reason as the detail. The 502 still
    * writes `meet_status: 'FAILED'` server-side, so refetch either way.
    */
   regenerateMeetingLink: (meetingId: number) =>
     post<LiveMeetingOut>(`/admin/meetings/${meetingId}/regenerate-link`),
 
-  /** Also deletes the Calendar event, which notifies invited students. */
+  /** Also removes the session's LMS room. */
   deleteMeeting: (meetingId: number) => del(`/admin/meetings/${meetingId}`),
 
   // ------------------------------------------------------------ materials
@@ -401,8 +373,8 @@ export const adminApi = {
    * Runs a sweep now instead of waiting for the next tick. Returns a job to
    * poll at `job()`.
    *
-   * Cannot double-email: every reminder is claimed by an atomic Firestore
-   * create keyed on (entry, date, offset, recipient), so an already-sent one is
+   * Cannot double-email: every reminder is claimed by an atomic database
+   * insert keyed on (entry, date, offset, recipient), so an already-sent one is
    * skipped whoever triggers it.
    */
   runReminders: () => post<JobAccepted>('/admin/reminders/run'),
@@ -417,9 +389,9 @@ export const adminApi = {
   /**
    * Whether class recordings are being collected, and what the last sweep did.
    *
-   * The first thing to open when a finished class has no video: `meet_problems`
-   * names the missing piece of the Meet setup, and `last_result.details` shows
-   * what the sweep decided about each session it looked at.
+   * The first thing to open when a finished class has no video: `problems`
+   * names the missing piece of the recording setup, and `last_result.details`
+   * shows what the sweep decided about each session it looked at.
    */
   recordingStatus: () => get<RecordingSchedulerStatus>('/admin/recordings/status'),
 
@@ -435,9 +407,9 @@ export const adminApi = {
    * Collects finished recordings now instead of waiting for the next tick.
    * Returns a job to poll at `job()`.
    *
-   * Cannot duplicate a video: every recording is claimed by an atomic Firestore
-   * create keyed on (meeting, Meet recording name), so an already-filed one is
-   * skipped whoever triggers the sweep.
+   * Cannot duplicate a video: every recording is claimed by an atomic database
+   * insert keyed on its recording id, so an already-filed one is skipped
+   * whoever triggers the sweep.
    */
   runRecordings: () => post<JobAccepted>('/admin/recordings/run'),
 
@@ -449,10 +421,10 @@ export const adminApi = {
   /**
    * Fetches and files ONE session's recording immediately.
    *
-   * 400 when the meeting has no Meet conference behind it — a hand-entered link
-   * is not something Meet can be asked about. A session Meet is still
-   * processing comes back as `recording_status: 'WAITING'`, which is a normal
-   * outcome rather than an error.
+   * 400 when the meeting has no LMS room behind it — a hand-entered link is
+   * not a call the LMS records. A recording still being prepared comes back as
+   * `recording_status: 'WAITING'`, which is a normal outcome rather than an
+   * error.
    */
   syncMeetingRecording: (meetingId: number) =>
     post<LiveMeetingOut>(`/admin/meetings/${meetingId}/recording/sync`, undefined, {
@@ -462,7 +434,7 @@ export const adminApi = {
   // --------------------------------------------------------- integrations
 
   /**
-   * Health of Drive, Storage, Meet and SMTP. Every section carries a `detail`
+   * Health of storage, live classes, recording and email. Every section carries a `detail`
    * naming the exact misconfiguration; no secrets are returned.
    *
    * `probe: false` skips the live reachability checks and reports settings
@@ -477,8 +449,8 @@ export const adminApi = {
   /**
    * Writes a probe file, reports where it landed, then deletes it.
    *
-   * This is the difference between "Drive is visible" and "Drive accepts our
-   * uploads" — `integrations` only proves the former.
+   * This is the difference between "storage is visible" and "storage accepts
+   * our uploads" — `integrations` only proves the former.
    */
   storageTestUpload: (cleanup = true) =>
     post<StorageProbeResult>('/admin/integrations/storage/test-upload', undefined, {

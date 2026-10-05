@@ -66,7 +66,7 @@ export interface LeaveQueueKey {
  * refetch. One unfiltered cache entry gives instant filter switching and makes
  * cross-class analytics free.
  *
- * `/admin/users` keeps `role` because that one is a real Firestore `where`.
+ * `/admin/users` keeps `role` because that one is a real server-side filter.
  */
 export const qk = {
   auth: {
@@ -117,7 +117,7 @@ export const qk = {
     liveEvents: (classId: number, todayOnly: boolean) =>
       ['admin', 'live-events', classId, todayOnly] as const,
     liveEventsRoot: () => ['admin', 'live-events'] as const,
-    /** Meet's own attendance for a class on a day (null date = today). */
+    /** A class's room attendance on a day, from the LMS join/leave log (null date = today). */
     liveAttendance: (classId: number, onDate: string | null) =>
       ['admin', 'live-attendance', classId, onDate] as const,
     liveAttendanceRoot: () => ['admin', 'live-attendance'] as const,
@@ -145,6 +145,10 @@ export const qk = {
     /** Keyed by date; undefined means "today per the school timezone". */
     timetableDay: (onDate?: string) => ['teacher', 'timetable', 'day', onDate ?? 'today'] as const,
     timetableUpcoming: () => ['teacher', 'timetable', 'upcoming'] as const,
+    /** Class videos awaiting review or already published — `/recordings/mine`. */
+    recordings: () => ['teacher', 'recordings'] as const,
+    /** The auto-publish rule. Its own key so polling the list never refetches it. */
+    recordingPreferences: () => ['teacher', 'recording-preferences'] as const,
   },
   student: {
     root: ['student'] as const,
@@ -189,7 +193,7 @@ export const qk = {
    * The online tuition product.
    *
    * Filters DO belong in these keys, unlike the LMS ones above. A tuition
-   * session list is a real Firestore range query over a date window, so
+   * session list is a real database range query over a date window, so
    * `from`/`to` fetch genuinely different rows rather than re-slicing one
    * response — and the windows a user moves between (this week, last month)
    * are worth caching separately.
@@ -531,7 +535,7 @@ export const qk = {
     live: () => ['classes', 'live'] as const,
 
     /**
-     * The class rooms — one standing Meet room per class. Near-zero stale like
+     * The class rooms — one standing LMS room per class. Near-zero stale like
      * `timing`: each carries "may I enter right now?" and today's clock.
      */
     rooms: () => ['classes', 'rooms'] as const,
@@ -642,7 +646,7 @@ export const qk = {
  * The backend now batches its reads and caches reference documents for 60s,
  * so list endpoints are no longer punishingly slow. These tiers stay
  * conservative anyway: the remaining latency floor is the ~850 ms round trip
- * between the API and its Firestore region, which caching on our side avoids
+ * between the API and its database, which caching on our side avoids
  * entirely. Refetching more eagerly would buy freshness nobody asked for at a
  * cost the user feels.
  */

@@ -22,8 +22,9 @@ import {
   useRoomPresence,
 } from '@/queries/classes.queries'
 import { cn } from '@/lib/cn'
-import { formatTime } from '@/lib/datetime'
+import { formatSchoolTime } from '@/lib/school-time'
 import { useCopyToClipboard } from '@/lib/hooks'
+import { shareableLink } from '@/lib/meeting-links'
 import { subjectName } from '@/lib/select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -31,7 +32,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 /**
- * The class room: ONE standing Google Meet link per class.
+ * The class room: ONE standing room per class, inside the LMS.
  *
  * A student joins it ONCE, when the day's first class starts, sits through the
  * breaks and leaves after the last; each subject teacher joins the same room
@@ -41,10 +42,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
  * fetched through `POST /classes/rooms/{id}/join` rather than held in the
  * list, so a bookmarked link cannot get anybody in early.
  *
- * Joining is recorded by that call. Leaving cannot be seen — a closed Meet
- * tab tells nobody — so it is recorded by the person pressing Leave. Google's
- * own record of who was in the call, and when, is what the office sees on the
- * live board once Meet shares it.
+ * Joining is recorded by that call, and the in-LMS call records a leave when
+ * the person hangs up; the Leave button says so explicitly. The office sees
+ * who was in the room, and when, on the live board.
+ *
+ * `room_link` is a relative app path (`/call/class/{id}`) for an LMS room, or
+ * a full https URL for a link the school pasted in; both open as they are.
  */
 
 /** A timetable entry may have no teacher mapped yet; say so rather than invent one. */
@@ -96,14 +99,14 @@ export function arrivalText(period: ScheduledPeriod): { text: string; tone: Arri
   switch (period.teacher_status) {
     case 'IN':
       return {
-        text: `in since ${formatTime(period.teacher_joined_at ?? null)}${
+        text: `in since ${formatSchoolTime(period.teacher_joined_at ?? null)}${
           late ? ` · students waited ${formatMinutes(waited)}` : ' · on time'
         }`,
         tone: waited != null && waited >= 5 ? 'warning' : 'success',
       }
     case 'LEFT':
       return {
-        text: `${formatTime(period.teacher_joined_at ?? null)} – ${formatTime(period.teacher_left_at ?? null)}${
+        text: `${formatSchoolTime(period.teacher_joined_at ?? null)} – ${formatSchoolTime(period.teacher_left_at ?? null)}${
           late ? ` · students waited ${formatMinutes(waited)}` : ''
         }`,
         tone: 'neutral',
@@ -134,7 +137,7 @@ function roomJoinState(access: ClassRoomAccessOut) {
     !access.has_room && !access.class_room_mode
       ? 'No room yet'
       : opensLater
-        ? `Opens at ${formatTime(opensAt)}`
+        ? `Opens at ${formatSchoolTime(opensAt)}`
         : teacher
           ? access.periods_today.length === 0
             ? 'No class today'
@@ -252,11 +255,11 @@ export function PresenceNote({
     <p className={cn('text-xs text-muted-foreground', className)}>
       {access.in_room ? (
         <>
-          <span className="font-medium text-success">You joined at {formatTime(access.my_last_at)}.</span>{' '}
+          <span className="font-medium text-success">You joined at {formatSchoolTime(access.my_last_at)}.</span>{' '}
           Press Leave when you are done, so your leaving time is recorded too.
         </>
       ) : (
-        <>You left at {formatTime(access.my_last_at)}.</>
+        <>You left at {formatSchoolTime(access.my_last_at)}.</>
       )}
     </p>
   )
@@ -334,14 +337,14 @@ export function RoomPresenceList({
               )}
               title={
                 s.last_at
-                  ? `${s.in_room ? 'Joined' : s.last_action === 'LEFT_ROOM' ? 'Left' : 'Last seen'} at ${formatTime(s.last_at)}`
+                  ? `${s.in_room ? 'Joined' : s.last_action === 'LEFT_ROOM' ? 'Left' : 'Last seen'} at ${formatSchoolTime(s.last_at)}`
                   : 'Has not joined today'
               }
             >
               <span className={cn('size-1.5 rounded-full', s.in_room ? 'bg-success' : 'bg-muted-foreground/40')} />
               {s.name}
               {s.last_at && (
-                <span className="tabular-nums text-muted-foreground">{formatTime(s.last_at)}</span>
+                <span className="tabular-nums text-muted-foreground">{formatSchoolTime(s.last_at)}</span>
               )}
             </li>
           ))}
@@ -388,7 +391,7 @@ function PeriodRow({
       )}
     >
       <span className="w-24 shrink-0 tabular-nums text-xs text-muted-foreground">
-        {formatTime(period.starts_at)} – {formatTime(period.ends_at)}
+        {formatSchoolTime(period.starts_at)} – {formatSchoolTime(period.ends_at)}
       </span>
       <span className="min-w-0 flex-1 truncate">
         <span className={cn('font-medium', mine && 'text-primary')}>
@@ -476,7 +479,7 @@ export function ClassRoomPanel({
                     </Badge>
                   </span>
                 </TooltipTrigger>
-                <TooltipContent>{access.room_error ?? 'Google Meet refused to create it.'}</TooltipContent>
+                <TooltipContent>{access.room_error ?? 'The live-class service could not create it.'}</TooltipContent>
               </Tooltip>
             )}
             {access.room_provider === 'MANUAL' && (
@@ -484,12 +487,27 @@ export function ClassRoomPanel({
                 External link
               </Badge>
             )}
+            {access.room_provider === 'GOOGLE_MEET' && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Badge tone="warning" size="sm">
+                      Room needs replacing
+                    </Badge>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  This class still has its old Google Meet room, which no longer works. The office
+                  can create a class room in the LMS under Classes.
+                </TooltipContent>
+              </Tooltip>
+            )}
           </div>
           <h3 className="mt-1 text-lg font-semibold">{access.class_name}</h3>
           <p className="mt-0.5 text-sm text-muted-foreground">
             {variant === 'student'
               ? access.day_opens_at && access.day_closes_at
-                ? `One link for the whole day. Join when the first class starts, stay through the breaks, and press Leave after the last one ends at ${formatTime(access.day_closes_at)}. Your teachers come to you.`
+                ? `One link for the whole day. Join when the first class starts, stay through the breaks, and press Leave after the last one ends at ${formatSchoolTime(access.day_closes_at)}. Your teachers come to you.`
                 : 'One link for the whole day. Join it and stay — your teachers come to you for each period.'
               : myPeriods.length > 0
                 ? `You have ${myPeriods.length} period${myPeriods.length === 1 ? '' : 's'} here today. Rejoin the same room for each one, and press Leave at the end of it.`
@@ -505,9 +523,9 @@ export function ClassRoomPanel({
               <p className="mt-2 text-sm">
                 <span className="font-medium">Your period:</span> {subjectName(own.entry)} ·{' '}
                 {started
-                  ? `started ${formatTime(own.starts_at)} · ${formatMinutes(minutesBetween(own.starts_at, now))} in`
-                  : `starts at ${formatTime(own.starts_at)}, in ${formatMinutes(minutesBetween(now, new Date(own.starts_at)))}`}{' '}
-                · ends {formatTime(own.ends_at)}
+                  ? `started ${formatSchoolTime(own.starts_at)} · ${formatMinutes(minutesBetween(own.starts_at, now))} in`
+                  : `starts at ${formatSchoolTime(own.starts_at)}, in ${formatMinutes(minutesBetween(now, new Date(own.starts_at)))}`}{' '}
+                · ends {formatSchoolTime(own.ends_at)}
                 {arrival && (
                   <span className={cn('block text-xs', ARRIVAL_TONE[arrival.tone])}>{arrival.text}</span>
                 )}
@@ -518,14 +536,14 @@ export function ClassRoomPanel({
           {access.current_period ? (
             <p className="mt-2 text-sm">
               <span className="font-medium">Now:</span> {subjectName(access.current_period.entry)} with{' '}
-              {teacherName(access.current_period.entry)} until {formatTime(access.current_period.ends_at)}
+              {teacherName(access.current_period.entry)} until {formatSchoolTime(access.current_period.ends_at)}
             </p>
           ) : access.next_period ? (
             <p className="mt-2 text-sm text-muted-foreground">
               <Hourglass className="mr-1 inline size-3.5" />
-              Next: {subjectName(access.next_period.entry)} at {formatTime(access.next_period.starts_at)}
+              Next: {subjectName(access.next_period.entry)} at {formatSchoolTime(access.next_period.starts_at)}
               {variant === 'teacher' && nextOfMine && nextOfMine !== access.next_period
-                ? ` · yours at ${formatTime(nextOfMine.starts_at)}`
+                ? ` · yours at ${formatSchoolTime(nextOfMine.starts_at)}`
                 : ''}
             </p>
           ) : (
@@ -541,7 +559,7 @@ export function ClassRoomPanel({
               variant="ghost"
               size="icon-sm"
               aria-label="Copy the room link"
-              onClick={() => void copy(access.room_link as string)}
+              onClick={() => void copy(shareableLink(access.room_link))}
             >
               {copied ? <Check className="text-success" /> : <Copy />}
             </Button>

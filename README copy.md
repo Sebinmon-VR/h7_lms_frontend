@@ -1,4 +1,11 @@
-# LMS Backend API (Firebase + Google Workspace)
+# LMS Backend API
+
+> **Note (September 2026):** this is a copy of the backend's README from before it moved to
+> Microsoft Azure, kept here for reference. Sign-in (the LMS's own password accounts in Azure SQL),
+> live video classes and their recordings (Azure Communication Services, joined inside the LMS),
+> file storage (Azure Blob Storage) and email (Azure Communication Services Email) are now all
+> provided by the backend on Azure. The Firebase and Google setup this file used to describe no
+> longer applies — see the backend repository for current setup.
 
 ## Overview
 
@@ -187,10 +194,6 @@ Configuration is centralized in `app/core/config.py` and overridable via environ
 | `PROJECT_NAME` | `LMS Backend API` | Application name |
 | `API_V1_STR` | `/api/v1` | API prefix |
 | `DEBUG` | `True` | Debug mode |
-| `GCP_PROJECT_ID` | — | Firebase/Google Cloud project ID |
-| `FIREBASE_CREDENTIALS_PATH` | `./firebase_credentials.json` | Firebase Admin SDK credentials |
-| `GOOGLE_APPLICATION_CREDENTIALS` | `./service_account.json` | Service account JSON (falls back to the above) |
-| `USE_FIREBASE_DB` | `True` | Enables Firestore usage |
 
 ### Performance
 
@@ -200,93 +203,20 @@ Configuration is centralized in `app/core/config.py` and overridable via environ
 | `QUERY_CONCURRENCY` | `8` | Thread-pool width for independent Firestore reads |
 | `MONITORING_REPORT_TTL_SECONDS` | `300` | How long a computed monitoring report stays fresh |
 
-### Authentication
+### Sign-in, live classes, storage and email
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `AUTH_PROVIDER` | `FIREBASE` | `FIREBASE` or `LEGACY_JWT` |
-| `ALLOW_LEGACY_JWT_LOGIN` | `True` | Accept legacy backend-issued JWTs during migration |
-| `FIREBASE_WEB_API_KEY` | `""` | Firebase Web API Key. Required **only** for the dev password-login helper, the Swagger auth modal, and `verify_lms.py` |
-| `SECRET_KEY` / `ALGORITHM` / `ACCESS_TOKEN_EXPIRE_MINUTES` | — | Legacy token validation only |
-
-### Google Workspace
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `GOOGLE_WORKSPACE_DOMAIN` | `""` | Your Workspace domain, e.g. `yourschool.com` |
-| `GOOGLE_IMPERSONATION_FALLBACK` | `""` | Workspace user impersonated when a teacher's email is outside the domain; also owns Drive uploads |
-| `ENABLE_GOOGLE_MEET` | `True` | Auto-create Calendar events with Meet links |
-| `GOOGLE_CALENDAR_ID` | `primary` | Target calendar |
-
-### Storage
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `STORAGE_PROVIDER` | `GCS` | `GCS`, `DRIVE`, or `LOCAL` |
-| `USE_LOCAL_STORAGE` | `False` | Legacy flag. **When `True` it overrides `STORAGE_PROVIDER` and forces `LOCAL`** |
-| `GCP_BUCKET_NAME` | — | Cloud Storage bucket |
-| `GOOGLE_DRIVE_SHARED_DRIVE_ID` | `""` | Required when `STORAGE_PROVIDER=DRIVE` |
-| `GOOGLE_DRIVE_ROOT_FOLDER_NAME` | `H7 LMS Materials` | Shared Drive display name |
-| `LOCAL_STORAGE_DIR` | `./uploads` | Local upload directory |
+These are provided by the backend on Microsoft Azure: password accounts in Azure SQL, live classes
+and recordings on Azure Communication Services, files in Azure Blob Storage, and email through
+Azure Communication Services Email. Their settings live in the backend's `.env.example`; the
+frontend needs none of them.
 
 ---
 
-## Google Cloud Console Setup
+## Azure Services
 
-Meet and Drive require Workspace configuration before they function. Firestore and Firebase Auth work without these steps.
-
-### 1. Enable APIs
-
-```bash
-gcloud config set project <YOUR_PROJECT_ID>
-gcloud services enable \
-  identitytoolkit.googleapis.com \
-  firestore.googleapis.com \
-  storage.googleapis.com \
-  calendar-json.googleapis.com \
-  drive.googleapis.com \
-  iamcredentials.googleapis.com
-```
-
-| API | Console name | Needed for |
-| --- | --- | --- |
-| `identitytoolkit` | Identity Toolkit API | Firebase Auth |
-| `calendar-json` | Google Calendar API | Meet link generation |
-| `drive` | Google Drive API | Shared Drive uploads |
-| `iamcredentials` | IAM Service Account Credentials API | Delegation token minting |
-
-### 2. Enable Firebase Auth providers
-
-Firebase Console → **Authentication → Get started**:
-
-- Enable **Email/Password**.
-- Enable **Google**, restricted to your Workspace domain.
-- Under **Settings → Authorized domains**, add `localhost` and your deployed hostname.
-
-### 3. Authorize domain-wide delegation (requires a Workspace super-admin)
-
-This is what allows the backend to act as a teacher without a per-user consent screen.
-
-1. Cloud Console → **IAM & Admin → Service Accounts** → open the service account → **Details** tab → copy the **Unique ID** (a ~21-digit number, *not* the email).
-2. Go to **admin.google.com** → **Security → Access and data control → API controls → Manage Domain Wide Delegation → Add new**.
-3. **Client ID** = the numeric Unique ID from step 1.
-4. **OAuth scopes**, comma-separated with no spaces:
-   ```
-   https://www.googleapis.com/auth/calendar.events,https://www.googleapis.com/auth/drive
-   ```
-5. Authorize. Propagation is usually under a minute, but Google documents up to 24 hours.
-
-> **Scope discipline:** delegation lets the backend impersonate *any* user in the domain within the granted scopes. Grant only these two.
-
-### 4. Create the Shared Drive (only if using Drive storage)
-
-1. **drive.google.com → Shared drives → New**.
-2. **Manage members** → add the service account email as **Content manager**.
-3. Copy the ID from the URL `drive.google.com/drive/folders/<ID>` into `GOOGLE_DRIVE_SHARED_DRIVE_ID`.
-
-### 5. Grant IAM roles
-
-Grant the service account `roles/datastore.user`, `roles/storage.objectAdmin`, and `roles/firebaseauth.admin`.
+No Google Cloud or Firebase setup is needed any more. The backend's own README describes the Azure
+resources it expects (Azure SQL Database, a Blob Storage container, an Azure Communication Services
+resource with email and an Event Grid subscription for recordings, and App Service settings).
 
 ---
 
@@ -523,28 +453,6 @@ All update models are partial: omitted fields are left unchanged, and an entirel
 5. Visit the docs:
    - Swagger UI: `http://127.0.0.1:8000/docs`
    - ReDoc: `http://127.0.0.1:8000/redoc`
-
----
-
-## Migrating Existing Users to Firebase Auth
-
-Run once after deploying this release. It finds or creates a Firebase Auth account for every user document lacking a `firebase_uid`, writes the role custom claims, links the uid back, and clears the legacy `hashed_password`.
-
-```bash
-python -m scripts.migrate_users_to_firebase_auth --dry-run     # report only
-python -m scripts.migrate_users_to_firebase_auth               # apply
-python -m scripts.migrate_users_to_firebase_auth --keep-hashes # apply, retain legacy hashes
-```
-
-Migrated accounts have **no password** in Firebase. Users either sign in with Google Workspace or complete a Firebase password-reset email.
-
-To preserve existing passwords instead, import the bcrypt hashes with the Firebase CLI *before* running the script — it will then link the imported accounts rather than create new ones:
-
-```bash
-firebase auth:import users.json --hash-algo=BCRYPT --project <YOUR_PROJECT_ID>
-```
-
-Documents whose `email` field is not a valid address will fail; the script reports them and continues.
 
 ---
 

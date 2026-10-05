@@ -11,6 +11,9 @@
     "legal": "node scripts/render-legal.mjs"
   },
   "dependencies": {
+    "@azure/communication-calling": "^1.46.1",
+    "@azure/communication-common": "^2.5.0",
+    "@azure/communication-react": "^1.35.0",
     "@hookform/resolvers": "^3.9.1",
     "@radix-ui/react-accordion": "^1.2.2",
     "@radix-ui/react-avatar": "^1.1.2",
@@ -35,7 +38,6 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.0.4",
     "date-fns": "^4.1.0",
-    "firebase": "^11.10.0",
     "framer-motion": "^11.15.0",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",

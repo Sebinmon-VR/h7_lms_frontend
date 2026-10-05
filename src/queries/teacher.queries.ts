@@ -370,8 +370,8 @@ export function useDeleteTopic() {
 }
 
 /**
- * A 201 carrying a null `meeting_link` means the meeting was saved but Google
- * Meet generation was unavailable. That is a documented degraded success, so
+ * A 201 carrying a null `meeting_link` means the meeting was saved but the
+ * live-class room could not be created. That is a documented degraded success, so
  * we confirm the save and say plainly that the link is missing rather than
  * showing a green "scheduled" toast over a meeting nobody can join.
  */
@@ -387,27 +387,27 @@ export function useCreateMeeting() {
       if (wantedMeetLink && !created.meeting_link) {
         // The server now records WHY, which beats the generic guess this used
         // to make. It stays a fallback for meetings created before that landed.
-        toast.warning('Meeting scheduled without a Meet link', {
+        toast.warning('Meeting scheduled without a class room', {
           description:
             created.meet_error ??
-            'Google Meet could not generate a link for this session. The meeting is saved — add a link manually, or ask an administrator to retry it once Workspace delegation is in place.',
+            'The live-class room could not be created for this session. The meeting is saved — add a link manually, or ask an administrator to give it a room.',
           duration: 10_000,
         })
       } else if (created.recording_status === 'ARM_FAILED' && submitted.auto_record !== false) {
-        // The link works, but Meet refused to arm recording — a partial success
+        // The room works, but recording could not be switched on — a partial success
         // nobody would notice until the class was over and no video appeared.
         toast.warning('Scheduled, but it will not record itself', {
           description:
             created.recording_error ??
-            'Google Meet would not switch automatic recording on for this session. An administrator can check what is missing under Recordings.',
+            'Automatic recording could not be switched on for this session. An administrator can check what is missing under Recordings.',
           duration: 10_000,
         })
-      } else if (created.google_event_id) {
+      } else if (created.meeting_link && created.meet_status !== 'MANUAL') {
         toast.success('Meeting scheduled', {
           description:
             created.recording_status === 'ARMED'
-              ? 'The class has been invited, and the session will record itself.'
-              : 'A Google Calendar invitation has been sent to the enrolled students.',
+              ? 'The class meets in the LMS, and it will be recorded when you join.'
+              : 'The class meets in the LMS.',
         })
       } else {
         toast.success('Meeting scheduled')
@@ -426,11 +426,7 @@ export function useUpdateMeeting() {
         prev?.map((m) => (m.id === updated.id ? updated : m)),
       )
       void qc.invalidateQueries({ queryKey: qk.teacher.meetings() })
-      toast.success('Meeting updated', {
-        description: updated.google_event_id
-          ? 'The Google Calendar event was updated for every invited student.'
-          : undefined,
-      })
+      toast.success('Meeting updated')
     },
   })
 }
@@ -450,12 +446,8 @@ export function useDeleteMeeting() {
     onError: (_error, _meetingId, context) => {
       if (context?.snapshot) qc.setQueryData(qk.teacher.meetings(), context.snapshot)
     },
-    onSuccess: (_data, _meetingId, context) => {
-      toast.success('Meeting cancelled', {
-        description: context?.removed?.google_event_id
-          ? 'The Google Calendar event was deleted and attendees were notified.'
-          : undefined,
-      })
+    onSuccess: () => {
+      toast.success('Meeting cancelled')
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.teacher.meetings() })
@@ -467,8 +459,8 @@ export function useDeleteMeeting() {
  * Collects this session's recording now instead of waiting for the sweep.
  *
  * Every outcome below is reported as what it is rather than as a failure:
- * recordings are filed automatically a few minutes after a class ends, so the
- * ordinary answer to pressing this early is "Meet has not published it yet".
+ * recordings are filed automatically once the video is ready, so the ordinary
+ * answer to pressing this early is "the video is not ready yet".
  * Only a genuine 4xx/5xx reaches `onError`.
  */
 export function useSyncMeetingRecording() {
@@ -507,7 +499,7 @@ export function useUploadMaterial(onProgress?: (percent: number) => void) {
       markMonitoringStale()
 
       // The upload succeeded either way, but a file that quietly landed on the
-      // server's disk instead of Drive is something the uploader should know:
+      // server's disk instead of school storage is something the uploader should know:
       // it is the difference between "students can open this" and "maybe not".
       if (created.storage_warning) {
         toast.warning(`“${created.title}” was stored on the server disk`, {
@@ -537,15 +529,25 @@ export function useUpdateMaterial() {
 }
 
 /**
- * `keepFile` leaves the object in Cloud Storage or Drive behind. Default is a
+ * `keepFile` leaves the file in school storage behind. Default is a
  * full delete, because an orphaned file nobody can reach from the LMS is the
  * worse outcome of the two.
  */
 export function useDeleteMaterial() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ materialId, keepFile }: { materialId: number; keepFile?: boolean }) =>
-      teacherApi.deleteMaterial(materialId, keepFile),
+    /**
+     * `classVideo` marks a published recording: the server only unpublishes
+     * those and keeps the video in Recordings, so the wording differs.
+     */
+    mutationFn: ({
+      materialId,
+      keepFile,
+    }: {
+      materialId: number
+      keepFile?: boolean
+      classVideo?: boolean
+    }) => teacherApi.deleteMaterial(materialId, keepFile),
     onMutate: async ({ materialId }) => {
       await qc.cancelQueries({ queryKey: qk.teacher.materials() })
       const snapshot = qc.getQueryData<StudyMaterialOut[]>(qk.teacher.materials())
@@ -557,12 +559,23 @@ export function useDeleteMaterial() {
     onError: (_error, _vars, context) => {
       if (context?.snapshot) qc.setQueryData(qk.teacher.materials(), context.snapshot)
     },
-    onSuccess: (_data, { keepFile }) => {
+    onSuccess: (_data, { keepFile, classVideo }) => {
       markMonitoringStale()
-      toast.success(keepFile ? 'Material removed, stored file kept' : 'Material and file deleted')
+      toast.success(
+        classVideo
+          ? 'Removed from the class library — the video is still in Recordings'
+          : keepFile
+            ? 'Material removed, stored file kept'
+            : 'Material and file deleted',
+      )
     },
-    onSettled: () => {
+    onSettled: (_data, _error, { classVideo }) => {
       void qc.invalidateQueries({ queryKey: qk.teacher.materials() })
+      if (classVideo) {
+        void qc.invalidateQueries({ queryKey: qk.teacher.recordings() })
+        void qc.invalidateQueries({ queryKey: qk.student.materials() })
+        void qc.invalidateQueries({ queryKey: qk.teacher.meetings() })
+      }
     },
   })
 }

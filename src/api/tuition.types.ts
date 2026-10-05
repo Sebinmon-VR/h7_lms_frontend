@@ -251,7 +251,7 @@ export interface TuitionSlotCreate {
   effective_from?: ApiDate | null
   effective_to?: ApiDate | null
   is_active?: boolean
-  /** A standing room. Omitted, each class gets its own Meet on demand. */
+  /** A standing room. Omitted, each class gets its own LMS room on demand. */
   meeting_link?: string | null
   auto_create_meet?: boolean
 }
@@ -1351,7 +1351,7 @@ export interface ProgramSettingsUpdate {
   currency?: string
   auto_create_meet?: boolean
   /**
-   * LMS only. One standing Meet room per class that every subject teacher
+   * LMS only. One standing room per class that every subject teacher
    * joins at their period, instead of a fresh link per scheduled session.
    */
   class_room_mode?: boolean

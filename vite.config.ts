@@ -78,10 +78,8 @@ export default defineConfig(({ command, mode }) => {
             charts: ['recharts'],
             motion: ['framer-motion'],
             query: ['@tanstack/react-query', '@tanstack/react-table'],
-            // The Auth SDK is needed on the login screen, so it cannot be
-            // deferred — but it changes on its own release cadence and is worth
-            // caching separately from app code.
-            firebase: ['firebase/app', 'firebase/auth'],
+            // The Azure calling UI is deliberately NOT listed: left to the
+            // lazy /call route it is only downloaded by somebody joining a class.
           },
         },
       },

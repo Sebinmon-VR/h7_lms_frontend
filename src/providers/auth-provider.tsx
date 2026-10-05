@@ -2,45 +2,24 @@ import * as React from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
-import { authApi } from '@/api/auth.api'
+import { authApi, type IssuedToken } from '@/api/auth.api'
 import { getAccessToken, loadStoredToken, onAuthEvent, setAccessToken } from '@/api/client'
 import { ApiError } from '@/api/errors'
-import type { LoginRequest, UserOut, UserRole } from '@/api/types'
+import type { LoginRequest, MeOut, UserOut, UserRole } from '@/api/types'
 import { STORAGE_KEYS } from '@/lib/constants'
 import { hasProgram } from '@/lib/tuition'
-import {
-  firebaseAuthMessage,
-  firebaseSendPasswordReset,
-  firebaseSignInWithGoogle,
-  firebaseSignInWithPassword,
-  firebaseSignOut,
-  isFirebaseReady,
-  refreshIdToken,
-  subscribeToIdToken,
-} from '@/lib/firebase'
-
-/**
- * Resolved once at module load: whether Firebase is configured AND initialised
- * successfully. A config-only check would leave the app booting forever if the
- * SDK failed to start, so this is the flag every branch below reads.
- */
-const HAS_FIREBASE = isFirebaseReady()
+import { setSchoolZone } from '@/lib/school-time'
 import { decodeJwt, isExpired, lmsRole, msUntilExpiry } from '@/lib/jwt'
 
 /**
- * Authentication is Firebase-first.
+ * Sign-in is owned by the backend.
  *
- * The client signs in with the Firebase SDK and sends the resulting ID token
- * as a bearer token; the backend verifies it and resolves the Firestore
- * profile. Firebase refreshes the token roughly every hour on its own, and
- * `subscribeToIdToken` pushes each new one into the API client — so a session
- * no longer dies at the 60-minute mark the way it did against the old
- * backend-signed JWTs.
- *
- * When Firebase is not configured (`HAS_FIREBASE` false) we fall back to the
- * backend's `POST /auth/login` development helper, which exchanges a password
- * for an ID token server-side. That path cannot refresh, so the expiry warning
- * below still applies to it.
+ * `POST /auth/login` checks the password and returns a session token, which
+ * the API client sends as a bearer token. Tokens last a day; the countdown
+ * below renews one through `POST /auth/refresh` when it has under
+ * `REFRESH_AHEAD_MS` left, so somebody working all day is never signed out
+ * mid-lesson. A password change, a deactivation or an admin reset revokes
+ * every token on the server, and the next request's 401 ends the session here.
  *
  * `degraded` matters: a server error while validating the session must never
  * sign the user out.
@@ -49,17 +28,20 @@ export type AuthStatus = 'booting' | 'authenticated' | 'anonymous' | 'degraded'
 
 export type LogoutReason = 'manual' | 'expired' | 'inactive' | 'no-profile'
 
+/** Renew a token once it has less than this left. */
+const REFRESH_AHEAD_MS = 15 * 60_000
+
 interface AuthContextValue {
   status: AuthStatus
-  user: UserOut | null
+  user: MeOut | null
   role: UserRole | null
   /** True when /auth/me failed but the token is still believed good. */
   profileDegraded: boolean
-  /** True when sign-in runs through the Firebase SDK rather than the dev endpoint. */
-  usesFirebase: boolean
-  login: (credentials: LoginRequest) => Promise<UserOut | null>
-  loginWithGoogle: () => Promise<UserOut | null>
-  sendPasswordReset: (email: string) => Promise<void>
+  login: (credentials: LoginRequest) => Promise<MeOut | null>
+  /** Emails a reset link; resolves with the server's message to show. */
+  sendPasswordReset: (email: string) => Promise<string>
+  /** Changes the signed-in user's password and keeps this session signed in. */
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>
   logout: (reason?: LogoutReason) => void
   retryBoot: () => void
   /** Milliseconds until the token expires, or null when unknown. */
@@ -67,16 +49,6 @@ interface AuthContextValue {
 }
 
 const AuthContext = React.createContext<AuthContextValue | null>(null)
-
-/**
- * What an interactive sign-in yields. `profileHint` is only present on the
- * dev-endpoint path, which returns role and name alongside the token; the
- * Firebase path has to ask `/auth/me` for those.
- */
-interface SignInResult {
-  token: string
-  profileHint?: { user_id: number; full_name: string; role: UserRole }
-}
 
 /** Minimal user synthesized from the token if /auth/me is unavailable. */
 function userFromToken(
@@ -102,20 +74,14 @@ function userFromToken(
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient()
   const [status, setStatus] = React.useState<AuthStatus>('booting')
-  const [user, setUser] = React.useState<UserOut | null>(null)
+  const [user, setUser] = React.useState<MeOut | null>(null)
   const [profileDegraded, setProfileDegraded] = React.useState(false)
   const [expiresInMs, setExpiresInMs] = React.useState<number | null>(null)
   const [bootNonce, setBootNonce] = React.useState(0)
 
-  /**
-   * Set while an interactive sign-in is running. The Firebase token listener
-   * fires mid-flow, and without this it would race the login call and boot the
-   * user twice — once from a bare token, once with the resolved profile.
-   */
-  const signingIn = React.useRef(false)
-
   const clearSession = React.useCallback(() => {
     setAccessToken(null)
+    setSchoolZone(null)
     setUser(null)
     setProfileDegraded(false)
     setExpiresInMs(null)
@@ -130,7 +96,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = React.useCallback(
     (reason: LogoutReason = 'manual') => {
       clearSession()
-      void firebaseSignOut()
       setStatus('anonymous')
       if (reason === 'expired') toast.info('Your session expired. Please sign in again.')
       if (reason === 'inactive') toast.error('This account has been deactivated.')
@@ -144,10 +109,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [clearSession],
   )
 
+  const adoptToken = React.useCallback((issued: IssuedToken) => {
+    setAccessToken(issued.access_token)
+    setExpiresInMs(msUntilExpiry(issued.access_token))
+  }, [])
+
   /** Loads the authoritative profile for a token already set on the client. */
-  const resolveProfile = React.useCallback(async (): Promise<UserOut | null> => {
+  const resolveProfile = React.useCallback(async (): Promise<MeOut | null> => {
     try {
       const me = await authApi.me()
+      setSchoolZone(me.school_timezone)
       setUser(me)
       setProfileDegraded(false)
       setStatus('authenticated')
@@ -180,13 +151,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const boot = async () => {
       const token = loadStoredToken()
 
-      // With Firebase configured, the SDK is the source of truth for whether a
-      // session exists. A stored token only avoids a flash of the login screen
-      // while `onIdTokenChanged` reports in; if it is already expired we drop
-      // it and wait for the listener rather than guessing.
       if (!token || isExpired(token)) {
         if (token) setAccessToken(null)
-        if (!cancelled && !HAS_FIREBASE) setStatus('anonymous')
+        if (!cancelled) setStatus('anonymous')
         return
       }
 
@@ -198,6 +165,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return
         const apiError = error instanceof ApiError ? error : null
 
+        // Includes a token from before sign-in moved off Firebase: the server
+        // no longer accepts it, so the person simply signs in again.
         if (apiError?.isUnauthorized || apiError?.isInactiveAccount || apiError?.isNoProfile) {
           clearSession()
           setStatus('anonymous')
@@ -214,84 +183,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [clearSession, resolveProfile, bootNonce])
 
-  // ------------------------------------------- firebase token lifecycle
-  /**
-   * The refresh loop. Firebase re-issues the ID token before it expires and
-   * this pushes each one into the API client, so requests never carry a stale
-   * credential. It also fires with null when Firebase signs the user out or
-   * the backend revokes the account's sessions.
-   */
-  React.useEffect(() => {
-    if (!HAS_FIREBASE) return
-
-    return subscribeToIdToken((token) => {
-      if (signingIn.current) return
-
-      if (!token) {
-        // Only tear down a session we actually established through Firebase.
-        // Under the dev-endpoint fallback this listener never carries state.
-        if (getAccessToken()) {
-          clearSession()
-          setStatus('anonymous')
-        } else {
-          setStatus((prev) => (prev === 'booting' ? 'anonymous' : prev))
-        }
-        return
-      }
-
-      const hadSession = getAccessToken() !== null
-      setAccessToken(token)
-      setExpiresInMs(msUntilExpiry(token))
-
-      // A refresh of an existing session: swap the token and stop there.
-      if (hadSession) return
-
-      // A restored session (reload, or another tab signed in): resolve it.
-      void resolveProfile().catch((error) => {
-        const apiError = error instanceof ApiError ? error : null
-        if (apiError?.isNoProfile) logout('no-profile')
-        else if (apiError?.isInactiveAccount) logout('inactive')
-        else if (apiError?.isUnauthorized) logout('expired')
-        else setStatus('degraded')
-      })
-    })
-  }, [clearSession, resolveProfile, logout])
-
   // ------------------------------------------- interceptor -> provider
   React.useEffect(
     () =>
       onAuthEvent((event) => {
-        if (event === 'unauthorized') {
-          // Firebase may simply have a fresher token than the one that 401'd.
-          // Try a forced refresh before ending the session.
-          if (HAS_FIREBASE) {
-            void refreshIdToken(true).then((token) => {
-              if (token) {
-                setAccessToken(token)
-                setExpiresInMs(msUntilExpiry(token))
-              } else {
-                logout('expired')
-              }
-            })
-          } else {
-            logout('expired')
-          }
-        } else if (event === 'inactive') {
-          logout('inactive')
-        }
+        // A 401 on an ordinary request means the token was revoked (password
+        // changed elsewhere, account reset) or has run out: either way, over.
+        if (event === 'unauthorized') logout('expired')
+        else if (event === 'inactive') logout('inactive')
       }),
     [logout],
   )
 
-  // ------------------------------------------------- expiry countdown
+  // ------------------------------------------ expiry countdown + refresh
   React.useEffect(() => {
     if (status !== 'authenticated') return
-    const initial = getAccessToken()
-    if (!initial) return
+    if (!getAccessToken()) return
 
-    let warned = false
+    let refreshing = false
     const tick = () => {
-      // Re-read every tick: Firebase swaps the token underneath us.
       const token = getAccessToken()
       if (!token) return
 
@@ -299,33 +209,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setExpiresInMs(remaining)
 
       if (remaining <= 0) {
-        // Under Firebase this should be unreachable — the SDK refreshes ahead
-        // of expiry. If it does happen, ask for a token before giving up.
-        if (HAS_FIREBASE) {
-          void refreshIdToken(true).then((fresh) => {
-            if (fresh) setAccessToken(fresh)
-            else logout('expired')
-          })
-        } else {
-          logout('expired')
-        }
+        logout('expired')
         return
       }
+      if (remaining > REFRESH_AHEAD_MS || refreshing) return
 
-      // Only the non-refreshing fallback path needs an expiry warning.
-      if (!HAS_FIREBASE && !warned && remaining <= 5 * 60_000) {
-        warned = true
-        toast.warning('Your session ends in under 5 minutes.', {
-          description: 'Sessions cannot be extended on this server — save your work and sign in again.',
-          duration: 10_000,
+      refreshing = true
+      authApi
+        .refresh()
+        .then((issued) => {
+          // Another tab may have signed out meanwhile; do not resurrect it.
+          if (getAccessToken()) adoptToken(issued)
         })
-      }
+        .catch((error) => {
+          const apiError = error instanceof ApiError ? error : null
+          // Refused outright: the session is too old or was revoked. A network
+          // blip is simply retried on the next tick.
+          if (apiError?.isUnauthorized || apiError?.isInactiveAccount) logout('expired')
+        })
+        .finally(() => {
+          refreshing = false
+        })
     }
 
     tick()
     const id = window.setInterval(tick, 30_000)
     return () => window.clearInterval(id)
-  }, [status, logout])
+  }, [status, logout, adoptToken])
 
   // ------------------------------------------------- presence heartbeat
   // A sign of life once a minute while the tab is visible, so the office's
@@ -364,85 +274,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [clearSession])
 
   // ----------------------------------------------------------- login
-  /**
-   * Runs an interactive sign-in that yields a bearer token, then resolves the
-   * LMS profile behind it. Shared by both password and Google flows so the
-   * listener-suppression and failure handling stay identical.
-   */
-  const completeSignIn = React.useCallback(
-    async (acquireToken: () => Promise<SignInResult>) => {
-      signingIn.current = true
-      try {
-        const { token, profileHint } = await acquireToken()
-        setAccessToken(token)
-        setExpiresInMs(msUntilExpiry(token))
-
-        try {
-          return await resolveProfile()
-        } catch (error) {
-          const apiError = error instanceof ApiError ? error : null
-
-          // Signed in with a real credential that the LMS does not know.
-          // Leaving a Firebase session open behind a failed sign-in would let
-          // the next reload silently retry it, so tear it down here.
-          if (apiError?.isNoProfile || apiError?.isInactiveAccount || apiError?.isUnauthorized) {
-            clearSession()
-            void firebaseSignOut()
-            setStatus('anonymous')
-            throw error
-          }
-
-          const fallback = userFromToken(token, profileHint)
-          if (!fallback) throw error
-
-          setUser(fallback)
-          setProfileDegraded(true)
-          setStatus('authenticated')
-          return fallback
-        }
-      } finally {
-        signingIn.current = false
-      }
-    },
-    [clearSession, resolveProfile],
-  )
-
   const login = React.useCallback(
     async (credentials: LoginRequest) => {
-      if (HAS_FIREBASE) {
-        return completeSignIn(async () => ({
-          token: await firebaseSignInWithPassword(credentials.email, credentials.password),
-        }))
+      const issued = await authApi.login(credentials)
+      adoptToken(issued)
+
+      try {
+        return await resolveProfile()
+      } catch (error) {
+        const apiError = error instanceof ApiError ? error : null
+        if (apiError?.isNoProfile || apiError?.isInactiveAccount || apiError?.isUnauthorized) {
+          clearSession()
+          setStatus('anonymous')
+          throw error
+        }
+
+        // /auth/me is down but the login itself said who this is.
+        const fallback = userFromToken(issued.access_token, issued)
+        if (!fallback) throw error
+
+        setUser(fallback)
+        setProfileDegraded(true)
+        setStatus('authenticated')
+        return fallback
       }
-
-      // Fallback: the backend's dev helper exchanges the password for an ID
-      // token server-side. It also returns role and name, which lets sign-in
-      // survive an unreachable /auth/me.
-      return completeSignIn(async () => {
-        const issued = await authApi.login(credentials)
-        return { token: issued.access_token, profileHint: issued }
-      })
     },
-    [completeSignIn],
-  )
-
-  const loginWithGoogle = React.useCallback(
-    () => completeSignIn(async () => ({ token: await firebaseSignInWithGoogle() })),
-    [completeSignIn],
+    [adoptToken, clearSession, resolveProfile],
   )
 
   const sendPasswordReset = React.useCallback(async (email: string) => {
-    if (!HAS_FIREBASE) {
-      throw new Error(
-        'Password resets are handled by Firebase, which is not configured for this deployment. Ask an administrator to reset your password.',
-      )
-    }
-    try {
-      await firebaseSendPasswordReset(email)
-    } catch (error) {
-      throw new Error(firebaseAuthMessage(error))
-    }
+    const { detail } = await authApi.requestPasswordReset(email)
+    return detail
   }, [])
+
+  const changePassword = React.useCallback(
+    async (currentPassword: string, newPassword: string) => {
+      const { token } = await authApi.changePassword(currentPassword, newPassword)
+      adoptToken(token)
+    },
+    [adoptToken],
+  )
 
   const retryBoot = React.useCallback(() => {
     setStatus('booting')
@@ -455,15 +326,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       role: user?.role ?? null,
       profileDegraded,
-      usesFirebase: HAS_FIREBASE,
       login,
-      loginWithGoogle,
       sendPasswordReset,
+      changePassword,
       logout,
       retryBoot,
       expiresInMs,
     }),
-    [status, user, profileDegraded, login, loginWithGoogle, sendPasswordReset, logout, retryBoot, expiresInMs],
+    [status, user, profileDegraded, login, sendPasswordReset, changePassword, logout, retryBoot, expiresInMs],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
@@ -473,6 +343,15 @@ export function useAuth() {
   const ctx = React.useContext(AuthContext)
   if (!ctx) throw new Error('useAuth must be used inside <AuthProvider>')
   return ctx
+}
+
+/**
+ * The IANA zone the school timetable is written in, from the profile. Null
+ * until it has loaded, or when the server was down and the token stood in.
+ */
+export function useSchoolTimezone(): string | null {
+  const { user } = useAuth()
+  return user?.school_timezone ?? null
 }
 
 /** Where each role lands after signing in. */

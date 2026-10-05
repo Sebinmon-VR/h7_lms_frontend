@@ -117,7 +117,7 @@ export function JoinClassButton({
         if (result.meeting_link) {
           window.open(result.meeting_link, '_blank', 'noopener')
         } else {
-          // A class with no Meet link is a real, non-error state: generation
+          // A class with no room is a real, non-error state: room creation
           // is best-effort and the schedule is saved either way.
           toast.warning('This class has no meeting link yet', {
             description: 'Your teacher has not attached one. Check back shortly.',

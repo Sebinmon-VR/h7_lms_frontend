@@ -28,7 +28,8 @@ import {
 } from '@/queries/teacher.queries'
 import { attendanceTrend, missingAttendanceToday, splitMeetings } from '@/lib/derive'
 import { cn } from '@/lib/cn'
-import { formatDayLabel, formatTime, todayApiDate } from '@/lib/datetime'
+import { formatDayLabel, todayApiDate } from '@/lib/datetime'
+import { formatSchoolTime } from '@/lib/school-time'
 import { greeting } from '@/lib/format'
 import { subjectName, className as classNameOf } from '@/lib/select'
 import { useNow } from '@/lib/hooks'
@@ -116,14 +117,14 @@ function TeachingNowCard({
           </p>
           <p className="text-sm text-muted-foreground">
             {live && spot.mine
-              ? `Started ${formatTime(period.starts_at)} · ${formatMinutes(minutesBetween(period.starts_at, now))} in · ends ${formatTime(period.ends_at)}`
+              ? `Started ${formatSchoolTime(period.starts_at)} · ${formatMinutes(minutesBetween(period.starts_at, now))} in · ends ${formatSchoolTime(period.ends_at)}`
               : live
-                ? `Until ${formatTime(period.ends_at)}`
-                : `${formatTime(period.starts_at)} – ${formatTime(period.ends_at)} · the room opens for you at ${formatTime(room.window_opens_at ?? period.starts_at)}`}
+                ? `Until ${formatSchoolTime(period.ends_at)}`
+                : `${formatSchoolTime(period.starts_at)} – ${formatSchoolTime(period.ends_at)} · the room opens for you at ${formatSchoolTime(room.window_opens_at ?? period.starts_at)}`}
             {' · '}
             {live && !spot.mine
               ? next
-                ? `your next period is ${next.room.class_name} · ${subjectName(next.period.entry)} at ${formatTime(next.period.starts_at)}`
+                ? `your next period is ${next.room.class_name} · ${subjectName(next.period.entry)} at ${formatSchoolTime(next.period.starts_at)}`
                 : 'no period of yours is left today'
               : 'the class sits in its shared room all day; you join it for your period'}
             {roomCount > 1 ? ` · you teach in ${roomCount} rooms today` : ''}
@@ -222,7 +223,7 @@ function PendingTopicsCard({ onLog }: { onLog: (pending: PendingTopicOut) => voi
                 {p.class_name} · {p.subject_name}
               </p>
               <p className="text-xs text-muted-foreground">
-                {formatTime(p.starts_at)} – {formatTime(p.ends_at)} · ended{' '}
+                {formatSchoolTime(p.starts_at)} – {formatSchoolTime(p.ends_at)} · ended{' '}
                 {p.minutes_since_end < 1 ? 'just now' : `${formatMinutes(p.minutes_since_end)} ago`}
               </p>
             </div>

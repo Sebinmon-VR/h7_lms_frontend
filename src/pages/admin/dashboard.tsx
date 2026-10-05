@@ -27,7 +27,8 @@ import { useLiveBoard } from '@/queries/classes.queries'
 import { isTeachingRole } from '@/lib/constants'
 import { cn } from '@/lib/cn'
 import { provisioningAlerts, signupsOverTime } from '@/lib/derive'
-import { formatRelative, formatTime } from '@/lib/datetime'
+import { formatRelative } from '@/lib/datetime'
+import { formatSchoolTime } from '@/lib/school-time'
 import { greeting } from '@/lib/format'
 import { subjectName } from '@/lib/select'
 import { Badge } from '@/components/ui/badge'
@@ -60,7 +61,7 @@ function LiveNowRow({ row }: { row: LiveClassBoardRow }) {
     ? (current.entry.teacher?.full_name ?? 'Teacher to be confirmed')
     : (session?.teacher_name ?? 'Teacher')
   const ends = current
-    ? `until ${formatTime(current.ends_at)}`
+    ? `until ${formatSchoolTime(current.ends_at)}`
     : session?.timing.minutes_remaining != null
       ? `${Math.max(0, Math.round(session.timing.minutes_remaining))} min left`
       : ''
@@ -139,7 +140,7 @@ function LiveNowStrip() {
             <span className="font-medium text-foreground">
               {upcoming[0].class_name} · {subjectName(nextUp.entry)}
             </span>{' '}
-            at {formatTime(nextUp.starts_at)}
+            at {formatSchoolTime(nextUp.starts_at)}
             {upcoming.length > 1
               ? `, then ${upcoming.length - 1} more ${upcoming.length - 1 === 1 ? 'class' : 'classes'} today`
               : ''}

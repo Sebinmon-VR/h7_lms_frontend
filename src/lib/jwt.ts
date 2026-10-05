@@ -5,27 +5,21 @@ import type { UserRole } from '@/api/types'
  * and discarding a stale token before the first network call. The signature is
  * never verified here; the server remains the only authority.
  *
- * Two token shapes reach this code:
- *
- *  - A **Firebase ID token**, the normal case. `sub` and `user_id` are the
- *    Firebase uid, and the LMS role arrives through custom claims the backend
- *    mirrors onto the account (`role`, `lms_user_id`).
- *  - A **legacy backend JWT**, accepted while `ALLOW_LEGACY_JWT_LOGIN` is on.
- *    Its `sub` is the numeric LMS user id.
- *
- * `lmsUserId` normalises across both so callers never branch on token origin.
+ * The token is the backend's own session token: `sub`, `user_id` and
+ * `lms_user_id` all carry the numeric LMS user id, and `role` mirrors the
+ * profile's role so the app can still route when `/auth/me` is unreachable.
  */
 export interface JwtPayload {
   sub: string
   email?: string
   exp: number
-  /** LMS role. A custom claim on Firebase tokens, a native claim on legacy ones. */
+  /** LMS role, mirrored from the profile when the token was issued. */
   role?: UserRole
-  /** Firebase custom claim carrying the numeric LMS user id. */
+  /** The numeric LMS user id. */
   lms_user_id?: number | string
-  /** Firebase-only: the uid, duplicated from `sub`. */
+  /** The LMS user id as a string, duplicated from `sub`. */
   user_id?: string
-  /** Firebase-only: seconds since epoch at which the user authenticated. */
+  /** Seconds since epoch at which the password was last typed. */
   auth_time?: number
 }
 
@@ -51,8 +45,6 @@ export function decodeJwt(token: string): JwtPayload | null {
 
 /**
  * The numeric LMS user id, from whichever claim carries it.
- * Returns null for a Firebase token whose claims have not been set yet — the
- * profile then has to come from `/auth/me`.
  */
 export function lmsUserId(token: string): number | null {
   const payload = decodeJwt(token)
@@ -64,8 +56,6 @@ export function lmsUserId(token: string): number | null {
     if (Number.isFinite(parsed)) return parsed
   }
 
-  // Legacy tokens put the numeric id straight in `sub`; Firebase uids are not
-  // numeric, so a failed parse correctly yields null.
   const fromSub = Number(payload.sub)
   return Number.isFinite(fromSub) ? fromSub : null
 }

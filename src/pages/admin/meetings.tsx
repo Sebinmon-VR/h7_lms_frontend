@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Disc, Plus, Radio, TriangleAlert, UserCheck, Video } from 'lucide-react'
+import { Disc, Plus, Radio, TriangleAlert, Video } from 'lucide-react'
 import * as React from 'react'
 import { useForm } from 'react-hook-form'
 import { Link } from 'react-router-dom'
@@ -19,9 +19,9 @@ import {
   useTeachingStaff,
   useUsers,
 } from '@/queries/admin.queries'
-import { useRepairTeacherAccess } from '@/queries/classes.queries'
 import { useProgramSettings } from '@/queries/tuition.queries'
 import { splitMeetings } from '@/lib/derive'
+import { hasRetiredMeetLink, isValidMeetingLink } from '@/lib/meeting-links'
 import { useNow } from '@/lib/hooks'
 import { buildDirectory, teacherName } from '@/lib/select'
 import { Badge } from '@/components/ui/badge'
@@ -54,7 +54,8 @@ const schema = z.object({
   subject_id: z.string().min(1, 'Choose a subject'),
   title: z.string().min(2, 'Enter a title').max(200),
   scheduled_time: z.string().min(1, 'Choose a date and time'),
-  meeting_link: z.string().url('Enter a valid URL').or(z.literal('')).optional(),
+  // An LMS room is a relative path; a pasted link is https.
+  meeting_link: z.string().refine(isValidMeetingLink, 'Enter a valid URL').optional(),
   auto_create_meet: z.boolean(),
   invite_students: z.boolean(),
   auto_record: z.boolean(),
@@ -82,11 +83,9 @@ const DEFAULT_VALUES: FormValues = {
 /**
  * Schedules a session on any teacher's behalf, or edits an existing one.
  *
- * The teacher choice is not merely attribution: the Calendar event is created
- * on THAT teacher's calendar. Leaving it unset would schedule under the acting
- * admin, whose account is usually not delegated — which is the most common way
- * to end up with a meeting that has no Meet link — so the field is required
- * here even though the API treats it as optional.
+ * The teacher choice decides whose schedule the session lands on and who
+ * hosts it, so the field is required here even though the API treats it as
+ * optional (it would otherwise be filed under the acting admin).
  */
 function AdminMeetingDialog({
   open,
@@ -233,12 +232,10 @@ function AdminMeetingDialog({
           <DialogTitle>{editing ? 'Edit meeting' : 'Schedule a meeting'}</DialogTitle>
           <DialogDescription>
             {editing
-              ? editing.google_event_id
-                ? 'Changing the title or time updates the Google Calendar event on the owning teacher’s calendar, so every invited student sees it.'
-                : 'This meeting has no Calendar event behind it, so changes stay inside the LMS.'
+              ? 'Students see the change in their schedule straight away.'
               : roomMode
-                ? 'The session is filed under the chosen teacher and happens in the class’s shared room — no new Meet link is created.'
-                : 'The session is filed under the chosen teacher, and the Calendar event is created on their calendar.'}
+                ? 'The session is filed under the chosen teacher and happens in the class’s shared room — no new room is created.'
+                : 'The session is filed under the chosen teacher, who hosts it in a class room in the LMS.'}
           </DialogDescription>
         </DialogHeader>
         <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
@@ -268,7 +265,7 @@ function AdminMeetingDialog({
                   label="Teacher"
                   required
                   error={form.formState.errors.teacher_id?.message}
-                  hint="The Calendar event is created on this teacher's calendar."
+                  hint="The session appears on this teacher's schedule."
                 >
                   <Combobox
                     id="admin-meeting-teacher"
@@ -407,40 +404,22 @@ function AdminMeetingDialog({
                   <div>
                     <p className="flex items-center gap-1.5 text-sm font-medium">
                       <Video className="size-4 text-primary" />
-                      Create a Google Meet link
+                      Hold it in a class room in the LMS
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      Adds a real Calendar event on the teacher’s account with a Meet link attached.
+                      Students join from their schedule inside the LMS — no separate app or link.
                     </p>
                   </div>
                   <Switch
                     checked={autoCreateMeet}
                     onCheckedChange={(v) => form.setValue('auto_create_meet', v)}
-                    aria-label="Create a Google Meet link"
-                  />
-                </div>
-
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium">Invite enrolled students</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      Each active student in the class is added as an attendee and receives a
-                      calendar invitation.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={form.watch('invite_students')}
-                    onCheckedChange={(v) => form.setValue('invite_students', v)}
-                    disabled={!meetGenerationActive}
-                    aria-label="Invite enrolled students"
+                    aria-label="Hold it in a class room in the LMS"
                   />
                 </div>
 
                 {/*
-                  Recording is configured on the Meet conference itself, so it
-                  can only be armed for a link the LMS generates — and it is
-                  filed into the school Drive rather than the teacher's, which
-                  is the reason it is worth switching on at all.
+                  Recording only works in a room the LMS runs: a pasted link
+                  belongs to a call we cannot record.
                 */}
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -449,9 +428,9 @@ function AdminMeetingDialog({
                       Record this class automatically
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      Meet records from the moment the first person joins. The video is filed into
-                      the school Drive a few minutes after the class ends and shared with the
-                      enrolled students.
+                      Recording starts when the teacher joins the class in the LMS. Shortly after the
+                      class ends the video is saved to school storage and shared with the enrolled
+                      students.
                     </p>
                   </div>
                   <Switch
@@ -465,21 +444,21 @@ function AdminMeetingDialog({
                 {meetGenerationActive ? (
                   <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
                     <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warning" />
-                    If Meet generation fails the meeting is still saved, and the reason is shown on
-                    the card. You can retry it from there once{' '}
+                    If the class room cannot be created the meeting is still saved, and the reason is
+                    shown on the card. You can retry it from there once{' '}
                     <Link
                       to="/admin/integrations"
                       className="font-medium text-primary hover:underline"
                     >
                       Integrations
                     </Link>{' '}
-                    reports Meet as healthy.
+                    reports live classes as healthy.
                   </p>
                 ) : (
                   <p className="text-xs text-muted-foreground">
                     {manualLink
-                      ? 'A meeting link is set below, so no Calendar event will be created.'
-                      : 'No Calendar event will be created — add a link manually below.'}
+                      ? 'A meeting link is set below, so no class room will be created.'
+                      : 'No class room will be created — add a link manually below.'}
                   </p>
                 )}
               </div>
@@ -493,13 +472,13 @@ function AdminMeetingDialog({
                 roomMode && !editing
                   ? 'Leave empty to use the class room. Anything entered here is used instead, for this session only.'
                   : meetGenerationActive
-                    ? 'Leave empty to let Google Meet generate one. Anything entered here is used instead.'
-                    : 'Google Meet, Zoom or Teams URL.'
+                    ? 'Leave empty to use a class room in the LMS. Anything entered here is used instead.'
+                    : 'A Zoom, Teams or other meeting URL.'
               }
             >
               <Input
                 id="admin-meeting-link"
-                placeholder="https://meet.google.com/abc-defg-hij"
+                placeholder="https://zoom.us/j/1234567890"
                 {...form.register('meeting_link')}
               />
             </Field>
@@ -524,7 +503,6 @@ export default function AdminMeetingsPage() {
   const deleteMeeting = useAdminDeleteMeeting()
   const regenerate = useRegenerateMeetingLink()
   const collectRecording = useAdminSyncRecording()
-  const repairAccess = useRepairTeacherAccess()
 
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<LiveMeetingOut | null>(null)
@@ -561,11 +539,16 @@ export default function AdminMeetingsPage() {
     setDialogOpen(true)
   }
 
-  /** Meetings saved without a link — the queue the retry action exists for. */
+  /**
+   * Upcoming meetings with no working room — saved without a link, or still
+   * carrying an old Google Meet link. The queue the repair action exists for.
+   */
   const needingLink = React.useMemo(
     () =>
       (meetingsQuery.data ?? []).filter(
-        (m) => !m.meeting_link && new Date(m.scheduled_time).getTime() > now.getTime(),
+        (m) =>
+          (!m.meeting_link || hasRetiredMeetLink(m)) &&
+          new Date(m.scheduled_time).getTime() > now.getTime(),
       ),
     [meetingsQuery.data, now],
   )
@@ -616,23 +599,9 @@ export default function AdminMeetingsPage() {
         title="Meetings"
         description="Every live session across all teachers. Schedule on a teacher's behalf, or repair one that lost its link."
         actions={
-          <>
-            {/* Teachers outside the Workspace domain were never on their own
-                sessions' guest lists, so Meet made them ask to join. New
-                sessions invite them; this covers the ones already scheduled. */}
-            <Button
-              variant="outline"
-              icon={<UserCheck />}
-              loading={repairAccess.isPending}
-              onClick={() => repairAccess.mutate(false)}
-              title="Add each teacher to their upcoming sessions' guest lists so Meet lets them in without asking"
-            >
-              Fix teacher access
-            </Button>
-            <Button variant="primary" icon={<Plus />} onClick={openCreate}>
-              Schedule meeting
-            </Button>
-          </>
+          <Button variant="primary" icon={<Plus />} onClick={openCreate}>
+            Schedule meeting
+          </Button>
         }
       >
         {teacherOptions.length > 1 && (
@@ -677,14 +646,15 @@ export default function AdminMeetingsPage() {
           <div>
             <p className="font-medium">
               {needingLink.length} upcoming{' '}
-              {needingLink.length === 1 ? 'session has' : 'sessions have'} no meeting link
+              {needingLink.length === 1 ? 'session has' : 'sessions have'} no working room
             </p>
             <p className="mt-0.5 text-muted-foreground">
-              Use “Retry Meet link” on the card once{' '}
+              Some were saved without a link; others still point at an old Google Meet room. Use
+              “Give this session a working room” on the card once{' '}
               <Link to="/admin/integrations" className="font-medium text-primary hover:underline">
                 Integrations
               </Link>{' '}
-              reports Google Meet as healthy, or edit the meeting to paste a link in by hand.
+              reports live classes as healthy, or edit the meeting to paste a link in by hand.
             </p>
           </div>
         </div>
@@ -714,7 +684,7 @@ export default function AdminMeetingsPage() {
           {renderList(
             groups.recordings,
             'No recordings yet',
-            'Recorded classes are filed here a few minutes after they end. If one is missing, Recordings reports what the collection sweep decided about it.',
+            'Recorded classes are filed here shortly after they end. If one is missing, Recordings reports what happened to it.',
           )}
         </TabsContent>
       </Tabs>
@@ -727,9 +697,7 @@ export default function AdminMeetingsPage() {
         title="Cancel this meeting?"
         description={
           cancelling
-            ? cancelling.google_event_id
-              ? `“${cancelling.title}” will be removed, and its Google Calendar event deleted — every invited student is notified.`
-              : `“${cancelling.title}” will be removed. Students will no longer see it in their schedule.`
+            ? `“${cancelling.title}” will be removed. Students will no longer see it in their schedule.`
             : undefined
         }
         confirmLabel="Cancel meeting"

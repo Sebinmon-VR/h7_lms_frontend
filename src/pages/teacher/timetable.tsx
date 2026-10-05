@@ -11,7 +11,7 @@ import { dayOfWeekFor } from '@/lib/timetable'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { DaySchedule, TimetableWeek, UpcomingPeriods } from '@/components/domain/timetable'
+import { ClockNote, DaySchedule, TimetableWeek, UpcomingPeriods } from '@/components/domain/timetable'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { PageHeader } from '@/components/layout/page-header'
 import { AdminTeacherNotice, useIsAdminViewingTeacher } from './teacher-guard'
@@ -41,6 +41,8 @@ export default function TeacherTimetablePage() {
         title="Timetable"
         description="Your lessons this week, and what is coming up next."
       />
+
+      <ClockNote scope="teacher" className="mb-4" />
 
       <Tabs defaultValue="week">
         <TabsList>

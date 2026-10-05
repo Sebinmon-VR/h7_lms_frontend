@@ -1455,7 +1455,8 @@ export interface LiveClassRow {
 /**
  * A class's standing room, as one person sees it right now.
  *
- * The school runs ONE Google Meet room per class: students join it and stay,
+ * The school runs ONE live-class room per class, inside the LMS: students
+ * join it and stay,
  * and each subject teacher joins at their period. `may_join` is the single
  * flag a join button binds to — for a student it is true for the WHOLE school
  * day, from `day_opens_at` (a little before the first period) to
@@ -1469,7 +1470,8 @@ export interface ClassRoomAccessOut {
   class_name: string
   class_code?: string | null
   has_room: boolean
-  room_provider?: 'GOOGLE_MEET' | 'MANUAL' | string | null
+  /** 'GOOGLE_MEET' survives only on old records and means "no working room". */
+  room_provider?: 'AZURE_ACS' | 'MANUAL' | 'GOOGLE_MEET' | string | null
   room_status?: 'NONE' | 'CREATED' | 'MANUAL' | 'FAILED' | string | null
   room_error?: string | null
   room_recording_status?: string | null
@@ -1505,12 +1507,16 @@ export interface ClassRoomAccessOut {
   live_meeting_ids: number[]
   /**
    * The caller's own last movement today. `in_room` is true when that last
-   * word was a join. The LMS cannot see a Meet tab close, so a leave is the
-   * person saying so through the Leave button (`POST /rooms/{id}/leave`).
+   * word was a join. The in-LMS call records a leave when the person hangs
+   * up; the Leave button (`POST /rooms/{id}/leave`) says so explicitly.
    */
   my_last_action?: ClassRoomEventAction | string | null
   my_last_at?: ApiDateTime | null
   in_room: boolean
+  /**
+   * A RELATIVE app path (`/call/class/{id}`) for an LMS room, or a full https
+   * URL for a manually pasted link.
+   */
   room_link?: string | null
 }
 
@@ -1561,8 +1567,8 @@ export interface RoomPresenceOut {
 /**
  * What the LMS recorded about a class's room: a join it handed a link out
  * for, a leave somebody told it about, a period a teacher opened or closed, a
- * room made or removed. Google Meet's own record of who was in the call, and
- * when, is `ClassRoomAttendanceOut`.
+ * room made or removed. The per-person join/leave summary built from the
+ * in-LMS call is `ClassRoomAttendanceOut`.
  */
 export type ClassRoomEventAction =
   | 'JOINED_ROOM'
@@ -1611,16 +1617,18 @@ export interface LiveClassBoardRow extends ClassRoomAccessOut {
   live_sessions: LiveSessionOut[]
   last_event?: ClassRoomEventOut | null
   is_live: boolean
-  /** When Meet's attendance record was last copied, or why it cannot be yet. */
+  /** When the attendance summary was last rebuilt from the LMS join/leave log. */
   room_attendance_synced_at?: ApiDateTime | null
+  /** Always null now; kept for old payloads. */
   room_attendance_error?: string | null
 }
 
 /**
- * One participant of one Meet conference in a class's room, as Google
- * recorded it: when they joined and left, in sessions. Meet gives a display
- * name, not an email, so `matched_user_*` is the LMS's best match by name and
- * is empty for a guest it cannot place.
+ * One person's time in a class's room on one day, built from the LMS's own
+ * join/leave log (the in-LMS call writes it on connect and hang-up): when they
+ * joined and left, in sessions. `user_kind` is 'LMS', `participant` is
+ * `users/{id}`, the `conference_*` fields are null and `matched_user_*` is
+ * always set.
  */
 export interface ClassRoomAttendanceOut {
   id?: string | null
@@ -1629,10 +1637,10 @@ export interface ClassRoomAttendanceOut {
   conference_record?: string | null
   conference_start_at?: ApiDateTime | null
   conference_end_at?: ApiDateTime | null
-  /** Meet's resource name for this participant in this conference. */
+  /** `users/{id}` for a row built from the LMS log. */
   participant?: string | null
   display_name?: string | null
-  user_kind?: 'SIGNED_IN' | 'ANONYMOUS' | 'PHONE' | string | null
+  user_kind?: 'LMS' | 'SIGNED_IN' | 'ANONYMOUS' | 'PHONE' | string | null
   matched_user_id?: number | null
   matched_user_name?: string | null
   matched_role?: UserRole | string | null

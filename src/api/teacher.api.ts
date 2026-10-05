@@ -139,30 +139,29 @@ export const teacherApi = {
   listMeetings: () => get<LiveMeetingOut[]>('/teachers/meetings'),
 
   /**
-   * A 201 with a null `meeting_link` is a SUCCESS, not a failure: Meet
-   * generation is best-effort and the schedule is saved either way. Callers
+   * A 201 with a null `meeting_link` is a SUCCESS, not a failure: room
+   * creation is best-effort and the schedule is saved either way. Callers
    * must report that honestly rather than treating it as an error.
    */
   createMeeting: (body: LiveMeetingCreate) => post<LiveMeetingOut>('/teachers/meetings', body),
 
-  /** Title and time changes propagate to the backing Google Calendar event. */
   updateMeeting: (meetingId: number, body: LiveMeetingUpdate) =>
     put<LiveMeetingOut>(`/teachers/meetings/${meetingId}`, body),
 
-  /** Also deletes the Calendar event, which notifies invited students. */
+  /** Also removes the session's LMS room. */
   deleteMeeting: (meetingId: number) => del(`/teachers/meetings/${meetingId}`),
 
   /**
    * Files this session's recording now rather than waiting for the sweep.
    *
-   * Recordings are collected automatically a few minutes after each class ends,
-   * so this is for the impatient case — a teacher who has just finished and
-   * wants the video in front of the class. Calling it again later is free: an
-   * already-filed video is never filed twice, and a recording Meet is still
-   * processing comes back as `recording_status: 'WAITING'`.
+   * Recordings are filed automatically once the video is ready, so this is for
+   * the impatient case — a teacher who has just finished and wants the video
+   * in front of the class. Calling it again later is free: an already-filed
+   * video is never filed twice, and one still being prepared comes back as
+   * `recording_status: 'WAITING'`.
    *
-   * 400 when the meeting has no Meet conference behind it, i.e. its link was
-   * pasted in by hand.
+   * 400 when the meeting has no LMS room behind it, i.e. its link was pasted
+   * in by hand.
    */
   syncMeetingRecording: (meetingId: number) =>
     post<LiveMeetingOut>(`/teachers/meetings/${meetingId}/recording/sync`, undefined, {
@@ -193,8 +192,8 @@ export const teacherApi = {
     put<StudyMaterialOut>(`/teachers/materials/${materialId}`, body),
 
   /**
-   * Removes the record and, unless `keepFile`, the underlying object in Cloud
-   * Storage or Drive. `keepFile` is the escape hatch for a file that is linked
+   * Removes the record and, unless `keepFile`, the underlying file in school
+   * storage. `keepFile` is the escape hatch for a file that is linked
    * from somewhere outside the LMS.
    */
   deleteMaterial: (materialId: number, keepFile = false) =>

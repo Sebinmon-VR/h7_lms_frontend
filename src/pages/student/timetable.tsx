@@ -11,7 +11,7 @@ import { dayOfWeekFor } from '@/lib/timetable'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { DaySchedule, TimetableWeek, UpcomingPeriods } from '@/components/domain/timetable'
+import { ClockNote, DaySchedule, TimetableWeek, UpcomingPeriods } from '@/components/domain/timetable'
 import { FunPageHeader } from '@/components/fun/fun-ui'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { PageHeader } from '@/components/layout/page-header'
@@ -54,6 +54,8 @@ export default function StudentTimetablePage() {
         title="My timetable"
         description="When each of your classes happens."
       />
+
+      <ClockNote scope="student" className="mb-4" />
 
       <Tabs defaultValue="week">
         <TabsList>

@@ -55,7 +55,7 @@ import { PageHeader } from '@/components/layout/page-header'
  * Extra classes — classes held outside the timetable.
  *
  * The thing this screen exists to make visible: approving and scheduling are
- * two separate calls, because creating the class can fail on a clash or a Meet
+ * two separate calls, because creating the class can fail on a clash or a room
  * error AFTER a human has already approved it. An `APPROVED` request with no
  * created class is a real, recoverable state, and it gets its own banner and a
  * retry rather than being rendered as done.
@@ -249,7 +249,7 @@ function DecideDialog({
           <DialogTitle>{approve ? 'Approve this request' : 'Reject this request'}</DialogTitle>
           <DialogDescription>
             {approve
-              ? 'Approving does not create the class — you schedule it as a second step, so a clash or a Meet failure does not lose the approval.'
+              ? 'Approving does not create the class — you schedule it as a second step, so a clash or a room failure does not lose the approval.'
               : 'The teacher sees the reason you give.'}
           </DialogDescription>
         </DialogHeader>
@@ -360,7 +360,7 @@ function RequestCard({
           <p className="text-xs text-muted-foreground">
             <strong className="text-foreground">Approved, but the class does not exist yet.</strong>{' '}
             {isAdmin
-              ? 'Creating it can fail on a timetable clash or a Meet error — press "Create the class" to try again.'
+              ? 'Creating it can fail on a timetable clash or a room error — press "Create the class" to try again.'
               : 'An administrator still has to create it.'}
           </p>
         </div>

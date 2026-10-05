@@ -1,6 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
-  CalendarCheck,
   Check,
   Copy,
   Disc,
@@ -20,6 +19,7 @@ import {
 } from 'lucide-react'
 import * as React from 'react'
 import { useForm } from 'react-hook-form'
+import { Link } from 'react-router-dom'
 import { z } from 'zod'
 
 import type { LiveMeetingOut } from '@/api/types'
@@ -36,6 +36,7 @@ import { useMyClassRooms } from '@/queries/classes.queries'
 import { splitMeetings } from '@/lib/derive'
 import { formatCountdown, formatDateTime, meetingPhase } from '@/lib/datetime'
 import { MAX_UPLOAD_BYTES, formatFileSize, resolveFileUrl } from '@/lib/files'
+import { hasRetiredMeetLink, isValidMeetingLink, shareableLink } from '@/lib/meeting-links'
 import { canCollectRecording, recordingHint } from '@/lib/recordings'
 import { subjectName, className as classNameOf } from '@/lib/select'
 import { useCopyToClipboard, useNow } from '@/lib/hooks'
@@ -82,8 +83,9 @@ const schema = z.object({
   subject_id: z.string().min(1, 'Choose a subject'),
   title: z.string().min(2, 'Enter a title').max(200),
   scheduled_time: z.string().min(1, 'Choose a date and time'),
-  meeting_link: z.string().url('Enter a valid URL').or(z.literal('')).optional(),
-  recording_url: z.string().url('Enter a valid URL').or(z.literal('')).optional(),
+  // An LMS room or a filed recording is a relative path; a pasted link is https.
+  meeting_link: z.string().refine(isValidMeetingLink, 'Enter a valid URL').optional(),
+  recording_url: z.string().refine(isValidMeetingLink, 'Enter a valid URL').optional(),
   auto_create_meet: z.boolean(),
   invite_students: z.boolean(),
   auto_record: z.boolean(),
@@ -111,9 +113,9 @@ const DEFAULT_VALUES: FormValues = {
 /**
  * Schedules a new meeting, or edits an existing one when `editing` is set.
  *
- * The two modes differ in what the API allows. On create the backend can build
- * a real Google Calendar event with a Meet link and invite the class; on
- * update it can only change the fields below, and the class and subject are
+ * The two modes differ in what the API allows. On create the backend can give
+ * the session its own class room in the LMS; on update it can only change the
+ * fields below, and the class and subject are
  * fixed because `LiveMeetingUpdate` does not accept them.
  */
 function MeetingFormDialog({
@@ -131,7 +133,7 @@ function MeetingFormDialog({
   const selection = useClassSubjectSelection(mappingsQuery.data)
 
   // The classroom model: when the school shares one room per class, a new
-  // session borrows the class's link and the Meet switches below are moot.
+  // session borrows the class's link and the room switches below are moot.
   const roomsQuery = useMyClassRooms(open)
   const roomMode = roomsQuery.data?.[0]?.class_room_mode ?? false
 
@@ -157,8 +159,8 @@ function MeetingFormDialog({
             meeting_link: editing.meeting_link ?? '',
             recording_url: editing.recording_url ?? '',
             duration_minutes: editing.duration_minutes ?? 60,
-            // Generation already happened (or did not) at create time, and
-            // recording is armed on the conference at that same moment.
+            // The room was made (or not) at create time, and recording was
+            // switched on for it at that same moment.
             auto_create_meet: false,
             invite_students: false,
             auto_record: false,
@@ -180,7 +182,7 @@ function MeetingFormDialog({
   const selectedRoom = roomsQuery.data?.find((r) => String(r.class_id) === classId) ?? null
 
   /**
-   * A manually supplied link makes the backend skip Meet generation entirely,
+   * A manually supplied link makes the backend skip the LMS room entirely,
    * so the two controls are mutually exclusive rather than merely related.
    * Under the classroom model nothing is generated per session at all.
    */
@@ -274,12 +276,10 @@ function MeetingFormDialog({
           <DialogTitle>{editing ? 'Edit meeting' : 'Schedule a meeting'}</DialogTitle>
           <DialogDescription>
             {editing
-              ? editing.google_event_id
-                ? 'Changing the title or time updates the Google Calendar event, so every invited student sees it on their own calendar.'
-                : 'This meeting has no Calendar event behind it, so changes stay inside the LMS.'
+              ? 'Students see the change in their schedule straight away.'
               : roomMode
                 ? 'Every period happens in the class’s shared room, so there is no new link to make — just say which class, which subject and when.'
-                : 'A Google Meet link and calendar invitations can be created automatically for the whole class.'}
+                : 'The class can meet in its own room inside the LMS — nothing to install, nothing to share.'}
           </DialogDescription>
         </DialogHeader>
         <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
@@ -382,47 +382,29 @@ function MeetingFormDialog({
               </div>
             )}
 
-            {/* ------------------------------------------- Meet generation */}
+            {/* ------------------------------------------- the LMS room */}
             {!editing && !roomMode && (
               <div className="space-y-3 rounded-lg border border-border bg-surface p-3.5">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="flex items-center gap-1.5 text-sm font-medium">
                       <Video className="size-4 text-primary" />
-                      Create a Google Meet link
+                      Hold it in a class room in the LMS
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      Adds a real Calendar event on your account with a Meet link attached.
+                      Students join from their schedule inside the LMS — no separate app or link.
                     </p>
                   </div>
                   <Switch
                     checked={autoCreateMeet}
                     onCheckedChange={(v) => form.setValue('auto_create_meet', v)}
-                    aria-label="Create a Google Meet link"
-                  />
-                </div>
-
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium">Invite enrolled students</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      Each active student in the class is added as an attendee and receives a calendar
-                      invitation.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={form.watch('invite_students')}
-                    onCheckedChange={(v) => form.setValue('invite_students', v)}
-                    disabled={!meetGenerationActive}
-                    aria-label="Invite enrolled students"
+                    aria-label="Hold it in a class room in the LMS"
                   />
                 </div>
 
                 {/*
-                  Recording is a property of the Meet conference itself, which
-                  is why it can only be switched on for a link the LMS
-                  generates: a pasted link belongs to a meeting we cannot
-                  configure.
+                  Recording only works in a room the LMS runs: a pasted link
+                  belongs to a call we cannot record.
                 */}
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -431,9 +413,9 @@ function MeetingFormDialog({
                       Record this class automatically
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      Meet starts recording when the first person joins — nobody has to press
-                      anything. A few minutes after the class ends the video is filed into the
-                      school Drive and shared with the students.
+                      Recording starts when you join the class in the LMS — nobody has to press
+                      anything. Shortly after the class ends the video is saved to school storage
+                      and shared with the students.
                     </p>
                   </div>
                   <Switch
@@ -447,14 +429,14 @@ function MeetingFormDialog({
                 {meetGenerationActive ? (
                   <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
                     <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warning" />
-                    If Google Meet is unavailable the meeting is still saved, just without a link. You
-                    can paste one in later.
+                    If the class room cannot be created the meeting is still saved, just without a
+                    link. You can paste one in later.
                   </p>
                 ) : (
                   <p className="text-xs text-muted-foreground">
                     {manualLink
-                      ? 'A meeting link is set below, so no Calendar event will be created.'
-                      : 'No Calendar event will be created — add a link manually below.'}
+                      ? 'A meeting link is set below, so no class room will be created.'
+                      : 'No class room will be created — add a link manually below.'}
                   </p>
                 )}
               </div>
@@ -468,11 +450,11 @@ function MeetingFormDialog({
                 roomMode && !editing
                   ? 'Leave empty to use the class room. Anything entered here is used instead, for this session only.'
                   : meetGenerationActive
-                    ? 'Leave empty to let Google Meet generate one. Anything entered here is used instead.'
-                    : 'Google Meet, Zoom or Teams URL.'
+                    ? 'Leave empty to use a class room in the LMS. Anything entered here is used instead.'
+                    : 'A Zoom, Teams or other meeting URL.'
               }
             >
-              <Input id="meeting-link" placeholder="https://meet.google.com/abc-defg-hij" {...form.register('meeting_link')} />
+              <Input id="meeting-link" placeholder="https://zoom.us/j/1234567890" {...form.register('meeting_link')} />
             </Field>
 
             <Field
@@ -481,7 +463,7 @@ function MeetingFormDialog({
               error={form.formState.errors.recording_url?.message}
               hint={
                 editing
-                  ? 'A recorded Meet session fills this in on its own once the video has been filed. Paste or upload only to override it.'
+                  ? 'A class recorded in the LMS fills this in on its own once the video has been saved. Paste or upload only to override it.'
                   : 'Only needed for a session recorded elsewhere — an automatically recorded class fills this in itself.'
               }
             >
@@ -532,8 +514,8 @@ function MeetingFormDialog({
  * Shared with the student and admin views, which pass different callbacks —
  * the action menu only renders for someone allowed to act on the meeting.
  *
- * `onRegenerate` is admin-only: retrying Meet generation is not something the
- * teacher endpoints expose.
+ * `onRegenerate` is admin-only: giving a session a new room is not something
+ * the teacher endpoints expose.
  */
 export function MeetingCard({
   meeting,
@@ -545,6 +527,7 @@ export function MeetingCard({
   regenerating,
   onCollectRecording,
   collecting,
+  reviewInRecordings,
 }: {
   meeting: LiveMeetingOut
   now: Date
@@ -557,15 +540,20 @@ export function MeetingCard({
   /** Fetch this session's recording now rather than waiting for the sweep. */
   onCollectRecording?: (meeting: LiveMeetingOut) => void
   collecting?: boolean
+  /** Links a filed recording to the teacher's Recordings page, where it is published. */
+  reviewInRecordings?: boolean
 }) {
   const phase = meetingPhase(meeting.scheduled_time, now)
   const { copied, copy } = useCopyToClipboard()
   const recording = resolveFileUrl(meeting.recording_url)
   const showActions = !!onEdit || !!onDelete
 
-  // Retrying is only meaningful while there is no link and the session has not
+  // A session carrying an old Google Meet link has no working room either.
+  const retiredLink = hasRetiredMeetLink(meeting)
+  const hasWorkingLink = !!meeting.meeting_link && !retiredLink
+  // Only meaningful while there is no working link and the session has not
   // already happened — the backend 400s on a meeting that already has one.
-  const canRegenerate = !!onRegenerate && !meeting.meeting_link && phase !== 'past'
+  const canRegenerate = !!onRegenerate && !hasWorkingLink && phase !== 'past'
 
   // Recordings are collected on their own a few minutes after a class ends, so
   // this is the impatient path, not the normal one.
@@ -584,23 +572,9 @@ export function MeetingCard({
                 in {formatCountdown(meeting.scheduled_time, now)}
               </span>
             )}
-            {meeting.google_event_id && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Badge tone="info" size="sm">
-                    <CalendarCheck />
-                    Calendar
-                  </Badge>
-                </TooltipTrigger>
-                <TooltipContent>
-                  Backed by a Google Calendar event. Editing or cancelling here updates every
-                  invited student&rsquo;s calendar.
-                </TooltipContent>
-              </Tooltip>
-            )}
             {/* Held in the class's one standing room rather than a link of
                 its own. Editing or cancelling this session leaves the room
-                alone, which is why the Calendar badge above does not show. */}
+                alone. */}
             {meeting.meet_status === 'CLASS_ROOM' && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -618,6 +592,20 @@ export function MeetingCard({
                 plainly, and prefer the server's own reason when it recorded
                 one. `meet_status` is null on meetings written before the field
                 existed, which is why the old wording is still the fallback. */}
+            {retiredLink && phase !== 'past' && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge tone="warning" size="sm">
+                    <TriangleAlert />
+                    Old Google Meet link
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  This session still points at a Google Meet room, which no longer works. An
+                  administrator can give it a class room in the LMS, or edit it to paste a link.
+                </TooltipContent>
+              </Tooltip>
+            )}
             {!meeting.meeting_link && phase !== 'past' && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -635,8 +623,8 @@ export function MeetingCard({
                 <TooltipContent>
                   {meeting.meet_error ??
                     (meeting.meet_status === 'SKIPPED'
-                      ? 'No Meet link was requested when this was scheduled. Edit the meeting to paste one in.'
-                      : 'Google Meet could not generate a link when this was scheduled. Edit the meeting to paste one in.')}
+                      ? 'No class room was requested when this was scheduled. Edit the meeting to paste a link in.'
+                      : 'The class room could not be created when this was scheduled. Edit the meeting to paste a link in.')}
                 </TooltipContent>
               </Tooltip>
             )}
@@ -683,7 +671,7 @@ export function MeetingCard({
               onClick={() => onRegenerate?.(meeting)}
             >
               <RefreshCw className="size-4" />
-              Retry Meet link
+              Give this session a working room
             </Button>
           )}
           {!meeting.meeting_link && onEdit && phase !== 'past' && (
@@ -705,11 +693,23 @@ export function MeetingCard({
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Copy meeting link"
-                onClick={() => void copy(meeting.meeting_link as string)}
+                onClick={() => void copy(shareableLink(meeting.meeting_link))}
               >
                 {copied ? <Check className="text-success" /> : <Copy />}
               </Button>
             </>
+          )}
+          {/* Students only see a recording once it is published to the class
+              library, so a teacher needs to know which side of that it is on. */}
+          {recording && meeting.recording_published != null && (
+            <Badge tone={meeting.recording_published ? 'success' : 'warning'} size="sm">
+              {meeting.recording_published ? 'Published' : 'Not published'}
+            </Badge>
+          )}
+          {recording && reviewInRecordings && (
+            <Button asChild variant="link" size="sm" className="px-1">
+              <Link to="/teacher/recordings">Review in Recordings</Link>
+            </Button>
           )}
           {recording && (
             <Button asChild variant="outline" size="sm">
@@ -726,13 +726,13 @@ export function MeetingCard({
               here; `recording_url` only ever points at the first. */}
           {extraSegments.map((file, index) => (
             <Button
-              key={file.drive_file_id ?? file.web_view_link ?? index}
+              key={file.drive_file_id ?? file.file_url ?? file.web_view_link ?? index}
               asChild
               variant="outline"
               size="sm"
             >
               <a
-                href={resolveFileUrl(file.web_view_link) ?? undefined}
+                href={resolveFileUrl(file.file_url ?? file.web_view_link) ?? undefined}
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -756,7 +756,7 @@ export function MeetingCard({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                Recordings are collected on their own a few minutes after a class ends. This asks
+                Recordings are saved on their own shortly after a class ends. This checks
                 now instead — pressing it twice cannot file the same video twice.
               </TooltipContent>
             </Tooltip>
@@ -852,6 +852,7 @@ export default function TeacherMeetingsPage() {
             onEdit={openEdit}
             onDelete={setCancelling}
             onCollectRecording={(m) => collectRecording.mutate(m.id)}
+            reviewInRecordings
             collecting={collectRecording.isPending && collectRecording.variables === meeting.id}
           />
         ))}
@@ -927,9 +928,7 @@ export default function TeacherMeetingsPage() {
         title="Cancel this meeting?"
         description={
           cancelling
-            ? cancelling.google_event_id
-              ? `“${cancelling.title}” will be removed, and its Google Calendar event deleted — every invited student is notified.`
-              : `“${cancelling.title}” will be removed. Students will no longer see it in their schedule.`
+            ? `“${cancelling.title}” will be removed. Students will no longer see it in their schedule.`
             : undefined
         }
         confirmLabel="Cancel meeting"

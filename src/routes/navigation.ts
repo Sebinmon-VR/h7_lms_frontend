@@ -8,6 +8,7 @@ import {
   CalendarDays,
   CalendarPlus,
   CalendarRange,
+  Clapperboard,
   ClipboardCheck,
   ClipboardList,
   Coins,
@@ -216,7 +217,7 @@ const ADMIN_NAV: NavSection[] = [
         to: '/admin/integrations',
         label: 'Integrations',
         icon: Plug,
-        description: 'Drive, Storage, Meet and email health',
+        description: 'Storage, live classes and email health',
       },
       {
         to: '/admin/reminders',
@@ -251,6 +252,7 @@ const TEACHER_NAV: NavSection[] = [
       { to: '/teacher/topics', label: 'Syllabus', icon: ClipboardList, description: 'Note down what you taught' },
       { to: '/teacher/meetings', label: 'Live Classes', icon: Video, description: 'Set up a session or share a recording' },
       { to: '/teacher/materials', label: 'Materials', icon: Library, description: 'Share notes and worksheets' },
+      { to: '/teacher/recordings', label: 'Recordings', icon: Clapperboard, description: 'Review class videos and publish them' },
       { to: '/teacher/gradebook', label: 'Gradebook', icon: FileText, description: 'Record and review test marks' },
       {
         to: '/teacher/homework',
@@ -306,7 +308,7 @@ const STUDENT_NAV: NavSection[] = [
       { to: '/student/attendance', label: 'My Days', icon: CalendarCheck, description: 'How often you were in class' },
       { to: '/student/syllabus', label: 'What We Learned', icon: ClipboardList, description: 'Topics your class has covered' },
       { to: '/student/meetings', label: 'Live Classes', icon: Video, description: 'Join a class or watch it back' },
-      { to: '/student/materials', label: 'Notes & Books', icon: Library, description: 'Things your teachers shared' },
+      { to: '/student/materials', label: 'Library', icon: Library, description: 'Class videos, notes and books' },
       { to: '/student/exams', label: 'Exams', icon: ClipboardCheck, description: 'Sit an exam or see how you did' },
       { to: '/student/grades', label: 'My Marks', icon: FileText, description: 'How you did in each test' },
       { to: '/student/report-cards', label: 'Report Cards', icon: FileBadge, description: 'How your term went' },

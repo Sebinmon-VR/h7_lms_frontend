@@ -102,9 +102,8 @@ export class ApiError extends Error {
   }
 
   /**
-   * Authenticated with Google against a real Firebase account, but no LMS
-   * profile exists for it. Signing in again will never fix this — an admin
-   * has to create the user.
+   * A valid sign-in with no LMS profile behind it. Signing in again will
+   * never fix this — an admin has to create the user.
    */
   get isNoProfile() {
     return this.status === 403 && /no lms profile exists/i.test(String(this.detail ?? ''))
@@ -121,16 +120,6 @@ export class ApiError extends Error {
 
   get isValidation() {
     return this.status === 422
-  }
-
-  /**
-   * `/auth/login` is a development helper that only works when the server has
-   * `FIREBASE_WEB_API_KEY` set. Without it the correct client behaviour is to
-   * sign in through the Firebase SDK instead, so this is a configuration
-   * signal rather than a failure to report as-is.
-   */
-  get isPasswordLoginUnavailable() {
-    return this.status === 501
   }
 }
 
@@ -222,7 +211,7 @@ export function errorDescription(error: ApiError): string {
       : 'The API server appears to be offline. Start it and try again.'
   }
   if (error.isNoProfile) {
-    return 'Your Google account signed in successfully, but no LMS profile is linked to it. Ask an administrator to create your account.'
+    return 'You signed in successfully, but no LMS profile is linked to this account. Ask an administrator to create your account.'
   }
   if (error.isOwnershipViolation) {
     return 'This record was created by another teacher. Only its author or an administrator can change it.'

@@ -20,7 +20,8 @@ import {
   studentTimeline,
   syllabusProgress,
 } from '@/lib/derive'
-import { formatCountdown, formatRelative, formatTime, meetingPhase } from '@/lib/datetime'
+import { formatCountdown, formatRelative, meetingPhase } from '@/lib/datetime'
+import { formatSchoolTime } from '@/lib/school-time'
 import { resolveFileUrl } from '@/lib/files'
 import { formatMarks, formatPercent, gradePercentage } from '@/lib/format'
 import { subjectName } from '@/lib/select'
@@ -156,7 +157,7 @@ function buildAchievements(opts: {
 
 const SHORTCUTS = [
   { to: '/student/timetable', label: 'My timetable', emoji: '🗓️', tone: 7 },
-  { to: '/student/materials', label: 'Notes & books', emoji: '📚', tone: 5 },
+  { to: '/student/materials', label: 'Library', emoji: '📚', tone: 5 },
   { to: '/student/grades', label: 'My marks', emoji: '⭐', tone: 3 },
   { to: '/student/meetings', label: 'Live classes', emoji: '🎥', tone: 9 },
 ]
@@ -349,7 +350,7 @@ export default function StudentDashboardPage() {
               <p className="mt-0.5 text-sm text-muted-foreground">
                 {nextPeriod ? (
                   <>
-                    {formatTime(nextPeriod.starts_at)}
+                    {formatSchoolTime(nextPeriod.starts_at)}
                     {nextPeriod.entry.room ? ` · ${nextPeriod.entry.room}` : ''} ·{' '}
                     <span className="font-semibold text-foreground">
                       {formatStartsIn(nextPeriod)}

@@ -8,13 +8,18 @@ import {
   FolderOpen,
   Hourglass,
   Play,
+  Radio,
   Video,
   XCircle,
 } from 'lucide-react'
 import * as React from 'react'
 import { Link } from 'react-router-dom'
 
-import type { RecordingSchedulerStatus, RecordingSweepSummary } from '@/api/types'
+import type {
+  RecordingLogEntry,
+  RecordingSchedulerStatus,
+  RecordingSweepSummary,
+} from '@/api/types'
 import {
   useRecordingLog,
   useRecordingPreview,
@@ -23,6 +28,7 @@ import {
 } from '@/queries/admin.queries'
 import { cn } from '@/lib/cn'
 import { formatRelative } from '@/lib/datetime'
+import { resolveFileUrl } from '@/lib/files'
 import { recordingLabel } from '@/lib/recordings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -37,13 +43,18 @@ import { PageHeader } from '@/components/layout/page-header'
  * Class recording diagnostics.
  *
  * The question this page exists to answer is "a class finished — where is the
- * video?", so it leads with what the sweep decided about each session rather
- * than with a switch. The dry-run preview claims nothing and moves nothing,
- * which makes it the safe thing to press while someone is asking.
+ * video?", so it leads with what happened to each recording rather than with
+ * a switch.
  *
- * Recording rides on its own Meet API and its own delegation scopes, so
- * `meet_problems` is surfaced prominently: Meet links can work perfectly while
- * not a single class can be recorded.
+ * How recording works now: when the teacher joins a class in the LMS, the
+ * backend asks Azure Communication Services to start recording. When the call
+ * ends, ACS prepares the video and announces it through an Azure Event Grid
+ * webhook; the backend then saves it to school storage (Azure Blob Storage)
+ * and attaches it to the session. The sweep only tidies up — it marks
+ * sessions nobody joined, and retries anything that did not file.
+ *
+ * `problems` is surfaced prominently: a class room can work perfectly while
+ * no video ever arrives, because the webhook is set up separately.
  */
 
 function Stat({
@@ -75,6 +86,7 @@ function Stat({
 const DETAIL_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
   STORED: 'success',
   WOULD_STORE: 'success',
+  RECORDING: 'warning',
   WAITING: 'warning',
   ARM_FAILED: 'warning',
   UNAVAILABLE: 'neutral',
@@ -93,11 +105,11 @@ function SweepSummary({ summary }: { summary: RecordingSweepSummary }) {
           tone={summary.stored > 0 ? 'success' : 'default'}
         />
         <Stat
-          label="Still processing"
+          label="Still being prepared"
           value={summary.waiting}
           tone={summary.waiting > 0 ? 'warning' : 'default'}
         />
-        {/* Not a fault: a class nobody joined never produces a video. */}
+        {/* Not a fault: a class the teacher never joined in the LMS is never recorded. */}
         <Stat label="Never recorded" value={summary.unavailable} />
         <Stat
           label="Failed"
@@ -108,29 +120,32 @@ function SweepSummary({ summary }: { summary: RecordingSweepSummary }) {
 
       {summary.details.length > 0 && (
         <div className="mt-3 space-y-1.5">
-          {summary.details.map((d) => (
-            <div
-              key={`${d.meeting_id}-${d.status}`}
-              className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs"
-            >
-              <Badge tone={DETAIL_TONE[String(d.status)] ?? 'neutral'} size="sm">
-                {d.status === 'WOULD_STORE' ? 'Ready to file' : recordingLabel(d.status)}
-              </Badge>
-              <span className="min-w-0 truncate font-medium">{d.title}</span>
-              <span className="min-w-0 flex-1 text-muted-foreground">{d.detail}</span>
-              {d.recording_url && (
-                <a
-                  href={d.recording_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
-                >
-                  Open
-                  <ExternalLink className="size-3" />
-                </a>
-              )}
-            </div>
-          ))}
+          {summary.details.map((d) => {
+            const video = resolveFileUrl(d.recording_url)
+            return (
+              <div
+                key={`${d.meeting_id}-${d.status}`}
+                className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs"
+              >
+                <Badge tone={DETAIL_TONE[String(d.status)] ?? 'neutral'} size="sm">
+                  {d.status === 'WOULD_STORE' ? 'Ready to file' : recordingLabel(d.status)}
+                </Badge>
+                <span className="min-w-0 truncate font-medium">{d.title}</span>
+                <span className="min-w-0 flex-1 text-muted-foreground">{d.detail}</span>
+                {video && (
+                  <a
+                    href={video}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                  >
+                    Open video
+                    <ExternalLink className="size-3" />
+                  </a>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
@@ -138,9 +153,9 @@ function SweepSummary({ summary }: { summary: RecordingSweepSummary }) {
 }
 
 function StatusPanel({ status }: { status: RecordingSchedulerStatus }) {
-  const problems = status.meet_problems ?? []
-  const healthy =
-    status.enabled && status.running && status.drive_configured && problems.length === 0
+  const problems = status.problems ?? status.meet_problems ?? []
+  const storageReady = status.storage_configured ?? status.drive_configured
+  const healthy = status.enabled && status.running && storageReady && problems.length === 0
 
   return (
     <Card className="p-5">
@@ -161,9 +176,9 @@ function StatusPanel({ status }: { status: RecordingSchedulerStatus }) {
             <p className="text-xs text-muted-foreground">
               {status.enabled
                 ? status.running
-                  ? 'Sessions are armed to record themselves, and finished videos are being collected.'
-                  : 'Enabled, but the collection sweep is not running.'
-                : 'Disabled — ENABLE_MEET_AUTO_RECORDING is off, so no class is armed to record.'}
+                  ? 'Classes are recorded when the teacher joins in the LMS, and finished videos are saved to school storage.'
+                  : 'Enabled, but the background sweep is not running.'
+                : 'Disabled — automatic recording is switched off on the server, so no class is recorded.'}
             </p>
           </div>
         </div>
@@ -175,52 +190,63 @@ function StatusPanel({ status }: { status: RecordingSchedulerStatus }) {
           <Badge tone={status.running ? 'success' : 'warning'} dot>
             {status.running ? 'Running' : 'Stopped'}
           </Badge>
-          <Badge tone={status.drive_configured ? 'success' : 'danger'} dot>
-            {status.drive_configured ? 'Drive ready' : 'No Drive'}
+          <Badge tone={storageReady ? 'success' : 'danger'} dot>
+            {storageReady ? 'Storage ready' : 'No storage'}
           </Badge>
         </div>
       </div>
 
-      {/*
-        Where the videos land and who can see them. `share_with_students` is the
-        difference between a recording the class can watch and one only the
-        staff can, and it is not visible anywhere else in the UI.
-      */}
-      <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm">
+      {/* How a recording gets from the class to the class's video list. */}
+      <ol className="mt-4 grid gap-2 text-xs sm:grid-cols-3">
+        <li className="rounded-lg border border-border bg-surface px-3 py-2.5">
+          <p className="font-medium text-foreground">1. Teacher joins</p>
+          <p className="mt-0.5 text-muted-foreground">
+            Recording starts when the teacher joins the class in the LMS. Nobody has to press
+            anything.
+          </p>
+        </li>
+        <li className="rounded-lg border border-border bg-surface px-3 py-2.5">
+          <p className="font-medium text-foreground">2. Class ends</p>
+          <p className="mt-0.5 text-muted-foreground">
+            Azure Communication Services prepares the video and tells the LMS it is ready (via
+            an Event Grid webhook).
+          </p>
+        </li>
+        <li className="rounded-lg border border-border bg-surface px-3 py-2.5">
+          <p className="font-medium text-foreground">3. Saved and shared</p>
+          <p className="mt-0.5 text-muted-foreground">
+            The video is saved to school storage and appears on the session for its class.
+          </p>
+        </li>
+      </ol>
+
+      <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm">
         <div>
-          <p className="text-xs text-muted-foreground">Filed into</p>
+          <p className="text-xs text-muted-foreground">Saved into</p>
           <p className="flex items-center gap-1.5 font-medium">
             <FolderOpen className="size-3.5 text-muted-foreground" />
             {status.destination_folder}/class_&lt;id&gt;
           </p>
         </div>
         <div>
-          <p className="text-xs text-muted-foreground">Transfer</p>
+          <p className="text-xs text-muted-foreground">Stored in</p>
           <p className="font-medium">
-            {status.transfer_mode === 'MOVE'
-              ? 'Moved into the school Drive'
-              : status.transfer_mode === 'COPY'
-                ? 'Copied — the teacher keeps the original'
-                : 'Linked where Meet left it'}
+            {status.transfer_mode === 'AZURE_BLOB' ? 'Azure Blob Storage' : status.transfer_mode}
           </p>
         </div>
         <div>
           <p className="text-xs text-muted-foreground">Students</p>
-          <p className="font-medium">
-            {status.share_with_students ? 'Given read access' : 'Not shared'}
-          </p>
+          <p className="font-medium">Can watch their class&rsquo;s recordings</p>
         </div>
-        <div>
-          <p className="text-xs text-muted-foreground">Collected</p>
-          <p className="font-medium">{status.harvest_delay_minutes} min after a class ends</p>
-        </div>
+        {status.max_recording_minutes != null && (
+          <div>
+            <p className="text-xs text-muted-foreground">Longest recording</p>
+            <p className="font-medium">{status.max_recording_minutes} min</p>
+          </div>
+        )}
       </div>
 
-      {/*
-        Recording needs the Meet API and two delegation scopes of its own, none
-        of which the Calendar setup provides — so these problems are the usual
-        answer to "the links work, why is nothing recorded?".
-      */}
+      {/* The usual answer to "the class room works, why is nothing recorded?". */}
       {problems.length > 0 && (
         <div className="mt-3 rounded-lg border border-warning/40 bg-warning/8 px-3 py-2.5">
           <p className="flex items-center gap-2 text-sm font-medium text-warning">
@@ -238,16 +264,16 @@ function StatusPanel({ status }: { status: RecordingSchedulerStatus }) {
             <Link to="/admin/integrations" className="font-medium text-primary hover:underline">
               Integrations
             </Link>{' '}
-            probes the Meet recording API live and names the exact grant that is missing.
+            checks storage, live classes and the recording webhook and names what is missing.
           </p>
         </div>
       )}
 
-      {!status.drive_configured && (
+      {!storageReady && (
         <p className="mt-3 flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">
           <XCircle className="mt-0.5 size-4 shrink-0" />
-          Google Drive is not configured, so there is nowhere to file a recording even when Meet
-          produces one. Fix it under{' '}
+          School storage is not configured, so there is nowhere to save a recording even when a
+          class produces one. Fix it under{' '}
           <Link to="/admin/integrations" className="font-medium underline">
             Integrations
           </Link>
@@ -268,19 +294,104 @@ function StatusPanel({ status }: { status: RecordingSchedulerStatus }) {
           label="Last run"
           value={status.last_run_at ? formatRelative(status.last_run_at) : 'Never'}
         />
-        <Stat label="Scans every" value={`${status.scan_interval_seconds}s`} />
-        {/* After this a session with no video is marked UNAVAILABLE and stops
-            being polled, which is what keeps the Meet API cost bounded. */}
+        <Stat label="Checks every" value={`${status.scan_interval_seconds}s`} />
+        {/* After this a session with no video is marked UNAVAILABLE and stops being checked. */}
         <Stat label="Gives up after" value={`${status.give_up_after_hours}h`} />
       </div>
     </Card>
   )
 }
 
-const LOG_TONE: Record<string, 'success' | 'danger' | 'warning'> = {
+const LOG_TONE: Record<string, 'success' | 'danger' | 'warning' | 'info' | 'neutral'> = {
+  RECORDING: 'info',
+  STOPPED: 'warning',
+  FILE_READY: 'warning',
   STORED: 'success',
   FAILED: 'danger',
-  CLAIMED: 'warning',
+  UNMATCHED: 'neutral',
+}
+
+const LOG_LABEL: Record<string, string> = {
+  RECORDING: 'Recording',
+  STOPPED: 'Stopped — preparing video',
+  FILE_READY: 'Video ready — saving',
+  STORED: 'Saved',
+  FAILED: 'Failed',
+  UNMATCHED: 'Not matched to a class',
+}
+
+function LogStatusIcon({ status }: { status: string }) {
+  if (status === 'STORED') return <CheckCircle2 className="size-4 shrink-0 text-success" />
+  if (status === 'FAILED') return <XCircle className="size-4 shrink-0 text-danger" />
+  if (status === 'RECORDING') return <Radio className="size-4 shrink-0 text-danger" />
+  // Stopped or file-ready but not yet saved: worth spotting if it lingers.
+  return <Hourglass className="size-4 shrink-0 text-warning" />
+}
+
+function logTitle(entry: RecordingLogEntry): string {
+  if (entry.title) return entry.title
+  if (entry.meeting_id != null) return `Meeting #${entry.meeting_id}`
+  if (entry.class_id != null) return `Class #${entry.class_id}`
+  return entry.recording_name
+}
+
+function LogRow({ entry }: { entry: RecordingLogEntry }) {
+  const video = resolveFileUrl(entry.file_url ?? entry.web_view_link)
+  const parts = entry.files ?? []
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-sm">
+      <LogStatusIcon status={entry.status} />
+      <span className="font-medium">{logTitle(entry)}</span>
+      <Badge tone={LOG_TONE[entry.status] ?? 'neutral'} size="sm">
+        {LOG_LABEL[entry.status] ?? entry.status}
+      </Badge>
+      {entry.started_by_name && (
+        <span className="text-xs text-muted-foreground">started by {entry.started_by_name}</span>
+      )}
+      {(entry.error || entry.warning) && (
+        <span
+          className={cn(
+            'min-w-0 flex-1 truncate text-xs',
+            entry.error ? 'text-danger' : 'text-warning',
+          )}
+          title={entry.error ?? entry.warning ?? undefined}
+        >
+          {entry.error ?? entry.warning}
+        </span>
+      )}
+      {parts.length > 1
+        ? parts.map((file, index) => {
+            const href = resolveFileUrl(file.file_url ?? file.web_view_link)
+            if (!href) return null
+            return (
+              <a
+                key={file.drive_file_id ?? href}
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+              >
+                Part {index + 1}
+                <ExternalLink className="size-3" />
+              </a>
+            )
+          })
+        : video && (
+            <a
+              href={video}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+            >
+              Open video
+              <ExternalLink className="size-3" />
+            </a>
+          )}
+      <span className="ml-auto text-xs text-muted-foreground">
+        {formatRelative(entry.started_at ?? entry.claimed_at)}
+      </span>
+    </div>
+  )
 }
 
 export default function AdminRecordingsPage() {
@@ -293,7 +404,7 @@ export default function AdminRecordingsPage() {
     <>
       <PageHeader
         title="Recordings"
-        description="Classes that recorded themselves, where the videos were filed, and what is holding any of them up."
+        description="Classes recorded in the LMS, where the videos were saved, and what is holding any of them up."
         actions={
           <>
             <Button
@@ -310,7 +421,7 @@ export default function AdminRecordingsPage() {
               loading={runSweep.isPending}
               onClick={() => runSweep.mutate()}
             >
-              Collect now
+              Check now
             </Button>
           </>
         }
@@ -320,11 +431,11 @@ export default function AdminRecordingsPage() {
         {(status) => <StatusPanel status={status} />}
       </QueryBoundary>
 
-      <Tabs defaultValue="preview" className="mt-5">
+      <Tabs defaultValue="log" className="mt-5">
         <TabsList>
+          <TabsTrigger value="log">Recording log</TabsTrigger>
           <TabsTrigger value="preview">Preview</TabsTrigger>
           <TabsTrigger value="last">Last sweep</TabsTrigger>
-          <TabsTrigger value="log">Filed log</TabsTrigger>
         </TabsList>
 
         <TabsContent value="preview">
@@ -342,7 +453,7 @@ export default function AdminRecordingsPage() {
               <EmptyState
                 icon={<Eye />}
                 title="Nothing previewed yet"
-                description="A preview asks Meet what it holds for every finished session and reports what the next sweep would file — without claiming, moving or sharing anything. It is the safe way to answer “is recording actually working?”."
+                description="A preview reports what the next sweep would do for every finished session — without changing anything. It is the safe way to answer “is recording actually working?”."
                 action={
                   <Button variant="primary" icon={<Eye />} onClick={() => previewQuery.refetch()}>
                     Preview the next sweep
@@ -361,7 +472,7 @@ export default function AdminRecordingsPage() {
               <EmptyState
                 icon={<Clock />}
                 title="No sweep has run yet"
-                description="The scheduler reports its result here after its first pass, or immediately after you use “Collect now”."
+                description="The scheduler reports its result here after its first pass, or immediately after you use “Check now”."
               />
             )}
           </Card>
@@ -381,67 +492,15 @@ export default function AdminRecordingsPage() {
             empty={
               <EmptyState
                 icon={<Video />}
-                title="Nothing filed yet"
-                description="Every recording moved into the school Drive is recorded here — which answers “where did that video go?”, and for a failure, why it did not go there."
+                title="Nothing recorded yet"
+                description="Every recording the LMS starts is listed here, from the moment the teacher joins until the video is saved to school storage — and, for a failure, why it was not."
               />
             }
           >
             {(entries) => (
               <div className="space-y-2">
                 {entries.map((entry) => (
-                  <div
-                    key={`${entry.meeting_id}-${entry.recording_name}`}
-                    className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-sm"
-                  >
-                    {entry.status === 'STORED' ? (
-                      <CheckCircle2 className="size-4 shrink-0 text-success" />
-                    ) : entry.status === 'FAILED' ? (
-                      <XCircle className="size-4 shrink-0 text-danger" />
-                    ) : (
-                      // Claimed but never finished: the sweep took the video and
-                      // stopped before filing it, which is worth spotting.
-                      <Hourglass className="size-4 shrink-0 text-warning" />
-                    )}
-                    <span className="font-medium">Meeting #{entry.meeting_id}</span>
-                    <Badge tone={LOG_TONE[entry.status] ?? 'neutral'} size="sm">
-                      {entry.status}
-                    </Badge>
-                    {entry.mode && (
-                      <Badge tone="outline" size="sm">
-                        {entry.mode}
-                      </Badge>
-                    )}
-                    {typeof entry.shared_with === 'number' && entry.shared_with > 0 && (
-                      <span className="text-xs text-muted-foreground">
-                        shared with {entry.shared_with}
-                      </span>
-                    )}
-                    {(entry.error || entry.warning) && (
-                      <span
-                        className={cn(
-                          'min-w-0 flex-1 truncate text-xs',
-                          entry.error ? 'text-danger' : 'text-warning',
-                        )}
-                        title={entry.error ?? entry.warning ?? undefined}
-                      >
-                        {entry.error ?? entry.warning}
-                      </span>
-                    )}
-                    {entry.web_view_link && (
-                      <a
-                        href={entry.web_view_link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                      >
-                        Open in Drive
-                        <ExternalLink className="size-3" />
-                      </a>
-                    )}
-                    <span className="ml-auto text-xs text-muted-foreground">
-                      {formatRelative(entry.claimed_at)}
-                    </span>
-                  </div>
+                  <LogRow key={entry.recording_id ?? entry.recording_name} entry={entry} />
                 ))}
               </div>
             )}

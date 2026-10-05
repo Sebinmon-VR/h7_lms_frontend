@@ -39,9 +39,11 @@ import {
 import { ROLE_LABEL } from '@/lib/constants'
 import { cn } from '@/lib/cn'
 import { ARRIVAL_TONE, arrivalText, formatMinutes } from '@/components/domain/class-room'
-import { formatDateTime, formatRelative, formatTime, parseApiDateTime } from '@/lib/datetime'
+import { formatDateTime, formatRelative, parseApiDateTime } from '@/lib/datetime'
+import { formatSchoolTime } from '@/lib/school-time'
 import { countLabel } from '@/lib/format'
 import { useCopyToClipboard } from '@/lib/hooks'
+import { shareableLink } from '@/lib/meeting-links'
 import { subjectName } from '@/lib/select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -63,17 +65,15 @@ import { PageHeader } from '@/components/layout/page-header'
 /**
  * The office's live board: every class room right now.
  *
- * What it can and cannot show is worth being clear about. Google Meet refuses
- * to be embedded in another page and offers no video feed, so there is no
- * picture of the class here — the "Preview window" button opens the Meet
- * itself in a compact pop-out beside this page, which is the closest thing.
+ * Classes happen inside the LMS (Azure Communication Services). The board
+ * shows no video itself — the "Preview window" button opens the class room
+ * in a compact pop-out beside this page.
  *
- * Two records of who was in. The LMS's own log: a join it handed a link for,
- * a leave the person pressed, a period a teacher opened — "in now" on a card
- * is whoever's last word today was a join. And Google Meet's: every
- * participant of every call in the room with their true join and leave
- * times, copied every few minutes once the school has authorised the Meet
- * read scope. The activity drawer shows both.
+ * Two views of who was in, both from the LMS. The room log: a join, a leave,
+ * a period a teacher opened — "in now" on a card is whoever's last word today
+ * was a join. And attendance: each person's join and leave times, built from
+ * the join/leave log the in-LMS call writes on connect and hang-up. The
+ * activity drawer shows both.
  */
 
 type Filter = 'LIVE' | 'TODAY' | 'ALL'
@@ -123,12 +123,11 @@ function periodTeacher(period: ScheduledPeriod): string {
 }
 
 /**
- * Opens the Meet in a compact pop-out window.
+ * Opens the class room in a compact pop-out window.
  *
  * The window is opened synchronously on the click — a window opened after an
  * await is what popup blockers exist to stop — and pointed at the link once
- * the join call has recorded it. Meet loads in a top-level window; it is
- * only an iframe it refuses.
+ * the join call has recorded it.
  */
 function usePreviewWindow() {
   const join = useJoinClassRoom()
@@ -141,7 +140,7 @@ function usePreviewWindow() {
     join.mutate(row.class_id, {
       onSuccess: (result) => {
         if (result.room_link) {
-          if (handle) handle.location.href = result.room_link
+          if (handle) handle.location.href = shareableLink(result.room_link)
           else window.open(result.room_link, '_blank', 'noopener')
         } else {
           handle?.close()
@@ -231,7 +230,7 @@ function LiveClassCard({
               <p className="text-xs uppercase tracking-wider text-white/50">Now teaching</p>
               <p className="mt-0.5 truncate text-xl font-bold">{subjectName(current.entry)}</p>
               <p className="truncate text-sm text-white/70">
-                {periodTeacher(current)} · ends {formatTime(current.ends_at)} ·{' '}
+                {periodTeacher(current)} · ends {formatSchoolTime(current.ends_at)} ·{' '}
                 {minutesLeft(current, now)} min left
               </p>
             </>
@@ -253,7 +252,7 @@ function LiveClassCard({
               <p className="text-xs uppercase tracking-wider text-white/50">Up next</p>
               <p className="mt-0.5 truncate text-xl font-bold">{subjectName(row.next_period.entry)}</p>
               <p className="truncate text-sm text-white/70">
-                {periodTeacher(row.next_period)} · {formatTime(row.next_period.starts_at)}
+                {periodTeacher(row.next_period)} · {formatSchoolTime(row.next_period.starts_at)}
               </p>
             </>
           ) : (
@@ -295,7 +294,7 @@ function LiveClassCard({
               size="icon-sm"
               className="text-white/70 hover:bg-white/10 hover:text-white"
               aria-label="Copy the room link"
-              onClick={() => void copy(row.room_link as string)}
+              onClick={() => void copy(shareableLink(row.room_link))}
             >
               {copied ? <Check className="text-success" /> : <Copy />}
             </Button>
@@ -391,7 +390,7 @@ function LiveClassCard({
                   title={`${subjectName(period.entry)} · ${periodTeacher(period)}${arrival ? ` · ${arrival.text}` : ''}`}
                 >
                   <span className={cn(past && !isNow && 'line-through')}>
-                    {formatTime(period.starts_at)} {subjectName(period.entry)}
+                    {formatSchoolTime(period.starts_at)} {subjectName(period.entry)}
                   </span>
                   {arrival && (
                     <span className={cn('block text-[10px] leading-tight', ARRIVAL_TONE[arrival.tone])}>
@@ -412,15 +411,16 @@ function attendanceWho(entry: ClassRoomAttendanceOut): string {
   if (entry.matched_role) {
     return ROLE_LABEL[entry.matched_role as keyof typeof ROLE_LABEL] ?? entry.matched_role
   }
+  if (entry.user_kind === 'LMS') return 'signed in to the LMS'
   if (entry.user_kind === 'ANONYMOUS') return 'guest, not signed in'
   if (entry.user_kind === 'PHONE') return 'dialled in'
   return 'not matched to an account'
 }
 
 /**
- * Google Meet's own record for the room today: each participant with their
- * join and leave times. The one place the office can see who really sat
- * through the day rather than who took a link.
+ * Who was in the room today: each person with their join and leave times,
+ * built from the join/leave log the in-LMS call writes on connect and
+ * hang-up. The one place the office can see who really sat through the day.
  */
 function AttendanceList({ row }: { row: LiveClassBoardRow }) {
   const attendance = useClassRoomAttendance(row.class_id)
@@ -432,12 +432,12 @@ function AttendanceList({ row }: { row: LiveClassBoardRow }) {
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-3 rounded-xl border border-border px-4 py-3 text-sm">
         <div className="min-w-0">
-          <p className="font-medium">From Google Meet</p>
+          <p className="font-medium">From the class room</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {row.room_attendance_synced_at
-              ? `Last checked ${formatRelative(row.room_attendance_synced_at)}; refreshed every few minutes.`
-              : 'Not checked yet.'}{' '}
-            Meet names people by display name, so a row is matched to an account by name when it can be.
+              ? `Last updated ${formatRelative(row.room_attendance_synced_at)}; refreshed every few minutes.`
+              : 'Not updated yet.'}{' '}
+            Every join and hang-up in the LMS call is recorded against the person&rsquo;s account.
           </p>
         </div>
         <Button
@@ -447,13 +447,13 @@ function AttendanceList({ row }: { row: LiveClassBoardRow }) {
           onClick={() => sync.mutate({ classId: row.class_id })}
         >
           <RefreshCw />
-          Ask Meet now
+          Update now
         </Button>
       </div>
 
       {row.room_attendance_error && (
         <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-xs">
-          <p className="font-medium text-warning">Meet is not sharing attendance yet</p>
+          <p className="font-medium text-warning">Attendance could not be updated</p>
           <p className="mt-1 text-muted-foreground">{row.room_attendance_error}</p>
         </div>
       )}
@@ -469,14 +469,14 @@ function AttendanceList({ row }: { row: LiveClassBoardRow }) {
       ) : rows.length === 0 ? (
         <EmptyState
           icon={<UserCheck />}
-          title="Nobody on Meet's record yet"
-          description="Meet reports who was in a call a few minutes after they join. The LMS log shows what it handed out in the meantime."
+          title="Nobody has joined yet"
+          description="People appear here as they join the class room in the LMS."
         />
       ) : (
         <>
           <p className="text-xs text-muted-foreground">
             {countLabel(rows.length, 'participant')} today
-            {inNow > 0 ? ` · ${inNow} in the call right now` : ''}
+            {inNow > 0 ? ` · ${inNow} in the room right now` : ''}
           </p>
           <ol className="space-y-1.5">
             {rows.map((entry, index) => (
@@ -500,12 +500,12 @@ function AttendanceList({ row }: { row: LiveClassBoardRow }) {
                     <span className="text-xs text-muted-foreground"> · {attendanceWho(entry)}</span>
                   </p>
                   <p className="text-xs tabular-nums text-muted-foreground">
-                    Joined {entry.first_joined_at ? formatTime(entry.first_joined_at) : '—'}
+                    Joined {entry.first_joined_at ? formatSchoolTime(entry.first_joined_at) : '—'}
                     {' · '}
                     {entry.still_in ? (
                       <span className="font-medium text-success">still in</span>
                     ) : (
-                      `left ${entry.last_left_at ? formatTime(entry.last_left_at) : '—'}`
+                      `left ${entry.last_left_at ? formatSchoolTime(entry.last_left_at) : '—'}`
                     )}
                     {' · '}
                     {Math.round(entry.minutes)} min
@@ -539,9 +539,8 @@ function ActivitySheet({ row, onClose }: { row: LiveClassBoardRow | null; onClos
             {row?.class_name} · room activity
           </SheetTitle>
           <p className="text-sm text-muted-foreground">
-            The LMS log is what this app saw: joins it handed a link for, leaves people pressed,
-            periods opened and closed. Attendance is Google Meet's own record of who was in the
-            call, and when.
+            The room log is every event in order: joins, leaves, periods opened and closed, room
+            changes. Attendance sums it up per person — who was in the room, and when.
           </p>
         </SheetHeader>
         <SheetBody className="space-y-4">
@@ -552,8 +551,8 @@ function ActivitySheet({ row, onClose }: { row: LiveClassBoardRow | null; onClos
             onChange={setView}
             aria-label="Which record to show"
             options={[
-              { value: 'LOG', label: 'LMS log' },
-              { value: 'ATTENDANCE', label: 'Attendance (Meet)' },
+              { value: 'LOG', label: 'Room log' },
+              { value: 'ATTENDANCE', label: 'Attendance' },
             ]}
           />
 
@@ -617,7 +616,7 @@ function ActivitySheet({ row, onClose }: { row: LiveClassBoardRow | null; onClos
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                        {todayOnly ? formatTime(event.at) : formatDateTime(event.at)}
+                        {todayOnly ? formatSchoolTime(event.at) : formatDateTime(event.at)}
                       </span>
                     </TooltipTrigger>
                     <TooltipContent>{formatDateTime(event.at)}</TooltipContent>
@@ -689,7 +688,7 @@ export default function AdminLiveClassesPage() {
           </Badge>
           {refreshedAt && (
             <span className="text-xs text-muted-foreground">
-              as of {formatTime(refreshedAt)}
+              as of {formatSchoolTime(refreshedAt)}
             </span>
           )}
         </div>
@@ -763,10 +762,9 @@ export default function AdminLiveClassesPage() {
 
       <div className="mt-6 rounded-xl border border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
         <ExternalLink className="mr-1.5 inline size-3.5" />
-        Google Meet cannot be shown inside this page; the preview window is the live Meet
-        itself, opened beside it. "In now" counts are the LMS's own record — a join it handed
-        out, a leave the person pressed. Meet's true join and leave times for everyone in a
-        room are under Activity → Attendance.
+        Classes happen inside the LMS; the preview window opens the class room beside this page.
+        "In now" counts come from the room log — every join and hang-up in the call. Each
+        person&rsquo;s join and leave times are under Activity → Attendance.
       </div>
 
       <ActivitySheet row={activityRow} onClose={() => setActivityFor(null)} />

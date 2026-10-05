@@ -40,7 +40,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { TimetableWeek } from '@/components/domain/timetable'
+import { ClockNote, TimetableWeek } from '@/components/domain/timetable'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field, FormError } from '@/components/forms/field'
@@ -630,6 +630,8 @@ export default function AdminTimetablePage() {
           </Button>
         </div>
       </PageHeader>
+
+      <ClockNote scope="admin" className="mb-4" />
 
       <QueryBoundary query={timetableQuery} loading={<Skeleton className="h-96 rounded-xl" />}>
         {() => (

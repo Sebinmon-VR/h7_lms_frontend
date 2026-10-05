@@ -16,6 +16,7 @@ export const RECORDING_LABEL: Record<RecordingStatus, string> = {
   NOT_REQUESTED: 'Not recorded',
   ARMED: 'Will record',
   ARM_FAILED: 'Recording not armed',
+  RECORDING: 'Recording now',
   WAITING: 'Processing',
   STORED: 'Recording ready',
   UNAVAILABLE: 'Never recorded',
@@ -33,17 +34,18 @@ export function recordingLabel(status: string | null | undefined): string {
  */
 const RECORDING_HINT: Record<RecordingStatus, string> = {
   NOT_REQUESTED:
-    'This session was not set to record itself. A link pasted in by hand belongs to a conference the LMS cannot configure.',
+    'This session was not set to record itself. A link pasted in by hand belongs to a call the LMS cannot record.',
   ARMED:
-    'Google Meet will start recording on its own when the first person joins. Nobody has to press anything.',
+    'Recording starts on its own when the teacher joins the class in the LMS. Nobody has to press anything.',
   ARM_FAILED:
-    'Google Meet would not switch automatic recording on for this session. If someone records it by hand the video is still collected.',
+    'Automatic recording could not be switched on for this session.',
+  RECORDING: 'The class is being recorded right now.',
   WAITING:
-    'The class is over and Google Meet has not published the video yet. This usually takes a few minutes.',
-  STORED: 'The video is filed in the school Drive and the class can watch it back.',
+    'Recording has stopped and the video is being prepared. This usually takes a few minutes.',
+  STORED: 'The video is saved to school storage and the class can watch it back.',
   UNAVAILABLE:
-    'No recording was ever published — the session was most likely never joined, or never recorded.',
-  FAILED: 'A recording exists but it could not be filed into the school Drive.',
+    'Nothing was recorded — the teacher never joined this class through the LMS.',
+  FAILED: 'A recording exists but it could not be saved to school storage.',
 }
 
 /** Why a session is in the recording state it is in, in one sentence. */
@@ -57,21 +59,22 @@ export function recordingHint(meeting: LiveMeetingOut): string {
 /** Still moving — worth showing a "coming" state rather than a gap. */
 export function recordingIsPending(meeting: LiveMeetingOut): boolean {
   const status = meeting.recording_status
-  return status === 'ARMED' || status === 'ARM_FAILED' || status === 'WAITING'
+  return (
+    status === 'ARMED' || status === 'ARM_FAILED' || status === 'RECORDING' || status === 'WAITING'
+  )
 }
 
 /**
  * Whether "collect the recording now" can do anything for this session.
  *
- * The backend answers 400 unless a Meet conference of its own backs the
- * meeting, so this asks the two questions the client can actually answer: did
- * the LMS generate the link, and is the video not already filed. NOT_REQUESTED
- * still qualifies — a teacher who recorded by hand in a session that was not
- * armed should be able to pull that video in.
+ * The backend answers 400 unless an LMS room of its own backs the meeting,
+ * so this asks the two questions the client can actually answer: did the LMS
+ * make the room, and is the video not already filed. NOT_REQUESTED still
+ * qualifies, since the check is cheap and the server has the last word.
  */
 export function canCollectRecording(meeting: LiveMeetingOut, phase: 'live' | 'upcoming' | 'past'): boolean {
   if (phase !== 'past') return false
-  if (meeting.recording_status === 'STORED') return false
+  if (meeting.recording_status === 'STORED' || meeting.recording_status === 'RECORDING') return false
   const fromLmsConference =
     meeting.meet_status === 'CREATED' ||
     (!!meeting.recording_status && meeting.recording_status !== 'NOT_REQUESTED')
@@ -84,8 +87,8 @@ export function canCollectRecording(meeting: LiveMeetingOut, phase: 'live' | 'up
  *
  * Shared by the teacher and admin mutations so both say the same thing. The
  * server's own `recording_error` wins wherever it wrote one: it names the
- * actual cause — an unauthorised scope, a Drive that refused the move — which
- * beats anything the client could infer from a status alone.
+ * actual cause — a storage account that refused the upload, say — which beats
+ * anything the client could infer from a status alone.
  */
 export function reportRecordingOutcome(meeting: LiveMeetingOut) {
   const hint = recordingHint(meeting)
@@ -93,11 +96,14 @@ export function reportRecordingOutcome(meeting: LiveMeetingOut) {
   switch (meeting.recording_status) {
     case 'STORED':
       toast.success('Recording filed', {
-        description: 'It is in the school Drive, and the class can watch it back.',
+        description: 'It is saved to school storage, and the class can watch it back.',
       })
       return
+    case 'RECORDING':
+      toast.info('Still recording', { description: hint, duration: 8_000 })
+      return
     case 'WAITING':
-      toast.info('Not published yet', { description: hint, duration: 8_000 })
+      toast.info('Not ready yet', { description: hint, duration: 8_000 })
       return
     case 'UNAVAILABLE':
       toast.warning('No recording for this session', { description: hint, duration: 8_000 })

@@ -335,7 +335,7 @@ function SettingsForm({ program }: { program: Program }) {
                   <div className="mt-4 space-y-3">
                     <label className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
                       <span className="text-sm">
-                        Create a Google Meet for each class
+                        Create a class room in the LMS for each class
                         <span className="block text-xs text-muted-foreground">
                           Slots with a standing link of their own are unaffected.
                         </span>

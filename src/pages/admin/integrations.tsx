@@ -1,6 +1,5 @@
 import {
   AlertTriangle,
-  CalendarClock,
   CheckCircle2,
   CloudUpload,
   Disc,
@@ -25,13 +24,15 @@ import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { PageHeader } from '@/components/layout/page-header'
 
 /**
- * Diagnostics for the Google integrations.
+ * Diagnostics for the Azure services the backend runs on: storage (Azure Blob
+ * Storage), live classes (Azure Communication Services), class recording and
+ * email.
  *
- * The page shows the backend's own `detail` string verbatim rather than
- * paraphrasing it. That string names the exact misconfiguration — a missing
- * credentials file, an unauthorised delegation, a Drive the service account
- * cannot see — and any wording we substituted would be strictly less useful to
- * whoever has to go and fix it.
+ * The page shows the backend's own `detail` and `problems` strings verbatim
+ * rather than paraphrasing them. They name the exact misconfiguration — a
+ * missing connection string, a container that does not exist, a webhook key
+ * that was never set — and any wording we substituted would be strictly less
+ * useful to whoever has to go and fix it.
  */
 
 function StatusIcon({ ok }: { ok: boolean }) {
@@ -78,6 +79,7 @@ function IntegrationCard({
   actions?: React.ReactNode
 }) {
   const problems = probe.problems ?? []
+  const ok = probe.ok ?? problems.length === 0
 
   return (
     <Card className="flex flex-col p-5">
@@ -89,9 +91,9 @@ function IntegrationCard({
           <div>
             <p className="text-sm font-semibold">{title}</p>
             <div className="mt-0.5 flex items-center gap-1.5">
-              <StatusIcon ok={probe.ok} />
-              <span className={cn('text-xs font-medium', probe.ok ? 'text-success' : 'text-danger')}>
-                {probe.ok ? 'Healthy' : 'Not working'}
+              <StatusIcon ok={ok} />
+              <span className={cn('text-xs font-medium', ok ? 'text-success' : 'text-danger')}>
+                {ok ? 'Healthy' : 'Not working'}
               </span>
               {!probed && (
                 <span className="text-xs text-muted-foreground">— from settings, not tested</span>
@@ -106,7 +108,7 @@ function IntegrationCard({
         <p
           className={cn(
             'mt-3 rounded-lg border px-3 py-2 text-xs leading-relaxed',
-            probe.ok
+            ok
               ? 'border-border bg-surface text-muted-foreground'
               : 'border-danger/30 bg-danger/8 text-danger',
           )}
@@ -133,34 +135,51 @@ function IntegrationCard({
   )
 }
 
-/** SMTP has no live probe, so it reports configuration only. */
+/** Email is reported from settings only — there is no live probe for it. */
 function EmailCard({ email }: { email: EmailHealth }) {
-  const ok = email.enabled && email.configured
+  const ok = email.ok ?? (email.enabled && email.configured)
+  const via =
+    email.provider === 'ACS'
+      ? 'Azure Communication Services'
+      : email.provider === 'SMTP'
+        ? 'SMTP'
+        : null
   return (
     <IntegrationCard
-      title="Email (SMTP)"
+      title="Email"
       icon={<Mail className="size-4" />}
       probed={false}
       probe={{
         ok,
         detail: email.enabled
           ? email.configured
-            ? 'Credential emails and notifications will be sent.'
-            : 'Notifications are enabled but SMTP is not fully configured, so nothing will actually send.'
+            ? `Credential emails and notifications will be sent${via ? ` through ${via}` : ''}.`
+            : 'Notifications are enabled but email is not fully configured, so nothing will actually send.'
           : 'Notifications are switched off. Generated passwords must be delivered to users by hand.',
       }}
     >
       <Detail label="Notifications" value={<Bool value={email.enabled} />} />
-      <Detail label="Credentials set" value={<Bool value={email.configured} />} />
-      <Detail label="Host" value={email.smtp_host} mono />
-      <Detail label="User" value={email.smtp_user} mono />
+      <Detail label="Configured" value={<Bool value={email.configured} />} />
+      <Detail label="Sent through" value={via} />
+      <Detail label="Sender" value={email.sender} mono />
+      <Detail label="Azure email set up" value={<Bool value={email.acs_configured} />} />
+      <Detail label="SMTP set up" value={<Bool value={email.smtp_configured} />} />
+      <Detail label="SMTP host" value={email.smtp_host} mono />
     </IntegrationCard>
   )
 }
 
+function storageProviderName(provider: string | null | undefined): string | null {
+  if (provider === 'AZURE_BLOB') return 'Azure Blob Storage'
+  if (provider === 'LOCAL') return 'Server disk'
+  return provider ?? null
+}
+
 function IntegrationsGrid({ data }: { data: IntegrationsHealth }) {
   const testUpload = useStorageTestUpload()
-  const { storage, drive, google_meet: meet, meet_recording: recording, email } = data
+  const { storage, live_classes: live, recording, email } = data
+  const storageProblems = storage.problems ?? []
+  const liveProblems = [...(live?.problems ?? []), ...(live?.recording?.problems ?? [])]
 
   return (
     <>
@@ -181,9 +200,12 @@ function IntegrationsGrid({ data }: { data: IntegrationsHealth }) {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <IntegrationCard
-          title="File storage"
+          title="Storage"
           icon={<HardDrive className="size-4" />}
-          probe={storage}
+          probe={{
+            ...storage,
+            ok: storage.ok ?? storageProblems.length === 0,
+          }}
           probed={data.probed}
           actions={
             <Button
@@ -197,65 +219,74 @@ function IntegrationsGrid({ data }: { data: IntegrationsHealth }) {
             </Button>
           }
         >
-          <Detail label="Provider" value={storage.provider} />
-          <Detail label="Bucket" value={storage.bucket} mono />
+          <Detail label="Provider" value={storageProviderName(storage.provider)} />
+          <Detail label="Storage account" value={storage.account} mono />
+          <Detail label="Container" value={storage.container} mono />
           <Detail label="Local directory" value={storage.local_dir} mono />
           {storage.strict !== undefined && (
-            <Detail
-              label="Strict mode"
-              value={<Bool value={storage.strict} />}
-            />
+            <Detail label="Strict mode" value={<Bool value={storage.strict} />} />
           )}
         </IntegrationCard>
 
-        <IntegrationCard
-          title="Google Drive"
-          icon={<CloudUpload className="size-4" />}
-          probe={drive}
-          probed={data.probed}
-        >
-          <Detail label="Configured" value={<Bool value={drive.configured} />} />
-          <Detail
-            label="Destination"
-            value={drive.destination === 'SHARED_DRIVE' ? 'Shared Drive' : drive.destination === 'FOLDER' ? 'Folder' : null}
-          />
-          <Detail label="Target" value={drive.target_name} />
-          <Detail label="Shared Drive ID" value={drive.shared_drive_id} mono />
-          <Detail label="Folder ID" value={drive.folder_id} mono />
-          <Detail label="Root folder" value={drive.root_folder_name} />
-          <Detail label="Acting as" value={drive.impersonating} mono />
-          <Detail label="Link sharing" value={<Bool value={drive.link_sharing} />} />
-          <Detail label="Credentials file" value={drive.credentials_file} mono />
-        </IntegrationCard>
-
-        <IntegrationCard
-          title="Google Meet"
-          icon={<CalendarClock className="size-4" />}
-          probe={meet}
-          probed={data.probed}
-        >
-          <Detail label="Enabled" value={<Bool value={meet.enabled} />} />
-          <Detail label="Calendar" value={meet.calendar_summary ?? meet.calendar_id} mono />
-          <Detail label="Timezone" value={meet.timezone} />
-          <Detail label="Impersonation" value={<Bool value={meet.impersonation} />} />
-          <Detail label="Acting as" value={meet.acting_as} mono />
-          <Detail label="Workspace domain" value={meet.workspace_domain} mono />
-          <Detail label="Fallback identity" value={meet.impersonation_fallback} mono />
-          <Detail label="Invite attendees" value={<Bool value={meet.invite_attendees} />} />
-          <Detail label="Credentials file" value={meet.credentials_file} mono />
-        </IntegrationCard>
+        {live && (
+          <IntegrationCard
+            title="Live classes"
+            icon={<Video className="size-4" />}
+            probe={{
+              ok: live.ok ?? (live.enabled && live.configured && (live.problems ?? []).length === 0),
+              detail:
+                live.detail ??
+                (live.enabled
+                  ? live.configured
+                    ? 'Classes happen inside the LMS on Azure Communication Services.'
+                    : 'Live classes are switched on but Azure Communication Services is not configured, so no class room can be created.'
+                  : 'Live classes are switched off.'),
+              problems: liveProblems,
+            }}
+            probed={data.probed}
+          >
+            <Detail label="Service" value="Azure Communication Services" />
+            <Detail label="Enabled" value={<Bool value={live.enabled} />} />
+            <Detail label="Configured" value={<Bool value={live.configured} />} />
+            <Detail label="Endpoint" value={live.endpoint} mono />
+            <Detail
+              label="Rooms valid for"
+              value={live.room_validity_days != null ? `${live.room_validity_days} days` : null}
+            />
+            <Detail
+              label="Sign-in to a call lasts"
+              value={live.token_hours != null ? `${live.token_hours} h` : null}
+            />
+            {live.recording && (
+              <>
+                <Detail label="Recording" value={<Bool value={live.recording.enabled} />} />
+                <Detail
+                  label="Recording events key set"
+                  value={<Bool value={live.recording.events_key_set} />}
+                />
+              </>
+            )}
+          </IntegrationCard>
+        )}
 
         {/*
-          Its own card rather than a line on the Meet one: recording depends on
-          a different API and a different pair of delegation scopes, so a school
-          whose Meet links work perfectly can still be unable to record a single
-          class — and the fix is a different form in the Workspace console.
+          Recording has its own card: a class room can work perfectly while
+          recordings never arrive, because finished videos are delivered to the
+          backend by an Azure Event Grid webhook that is set up separately.
         */}
         {recording && (
           <IntegrationCard
             title="Class recording"
             icon={<Disc className="size-4" />}
-            probe={recording}
+            probe={{
+              ok: recording.ok,
+              detail:
+                recording.detail ??
+                (recording.enabled
+                  ? 'Recording starts when the teacher joins in the LMS; the video is saved to school storage once it is ready.'
+                  : 'Automatic recording is switched off.'),
+              problems: recording.problems,
+            }}
             probed={data.probed}
             actions={
               <Button asChild variant="outline" size="sm">
@@ -267,24 +298,8 @@ function IntegrationsGrid({ data }: { data: IntegrationsHealth }) {
             }
           >
             <Detail label="Enabled" value={<Bool value={recording.enabled} />} />
-            <Detail label="Acting as" value={recording.acting_as} mono />
-            <Detail label="Transfer mode" value={recording.transfer_mode} />
-            <Detail label="Destination folder" value={recording.destination_folder} />
-            <Detail label="Shared with students" value={<Bool value={recording.share_with_students} />} />
-            <Detail label="Collected after" value={`${recording.harvest_delay_minutes} min`} />
-            <Detail label="Sweep interval" value={`${recording.scan_interval_seconds}s`} />
-            <Detail label="Gives up after" value={`${recording.give_up_after_hours}h`} />
-            {/* The exact strings the domain-wide delegation form asks for. */}
-            <Detail
-              label="Required scopes"
-              value={
-                <span className="font-mono text-2xs leading-relaxed">
-                  {(recording.required_scopes ?? []).join(' ')}
-                </span>
-              }
-            />
-            <Detail label="Service account ID" value={recording.service_account?.client_id} mono />
-            <Detail label="Credentials file" value={recording.credentials_file} mono />
+            {/* Where Azure Event Grid must deliver "recording ready" events. */}
+            <Detail label="Event Grid webhook" value={recording.webhook_path} mono />
           </IntegrationCard>
         )}
 
@@ -332,7 +347,7 @@ export default function AdminIntegrationsPage() {
     <>
       <PageHeader
         title="Integrations"
-        description="Where files are stored, how meetings are created and recorded, and what is currently broken."
+        description="Where files are stored, how live classes run and are recorded, how email is sent, and what is currently broken."
         actions={
           <Button
             variant="outline"

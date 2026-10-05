@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/cn'
 import { MATERIAL_TYPE_PRESETS } from '@/lib/constants'
 import { MAX_UPLOAD_BYTES, fileNameFromUrl, formatFileSize, storageLabel } from '@/lib/files'
+import { isClassVideo } from '@/lib/materials'
 import { buildDirectory, subjectName, teacherName } from '@/lib/select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -633,38 +634,43 @@ export default function AdminMaterialsPage() {
       <ConfirmDialog
         open={!!deleting}
         onOpenChange={(v) => !v && setDeleting(null)}
-        title="Delete this material?"
+        title={deleting && isClassVideo(deleting) ? 'Remove this class video?' : 'Delete this material?'}
         description={
           deleting
-            ? `“${deleting.title}” will disappear from every student's materials list for ${subjectName(deleting)}, and from ${teacherName(deleting, userDir)}'s own materials page.`
+            ? isClassVideo(deleting)
+              ? `“${deleting.title}” will be removed from the class library for ${subjectName(deleting)}. The video itself is kept in ${teacherName(deleting, userDir)}'s Recordings, where it can be published again.`
+              : `“${deleting.title}” will disappear from every student's materials list for ${subjectName(deleting)}, and from ${teacherName(deleting, userDir)}'s own materials page.`
             : undefined
         }
-        confirmLabel="Delete material"
+        confirmLabel={deleting && isClassVideo(deleting) ? 'Remove from library' : 'Delete material'}
         destructive
         loading={deleteMaterial.isPending}
         onConfirm={() => {
           if (!deleting) return
+          const classVideo = isClassVideo(deleting)
           deleteMaterial.mutate(
-            { materialId: deleting.id, keepFile },
+            { materialId: deleting.id, keepFile: classVideo ? false : keepFile, classVideo },
             { onSettled: () => setDeleting(null) },
           )
         }}
       >
-        <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5">
-          <Checkbox
-            checked={keepFile}
-            onCheckedChange={(v) => setKeepFile(v === true)}
-            className="mt-0.5"
-          />
-          <span className="text-sm">
-            <span className="font-medium">Keep the stored file</span>
-            <span className="mt-0.5 block text-xs text-muted-foreground">
-              Removes the LMS entry but leaves the file in {storageLabel(deleting?.storage_provider)}
-              . Use this only when something outside the LMS links to it — otherwise the file becomes
-              unreachable from here.
+        {deleting && !isClassVideo(deleting) && (
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5">
+            <Checkbox
+              checked={keepFile}
+              onCheckedChange={(v) => setKeepFile(v === true)}
+              className="mt-0.5"
+            />
+            <span className="text-sm">
+              <span className="font-medium">Keep the stored file</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                Removes the LMS entry but leaves the file in {storageLabel(deleting?.storage_provider)}
+                . Use this only when something outside the LMS links to it — otherwise the file becomes
+                unreachable from here.
+              </span>
             </span>
-          </span>
-        </label>
+          </label>
+        )}
       </ConfirmDialog>
     </>
   )

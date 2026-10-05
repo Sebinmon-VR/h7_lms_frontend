@@ -61,7 +61,7 @@ export const liveClassApi = {
 
   // ------------------------------------------------------------- class rooms
   //
-  // The classroom model: ONE standing Meet room per class. A student joins it
+  // The classroom model: ONE standing room per class, inside the LMS. A student joins it
   // and stays; each subject teacher joins at their period. Sessions still
   // exist (they are the periods), but their link is the room's.
 
@@ -83,9 +83,9 @@ export const liveClassApi = {
   joinRoom: (classId: number) => post<JoinRoomOut>(`/classes/rooms/${classId}/join`),
 
   /**
-   * Records that the caller has left. The LMS cannot see a Meet tab close, so
-   * this is the person saying so; the class log gains a LEFT_ROOM line and the
-   * returned access reads `in_room: false`. The Meet call itself is untouched.
+   * Records that the caller has left; the class log gains a LEFT_ROOM line and
+   * the returned access reads `in_room: false`. The in-LMS call does this on
+   * hang-up; the Leave button says so explicitly.
    */
   leaveRoom: (classId: number) => post<ClassRoomAccessOut>(`/classes/rooms/${classId}/leave`),
 
@@ -97,7 +97,7 @@ export const liveClassApi = {
  * Extra classes — a class held outside the timetable.
  *
  * Approving and scheduling are two calls ON PURPOSE: creating the class can
- * fail on a clash or a Meet error after a human has already approved it. An
+ * fail on a clash or a room error after a human has already approved it. An
  * `APPROVED` request with no `created_meeting_id` / `created_session_id` is an
  * approval whose class has not been made yet. Show it as such and offer a
  * retry, rather than treating APPROVED as done.

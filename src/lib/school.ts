@@ -443,7 +443,7 @@ export const EXTRA_CLASS_STATUS_TONE: Record<ExtraClassStatus, Tone> = {
  * An APPROVED request whose class was never created.
  *
  * Approving and scheduling are two calls because the second can fail — a
- * clash, a Meet error — after a human has already said yes. This is the state
+ * clash, a room error — after a human has already said yes. This is the state
  * that leaves behind, and it must be visible and retryable rather than read as
  * done.
  */

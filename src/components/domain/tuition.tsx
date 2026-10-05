@@ -9,6 +9,7 @@ import type {
 } from '@/api/types'
 import { cn } from '@/lib/cn'
 import { formatDateTime, formatRelative } from '@/lib/datetime'
+import { resolveFileUrl } from '@/lib/files'
 import { formatPercent } from '@/lib/format'
 import {
   APPROVAL_TONE,
@@ -261,7 +262,7 @@ export function SessionCard({
 
       {session.recording_url && (
         <a
-          href={session.recording_url}
+          href={resolveFileUrl(session.recording_url) ?? undefined}
           target="_blank"
           rel="noreferrer"
           onClick={(event) => event.stopPropagation()}

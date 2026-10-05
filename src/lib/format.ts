@@ -77,6 +77,21 @@ export function truncate(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max - 1)}…`
 }
 
+/**
+ * A length of time in words a person would say: "42 min", "1 h 5 min", "35 s".
+ * Null or negative gives an empty string, so callers can skip the label.
+ */
+export function formatDuration(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return ''
+  const totalSeconds = Math.round(ms / 1000)
+  if (totalSeconds < 60) return `${totalSeconds} s`
+  const totalMinutes = Math.round(totalSeconds / 60)
+  if (totalMinutes < 60) return `${totalMinutes} min`
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return minutes ? `${hours} h ${minutes} min` : `${hours} h`
+}
+
 /** Title-cases an UPPER_SNAKE or lowercase token for display. */
 export function humanize(value: string): string {
   return value

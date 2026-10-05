@@ -70,7 +70,7 @@
       <section>
         <h2>What data the app holds</h2>
         <p>Depending on your role, the app may hold:</p>
-        <ul><li>Identity and contact details: full name, email address, phone and alternate phone, date of birth, gender, and a profile photograph.</li><li>Postal address: address lines, city, state, postal code and country.</li><li>Student records: admission number, roll number, admission date, blood group, and the class the student is enrolled in.</li><li>Guardian details: guardian name, phone, email and relationship to the student.</li><li>Staff records: employee ID, designation, qualification, specialisation, date of joining and years of experience.</li><li>Academic records: attendance, examination marks, syllabus topics covered, timetable periods, subject assignments and class-teacher assignments.</li><li>Content: study materials uploaded by teachers, and links to scheduled live classes.</li><li>Administrative notes recorded by the school about a user. These are internal to the school and are never shown to the person they describe.</li></ul>
+        <ul><li>Identity and contact details: full name, email address, phone and alternate phone, date of birth, gender, and a profile photograph.</li><li>Postal address: address lines, city, state, postal code and country.</li><li>Student records: admission number, roll number, admission date, blood group, and the class the student is enrolled in.</li><li>Guardian details: guardian name, phone, email and relationship to the student.</li><li>Staff records: employee ID, designation, qualification, specialisation, date of joining and years of experience.</li><li>Academic records: attendance, examination marks, syllabus topics covered, timetable periods, subject assignments and class-teacher assignments.</li><li>Content: study materials uploaded by teachers, and scheduled live classes — including, where the school has switched recording on, recordings of those classes and a log of when each person joined and left.</li><li>Administrative notes recorded by the school about a user. These are internal to the school and are never shown to the person they describe.</li></ul>
         <p>We do not collect location data, contacts, advertising identifiers or biometric data. The app contains no advertising or analytics tracking software, and we do not sell personal data or use it to build profiles.</p>
       </section>
       <section>
@@ -86,7 +86,7 @@
       <section>
         <h2>Who else processes the data</h2>
         <p>We use the following providers to run the service. They process data on our behalf under contract and may not use it for their own purposes:</p>
-        <ul><li>Google Firebase Authentication — verifies sign-in and issues session tokens.</li><li>Google Cloud Firestore — stores the school's records.</li><li>Google Cloud Storage — stores uploaded study materials.</li><li>Google Calendar and Google Meet — create and host live classes, where the school has enabled it.</li><li>Microsoft Azure — hosts the application server, in the India South Central region.</li><li>Expo — delivers app updates and, if reminders are enabled, push notifications.</li><li>An email provider — delivers credentials and reminder emails.</li></ul>
+        <ul><li>Microsoft Azure SQL Database — stores the school's records and account sign-in details.</li><li>Microsoft Azure Blob Storage — stores uploaded study materials and class recordings.</li><li>Microsoft Azure Communication Services — hosts live video classes inside the app, records them where the school has enabled it, and delivers credential and reminder emails.</li><li>Microsoft Azure App Service and Azure Static Web Apps — host the application server and website, in the India South Central region.</li><li>Expo — delivers app updates and, if reminders are enabled, push notifications.</li></ul>
         <p>Some of these providers operate infrastructure outside your country. Where personal data is transferred across a border, it is done under the provider's contractual safeguards and only to the extent needed to run the service.</p>
       </section>
       <section>
@@ -120,7 +120,7 @@
       </section>
       <section>
         <h2>Security</h2>
-        <p>Sign-in is handled by Google Firebase Authentication; the app never stores your password. Traffic between the app and the server is encrypted in transit. Access inside the app is enforced by role on the server, not merely hidden in the interface.</p>
+        <p>Passwords are never stored in readable form — only as a salted one-way hash that cannot be turned back into the password. Traffic between the app and the server is encrypted in transit. Access inside the app is enforced by role on the server, not merely hidden in the interface.</p>
         <p>No system is perfectly secure. If a breach affects your data, we will notify your school without undue delay so the school can meet its own notification duties.</p>
       </section>
       <section>

@@ -2,6 +2,7 @@ import { Clock, Info, KeyRound, LogOut, Monitor, Moon, Server, Sun } from 'lucid
 import * as React from 'react'
 import { toast } from 'sonner'
 
+import { ApiError } from '@/api/errors'
 import { useAuth } from '@/providers/auth-provider'
 import { useTheme, type ThemeMode } from '@/providers/theme-provider'
 import { formatDateTime } from '@/lib/datetime'
@@ -11,6 +12,8 @@ import { ROLE_LABEL } from '@/lib/constants'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { RoleBadge, ActiveBadge } from '@/components/domain/badges'
 import { ProfileSummary } from '@/components/domain/profile-summary'
@@ -31,30 +34,103 @@ function formatRemaining(ms: number | null): string {
   return `${minutes}m remaining`
 }
 
-export default function ProfilePage() {
-  const { user, logout, expiresInMs, usesFirebase, sendPasswordReset } = useAuth()
-  const { mode, setMode } = useTheme()
-  const [resetBusy, setResetBusy] = React.useState(false)
+/**
+ * Changing your own password. The server checks the current one, signs every
+ * other device out, and hands this one a fresh token so it stays signed in.
+ */
+function ChangePasswordCard() {
+  const { changePassword } = useAuth()
+  const [current, setCurrent] = React.useState('')
+  const [next, setNext] = React.useState('')
+  const [confirm, setConfirm] = React.useState('')
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
 
-  /**
-   * Passwords live in Firebase, not in this backend, so a reset is a Firebase
-   * email rather than an API call. Only offered when Firebase is configured.
-   */
-  const requestPasswordReset = async () => {
-    if (!user?.email) return
-    setResetBusy(true)
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setError(null)
+    if (next.length < 8) {
+      setError('Use at least 8 characters.')
+      return
+    }
+    if (next !== confirm) {
+      setError('The two new passwords do not match.')
+      return
+    }
+    setBusy(true)
     try {
-      await sendPasswordReset(user.email)
-      toast.success('Password reset email sent', {
-        description: `Check ${user.email} for a link to set a new password.`,
-        duration: 8_000,
+      await changePassword(current, next)
+      setCurrent('')
+      setNext('')
+      setConfirm('')
+      toast.success('Password changed', {
+        description: 'Any other device signed in to this account has been signed out.',
       })
-    } catch (error) {
-      toast.error((error as Error)?.message ?? 'Could not send a reset email.')
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not change the password.')
     } finally {
-      setResetBusy(false)
+      setBusy(false)
     }
   }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Password</CardTitle>
+        <CardDescription>Choose a new password for signing in.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={submit} className="space-y-3" noValidate>
+          <div className="space-y-1.5">
+            <Label htmlFor="current-password">Current password</Label>
+            <Input
+              id="current-password"
+              type="password"
+              autoComplete="current-password"
+              value={current}
+              onChange={(e) => setCurrent(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-password">New password</Label>
+            <Input
+              id="new-password"
+              type="password"
+              autoComplete="new-password"
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="confirm-password">Repeat the new password</Label>
+            <Input
+              id="confirm-password"
+              type="password"
+              autoComplete="new-password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+            />
+          </div>
+          {error && <p className="text-xs text-danger">{error}</p>}
+          <Button
+            type="submit"
+            variant="outline"
+            block
+            icon={<KeyRound />}
+            loading={busy}
+            disabled={!current || !next || !confirm}
+          >
+            Change password
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  )
+}
+
+export default function ProfilePage() {
+  const { user, logout, expiresInMs } = useAuth()
+  const { mode, setMode } = useTheme()
 
   return (
     <>
@@ -65,9 +141,7 @@ export default function ProfilePage() {
           <CardHeader>
             <CardTitle>Account</CardTitle>
             <CardDescription>
-              {usesFirebase
-                ? 'Your name, email and role are managed by an administrator. Your password is held by Firebase and you can reset it yourself.'
-                : 'Your details are managed by an administrator. Names, emails and passwords cannot be changed from here.'}
+              Your name, email and role are managed by an administrator. You can change your own password below.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -186,26 +260,16 @@ export default function ProfilePage() {
                 <span>{formatRemaining(expiresInMs)}</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                {usesFirebase
-                  ? 'Your sign-in token refreshes automatically about every hour, so you stay signed in until you sign out or an administrator deactivates the account.'
-                  : 'This server issues short-lived tokens that cannot be renewed — you will be asked to sign in again when the countdown ends.'}
+                Your session renews itself while you use the LMS, so you stay signed in until you sign out,
+                change your password, or an administrator deactivates the account.
               </p>
-              {usesFirebase && user?.email && (
-                <Button
-                  variant="outline"
-                  block
-                  icon={<KeyRound />}
-                  loading={resetBusy}
-                  onClick={requestPasswordReset}
-                >
-                  Reset password
-                </Button>
-              )}
               <Button variant="outline" block icon={<LogOut />} onClick={() => logout('manual')}>
                 Sign out
               </Button>
             </CardContent>
           </Card>
+
+          <ChangePasswordCard />
 
           <Card>
             <CardHeader>
@@ -222,9 +286,7 @@ export default function ProfilePage() {
               <div className="flex items-start gap-2">
                 <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                 <p className="text-xs text-muted-foreground">
-                  {usesFirebase
-                    ? 'Roles can only be changed by an administrator — the API has no self-service endpoint for that.'
-                    : 'Need a password reset or a role change? Contact an administrator — this server has no self-service endpoint for either.'}
+                  Roles can only be changed by an administrator — the API has no self-service endpoint for that.
                 </p>
               </div>
             </CardContent>

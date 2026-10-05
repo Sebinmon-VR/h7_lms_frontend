@@ -209,13 +209,20 @@ export interface UserOut extends UserProfileFields {
    */
   programs?: Program[]
   created_at: ApiDateTime
-  /**
-   * Links the profile to its Firebase Auth account. Null on profiles created
-   * before the Firebase migration — the backend backfills it on that user's
-   * first authenticated request.
-   */
-  firebase_uid?: string | null
   updated_at?: ApiDateTime | null
+}
+
+/**
+ * GET /auth/me: the signed-in user's own profile plus the school-wide facts
+ * needed to render it.
+ *
+ * `school_timezone` is the IANA zone the school timetable is written in.
+ * Period times are wall-clock strings in that zone, so a viewer sitting
+ * elsewhere needs it before "09:00" can be labelled or converted. Absent on
+ * a profile synthesised from the token while the server was unreachable.
+ */
+export interface MeOut extends UserOut {
+  school_timezone?: string | null
 }
 
 /**
@@ -251,7 +258,7 @@ export interface GenerateCredentialsRequest {
 }
 
 /**
- * The one and only time the generated password exists outside Firebase.
+ * The one and only time the generated password exists in readable form.
  *
  * The backend does not store it and cannot return it again, so the UI must
  * treat this response as the single opportunity to show or copy it — and must
@@ -284,8 +291,7 @@ export interface UserUpdate extends UserProfileFields {
   email?: string
   is_active?: boolean
   /**
-   * SIGNS THE USER OUT. Changing a role re-issues Firebase claims and revokes
-   * every existing token — otherwise a stale token leaves them looking at the
+   * SIGNS THE USER OUT. Changing a role revokes every existing token — otherwise a stale token leaves them looking at the
    * wrong navigation until it expires. Always confirm before sending this.
    */
   role?: UserRole
@@ -296,16 +302,16 @@ export interface UserUpdate extends UserProfileFields {
 /**
  * DELETE /admin/users/{id} — 200 with this body, NOT the 204 it used to return.
  *
- * `deleted_records` is empty for a soft delete. `firebase_auth_deleted: false`
- * on a permanent delete means an orphaned login may still exist and needs
- * clearing by hand.
+ * `deleted_records` is empty for a soft delete. `login_deleted: false` on a
+ * permanent delete means the stored password could not be removed — harmless,
+ * since the profile it belonged to is gone.
  */
 export interface UserDeleted {
   user_id: number
   email: string | null
   full_name: string | null
   mode: 'SOFT' | 'PERMANENT'
-  firebase_auth_deleted: boolean
+  login_deleted: boolean
   /** Collection label → number of records removed. */
   deleted_records: Record<string, number>
   detail: string
@@ -319,55 +325,39 @@ export interface ClassRoomOut {
   code: string
   description: string | null
   /**
-   * The class's standing live-class room — ONE Google Meet link the whole
-   * class shares, which every subject teacher joins at their period. All
-   * optional: a class whose room is not set up carries none. `room_status`
-   * is NONE, CREATED (a Meet room the LMS made), MANUAL (a pasted link) or
-   * FAILED, with `room_error` saying why.
+   * The class's standing live-class room — ONE room the whole class shares,
+   * which every subject teacher joins at their period. All optional: a class
+   * whose room is not set up carries none. `room_status` is NONE, CREATED (a
+   * room inside the LMS), MANUAL (a pasted link) or FAILED, with `room_error`
+   * saying why.
+   *
+   * For an LMS room (`room_provider: 'AZURE_ACS'`) `room_link` is a RELATIVE
+   * app path such as `/call/class/5`; a MANUAL link is a full https URL.
+   * 'GOOGLE_MEET' survives only on old records and means "no working room".
    */
   room_link?: string | null
-  room_provider?: 'GOOGLE_MEET' | 'MANUAL' | string | null
+  room_provider?: 'AZURE_ACS' | 'MANUAL' | 'GOOGLE_MEET' | string | null
   room_status?: 'NONE' | 'CREATED' | 'MANUAL' | 'FAILED' | string | null
   room_error?: string | null
-  room_owner_id?: number | null
-  room_owner_email?: string | null
   room_auto_record?: boolean | null
   room_recording_status?: RecordingStatus | string | null
-  /**
-   * Teachers on the room's Calendar guest list — the ones Meet lets in
-   * without asking. Kept in step as teachers are mapped, schedule or join.
-   */
+  room_created_at?: ApiDateTime | null
+  /** No longer populated — kept only so old payloads still type-check. */
+  room_owner_id?: number | null
+  room_owner_email?: string | null
+  room_event_id?: string | null
   room_guest_emails?: string[] | null
   room_guest_error?: string | null
-  /**
-   * Who may walk in without asking. OPEN means anyone with the link — the
-   * goal, since teachers and students sign into Google with addresses the
-   * LMS cannot invite. Null means Google has not accepted the setting yet
-   * and `room_access_error` says why (usually a missing Meet API scope).
-   */
-  room_access_type?: 'OPEN' | 'TRUSTED' | 'RESTRICTED' | string | null
+  room_access_type?: string | null
   room_access_error?: string | null
-  room_created_at?: ApiDateTime | null
-}
-
-/** Outcome of `POST /admin/meetings/repair-teacher-access`. */
-export interface TeacherAccessRepair {
-  checked: number
-  invited: number
-  already: number
-  skipped: number
-  failed: number
-  failures: { meeting_id: number | null; title?: string | null; error: string }[]
 }
 
 /** Body of `POST /admin/classes/{id}/room`. Everything optional. */
 export interface ClassRoomSetup {
-  /** Host the room on this teacher's calendar (their Drive gets the recordings). */
-  owner_id?: number | null
   auto_record?: boolean
-  /** Use a link the school already has instead of creating a Meet room. */
+  /** Use a link the school already has instead of an LMS room. */
   manual_link?: string | null
-  /** Replace an existing room; its Calendar event is deleted. */
+  /** Replace an existing room. */
   replace?: boolean
 }
 
@@ -441,7 +431,7 @@ export interface ClassTeacherMappingOut {
  * POST /admin/mappings/class-teacher.
  *
  * SIGNS THE TEACHER OUT. Assigning promotes them to `CLASS_TEACHER` and
- * re-issues their Firebase claims, which revokes every existing token so the
+ * revokes every existing token so the
  * new navigation appears immediately instead of after the old one expires.
  * Removing their last assignment demotes them back to `TEACHER` the same way.
  */
@@ -592,28 +582,30 @@ export interface LiveMeetingOut {
   teacher: UserOut | null
   title: string
   /**
-   * NULL IS EXPECTED ON A 201. Meet generation is best-effort: if delegation
-   * has not propagated, the teacher is outside the Workspace domain, or quota
-   * is exhausted, the meeting is still persisted with no link.
+   * NULL IS EXPECTED ON A 201. Room creation is best-effort: if the live-class
+   * service is not configured, the meeting is still persisted with no link.
+   *
+   * An LMS room is a RELATIVE app path (`/call/meeting/{id}`); a hand-entered
+   * link is a full https URL.
    */
   meeting_link: string | null
+  /** Relative `/files/...` path — resolve with resolveFileUrl. */
   recording_url: string | null
   scheduled_time: ApiDateTime
   /** Free-form string, not an enum. */
   status: string
   created_at: ApiDateTime
-  /** Present only when a real Google Calendar event backs this meeting. */
+  /** No longer populated — kept only so old payloads still type-check. */
   google_event_id?: string | null
   google_calendar_id?: string | null
-  /** Echoed back only on records created since the Meet integration landed. */
   duration_minutes?: number | null
   /**
-   * Outcome of Meet link generation, so a missing link is explainable rather
-   * than silent. Null on rows written before the field existed — treat that as
+   * Outcome of room creation, so a missing link is explainable rather than
+   * silent. Null on rows written before the field existed — treat that as
    * "unknown", not as a failure.
    */
   meet_status?: MeetStatus | string | null
-  /** Why generation failed. Only meaningful alongside `meet_status: 'FAILED'`. */
+  /** Why room creation failed. Only meaningful alongside `meet_status: 'FAILED'`. */
   meet_error?: string | null
 
   /**
@@ -637,21 +629,29 @@ export interface LiveMeetingOut {
    */
   recording_files?: RecordingFile[] | null
   /**
+   * Whether the teacher has published this session's recording to the class
+   * library. Students receive the recording only once it is published.
+   */
+  recording_published?: boolean
+  /**
    * True when the session uses its class's one standing room rather than a
    * link of its own (`meet_status` is then CLASS_ROOM). Editing or cancelling
    * the session leaves the room untouched.
    */
   uses_class_room?: boolean | null
-  /** OPEN means anyone with the link joins without asking; null means not yet accepted by Google. */
-  meet_access_type?: 'OPEN' | 'TRUSTED' | 'RESTRICTED' | string | null
+  /** No longer populated — kept only so old payloads still type-check. */
+  meet_access_type?: string | null
   meet_access_error?: string | null
+  meet_space_name?: string | null
+  meet_meeting_code?: string | null
+  teacher_invited?: boolean | null
 }
 
 /**
- * MANUAL — a link was supplied by hand; SKIPPED — generation was not requested;
- * CREATED — a Meet link was generated; FAILED — generation was attempted and
- * did not work, and `meet_error` says why; CLASS_ROOM — the session uses the
- * class's shared room.
+ * MANUAL — a link was supplied by hand; SKIPPED — no room was requested;
+ * CREATED — the session has its own LMS room; FAILED — creating the room was
+ * attempted and did not work, and `meet_error` says why; CLASS_ROOM — the
+ * session uses the class's shared room.
  */
 export type MeetStatus = 'CREATED' | 'FAILED' | 'MANUAL' | 'SKIPPED' | 'CLASS_ROOM'
 
@@ -659,25 +659,31 @@ export type MeetStatus = 'CREATED' | 'FAILED' | 'MANUAL' | 'SKIPPED' | 'CLASS_RO
  * Lifecycle of a session's recording.
  *
  * NOT_REQUESTED — recording was switched off, or the link was pasted in by
- * hand; ARMED — Meet will record the conference on its own; ARM_FAILED —
- * arming did not work, but the session is still swept in case the teacher
- * records it manually; WAITING — the class is over and Meet has not published
- * the file yet; STORED — the video is in the school Drive and `recording_url`
- * points at it; UNAVAILABLE — nothing was ever published and the backend has
- * stopped looking; FAILED — a recording exists but could not be filed, and
- * `recording_error` says why.
+ * hand; ARMED — recording starts when the teacher joins the class in the LMS;
+ * RECORDING — being recorded right now; WAITING — recording stopped and the
+ * file is being prepared; STORED — the video is in school storage and
+ * `recording_url` points at it; UNAVAILABLE — the teacher never joined through
+ * the LMS, so nothing was recorded; FAILED — a recording exists but could not
+ * be filed, and `recording_error` says why. ARM_FAILED is no longer produced
+ * and survives only on old records.
  */
 export type RecordingStatus =
   | 'NOT_REQUESTED'
   | 'ARMED'
   | 'ARM_FAILED'
+  | 'RECORDING'
   | 'WAITING'
   | 'STORED'
   | 'UNAVAILABLE'
   | 'FAILED'
 
-/** One filed segment of a session's recording. */
+/**
+ * One filed segment of a session's recording. `file_url` and `web_view_link`
+ * are the same RELATIVE `/files/...` path — resolve with resolveFileUrl.
+ * `drive_file_id` now holds the storage blob name.
+ */
 export interface RecordingFile {
+  file_url?: string | null
   drive_file_id: string | null
   web_view_link: string | null
   name: string | null
@@ -690,23 +696,23 @@ export interface LiveMeetingCreate {
   class_id: number
   subject_id: number
   title: string
-  /** Supplying this manually SKIPS Google Meet generation entirely. */
+  /** Supplying this manually skips the LMS room entirely. */
   meeting_link?: string | null
   recording_url?: string | null
   scheduled_time: ApiDateTime
   status: string
-  /** Create a Calendar event with an attached Meet link. Backend default: true. */
+  /** Give the session an LMS live-class room. Backend default: true. */
   auto_create_meet?: boolean
-  /** Calendar event length. Backend default: 60. */
+  /** Session length. Backend default: 60. */
   duration_minutes?: number
-  /** Add enrolled students as attendees so they get invitations. Default: true. */
+  /** No longer has any effect; kept because the backend still accepts it. */
   invite_students?: boolean
   /**
-   * Arm the generated Meet conference to record itself, and file the video into
-   * the school Drive once the class is over. Backend default: true.
+   * Record the class when the teacher joins it in the LMS, and file the video
+   * into school storage. Backend default: true.
    *
    * Ignored when `meeting_link` is supplied: a hand-entered link belongs to a
-   * conference the LMS cannot configure.
+   * call the LMS cannot record.
    */
   auto_record?: boolean
 }
@@ -714,20 +720,14 @@ export interface LiveMeetingCreate {
 /**
  * POST /admin/meetings — the same body plus attribution.
  *
- * `teacher_id` names the teacher the session is filed under AND whose calendar
- * the event is created on; omitting it schedules under the acting admin. That
- * second effect is the reason this is not merely a bookkeeping field: an admin
- * without Calendar delegation who leaves it blank gets a meeting with no link.
+ * `teacher_id` names the teacher the session is filed under; omitting it
+ * schedules under the acting admin.
  */
 export interface AdminLiveMeetingCreate extends LiveMeetingCreate {
   teacher_id?: number | null
 }
 
-/**
- * PUT /teachers/meetings/{id} — partial, ownership-scoped. Changing `title` or
- * `scheduled_time` propagates to the backing Calendar event, so invited
- * students see the change on their own calendars.
- */
+/** PUT /teachers/meetings/{id} — partial, ownership-scoped. */
 export interface LiveMeetingUpdate {
   title?: string
   meeting_link?: string
@@ -750,13 +750,13 @@ export interface StudyMaterialOut {
   title: string
   /** Free-form string, not an enum. */
   material_type: string
-  /** Absolute GCS/Drive URL or root-relative "/uploads/..." — use resolveFileUrl. */
+  /** Root-relative "/files/..." (or a legacy absolute URL) — use resolveFileUrl. */
   file_url: string
   uploaded_at: ApiDateTime
   /**
-   * Which backend stored this file. Recorded per-material so GCS-era and
-   * Drive-era uploads coexist and delete correctly. Null on rows written
-   * before the three-way storage switch landed.
+   * Which backend stored this file. Recorded per-material so files from
+   * different storage eras coexist and delete correctly. 'GCS' / 'DRIVE' mark
+   * old uploads whose files were lost with the retired Google storage.
    */
   storage_provider?: StorageProvider | string | null
   /**
@@ -765,10 +765,20 @@ export interface StudyMaterialOut {
    * Its presence means `storage_provider` is NOT what the server was asked for.
    */
   storage_warning?: string | null
+  /**
+   * Set on a published class video (`material_type` 'RECORDING'): the key of
+   * the recording it came from. Its `file_url` is then an absolute signed
+   * https URL that expires after a few hours. Deleting such a material only
+   * unpublishes it — the video stays in the teacher's Recordings.
+   */
+  recording_key?: string | null
 }
 
-/** `STORAGE_PROVIDER` switch on the backend. */
-export type StorageProvider = 'GCS' | 'DRIVE' | 'LOCAL'
+/**
+ * `STORAGE_PROVIDER` switch on the backend. 'GCS' and 'DRIVE' are legacy
+ * values that survive only on old records.
+ */
+export type StorageProvider = 'AZURE_BLOB' | 'LOCAL' | 'GCS' | 'DRIVE'
 
 /**
  * PUT /teachers/materials/{id} — metadata only, ownership-scoped. Replacing
@@ -919,7 +929,7 @@ export interface CacheHealth {
     entries: number
     hits: number
     misses: number
-    /** 0–1. Below ~0.5 under real traffic means excess Firestore round trips. */
+    /** 0–1. Below ~0.5 under real traffic means excess database round trips. */
     hit_rate: number
   }
   ttl_seconds: number
@@ -1124,25 +1134,33 @@ export interface ReminderLogEntry {
 /**
  * GET /admin/recordings/status.
  *
- * `meet_problems` is the first thing to read when a finished class has no
- * video: it names the missing piece of the Meet setup without touching the
- * network. Recording rides on its own delegation grant, so Meet links can work
- * perfectly while this is broken.
+ * `problems` is the first thing to read when a finished class has no video:
+ * it names the missing piece of the recording setup (storage, the live-class
+ * service, or the Event Grid webhook key) without touching the network.
+ * Recording starts when the teacher joins the class in the LMS; the video is
+ * filed automatically once Azure Communication Services finishes it.
  */
 export interface RecordingSchedulerStatus {
   enabled: boolean
   running: boolean
-  /** MOVE into the Shared Drive, COPY there, or LINK the teacher's original. */
-  transfer_mode: 'MOVE' | 'COPY' | 'LINK' | string
+  transfer_mode: 'AZURE_BLOB' | string
+  /** Folder (blob prefix) in school storage the videos are filed under. */
   destination_folder: string
-  share_with_students: boolean
-  /** Meet needs minutes to publish a file, so the sweep waits this long. */
-  harvest_delay_minutes: number
   scan_interval_seconds: number
   /** A session with no recording after this is marked UNAVAILABLE. */
   give_up_after_hours: number
+  /** Longest a single class is recorded for. */
+  max_recording_minutes?: number | null
+  storage_configured?: boolean
+  /** Alias of `storage_configured`, kept for older screens. */
   drive_configured: boolean
+  problems?: string[]
+  /** Alias of `problems`, kept for older screens. */
   meet_problems: string[]
+  /** Always 0 now. */
+  harvest_delay_minutes?: number
+  /** Always true now. */
+  share_with_students?: boolean
   started_at: ApiDateTime | null
   last_run_at: ApiDateTime | null
   run_count: number
@@ -1174,29 +1192,41 @@ export interface RecordingSweepDetail {
   title: string
   status: RecordingStatus | 'WOULD_STORE' | string | null
   detail: string
+  /** Relative `/files/...` path — resolve with resolveFileUrl. */
   recording_url?: string | null
   /** Segments filed for this session by this sweep. */
   transferred: number
 }
 
 /**
- * A row of GET /admin/recordings/log — one claimed (meeting, Meet recording)
- * pair. The claim is written BEFORE the transfer, so a row with no
- * `finished_at` is a move that never completed rather than one that never ran.
+ * A row of GET /admin/recordings/log — one recording the LMS started for a
+ * class room, a scheduled session or a tuition class. The row is written when
+ * recording starts, so RECORDING / STOPPED rows are ones whose video has not
+ * arrived yet.
  */
 export interface RecordingLogEntry {
-  meeting_id: number
-  /** Meet's own resource name for the recording — the deduplication key. */
+  /** The live-class service's own id for the recording — the deduplication key. */
+  recording_id?: string | null
   recording_name: string
   claimed_at: ApiDateTime
-  finished_at?: ApiDateTime | null
-  status: 'CLAIMED' | 'STORED' | 'FAILED' | string
-  mode?: string | null
-  drive_file_id?: string | null
+  /** What was recorded: a class room, a scheduled session or a tuition class. */
+  kind?: string | null
+  entity_id?: number | string | null
+  class_id?: number | null
+  meeting_id?: number | null
+  title?: string | null
+  started_by?: number | null
+  started_by_name?: string | null
+  started_at?: ApiDateTime | null
+  stopped_at?: ApiDateTime | null
+  status: 'RECORDING' | 'STOPPED' | 'FILE_READY' | 'STORED' | 'FAILED' | 'UNMATCHED' | string
+  files?: RecordingFile[] | null
+  /** Relative `/files/...` path — resolve with resolveFileUrl. */
+  file_url?: string | null
   web_view_link?: string | null
-  /** How many students were granted read access. */
-  shared_with?: number | null
-  /** Filed, but not the way that was asked for — e.g. copied instead of moved. */
+  /** The storage blob name. */
+  drive_file_id?: string | null
+  mode?: 'AZURE_BLOB' | string | null
   warning?: string | null
   error?: string | null
 }
@@ -1211,7 +1241,7 @@ export interface RecordingLogEntry {
  * generic message of its own.
  */
 export interface HealthProbe {
-  ok: boolean
+  ok?: boolean
   detail?: string | null
   /** Configuration faults found without touching the network. */
   problems?: string[] | null
@@ -1220,92 +1250,60 @@ export interface HealthProbe {
 /** GET /storage/status, and the `storage` section of the admin view. */
 export interface StorageHealth extends HealthProbe {
   provider: StorageProvider | string
-  /** Present for GCS. */
-  bucket?: string | null
-  /** Present for Drive — the nested Drive configuration is spread in. */
-  destination?: 'SHARED_DRIVE' | 'FOLDER' | null
-  target_name?: string | null
+  /** Present for Azure Blob storage. */
+  container?: string | null
+  account?: string | null
+  /** Present for local storage. */
   local_dir?: string | null
   strict?: boolean
 }
 
-export interface DriveHealth extends HealthProbe {
+/** The `live_classes` section: rooms inside the LMS on Azure Communication Services. */
+export interface LiveClassesHealth extends HealthProbe {
+  provider: 'AZURE_ACS' | string
+  enabled: boolean
   configured: boolean
-  destination: 'SHARED_DRIVE' | 'FOLDER' | null
-  shared_drive_id: string | null
-  folder_id: string | null
-  root_folder_name: string | null
-  impersonating: string | null
-  link_sharing: boolean
-  credentials_file: string | null
-  /** Set only by the live probe. */
-  target_name?: string | null
+  endpoint: string | null
+  room_validity_days: number | null
+  token_hours: number | null
+  problems: string[]
+  recording: {
+    enabled: boolean
+    events_key_set: boolean
+    problems: string[]
+  }
 }
 
-export interface MeetHealth extends HealthProbe {
+/** The `recording` section: automatic class recording into school storage. */
+export interface RecordingHealth extends HealthProbe {
   enabled: boolean
-  calendar_id: string | null
-  timezone: string | null
-  impersonation: boolean
-  workspace_domain: string | null
-  impersonation_fallback: string | null
-  invite_attendees: boolean
-  credentials_file: string | null
-  /** Set only by the live probe. */
-  acting_as?: string | null
-  calendar_summary?: string | null
+  ok: boolean
+  problems: string[]
+  /** Where Event Grid must deliver "recording ready" events. */
+  webhook_path: string
 }
 
-/**
- * The `meet_recording` section of `GET /admin/integrations`.
- *
- * Reported separately from `google_meet` because it depends on its own API and
- * its own delegation scopes: a school can create perfectly good Meet links and
- * still be unable to record a single class.
- */
-export interface MeetRecordingHealth extends HealthProbe {
-  enabled: boolean
-  transfer_mode: string
-  destination_folder: string
-  share_with_students: boolean
-  harvest_delay_minutes: number
-  scan_interval_seconds: number
-  give_up_after_hours: number
-  credentials_file: string | null
-  /** Email and numeric client ID — the value the delegation form asks for. */
-  service_account?: { client_email?: string | null; client_id?: string | null } | null
-  required_scopes: string[]
-  /** Which scope set actually authenticated, per purpose. Live probe only. */
-  granted_scopes?: Record<string, string[]> | null
-  /** Set only by the live probe. */
-  acting_as?: string | null
-}
-
-/** SMTP is reported from settings only — there is no live probe for it. */
+/** Email is reported from settings only — there is no live probe for it. */
 export interface EmailHealth {
   enabled: boolean
   configured: boolean
+  provider: 'ACS' | 'SMTP' | string | null
+  sender: string | null
+  acs_configured: boolean
+  smtp_configured: boolean
   smtp_host: string | null
-  smtp_user: string | null
+  ok?: boolean
 }
 
 export interface IntegrationsHealth {
   storage: StorageHealth
   /**
-   * Set when USE_LOCAL_STORAGE and STORAGE_PROVIDER disagree. The backend
-   * refuses to guess and reports the conflict instead of silently applying one.
+   * Set when the storage settings disagree. The backend refuses to guess and
+   * reports the conflict instead of silently applying one.
    */
   storage_config_conflict: string | null
-  drive: DriveHealth
-  google_meet: MeetHealth
-  /**
-   * Automatic class recording — its own API and its own delegation grant.
-   *
-   * Optional because a backend older than the recording feature omits the
-   * section entirely, and a diagnostics page that white-screens against a
-   * lagging deployment is worse than one that shows a card less.
-   */
-  meet_recording?: MeetRecordingHealth
+  live_classes: LiveClassesHealth
+  recording: RecordingHealth
   email: EmailHealth
   /** False when `?probe=false` asked for a settings-only view. */
   probed: boolean

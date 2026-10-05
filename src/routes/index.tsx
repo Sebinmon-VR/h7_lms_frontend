@@ -13,6 +13,10 @@ import {
 
 // Split per role so a student never downloads the admin bundle.
 const LoginPage = lazy(() => import('@/pages/auth/login'))
+const ResetPasswordPage = lazy(() => import('@/pages/auth/reset-password'))
+// The live-class call. Its own chunk, and a large one: the Azure calling UI is
+// only downloaded by somebody actually joining a class.
+const CallPage = lazy(() => import('@/pages/call/call'))
 const ProfilePage = lazy(() => import('@/pages/shared/profile'))
 const NotFoundPage = lazy(() => import('@/pages/shared/not-found'))
 
@@ -118,6 +122,7 @@ const TeacherAttendance = lazy(() => import('@/pages/teacher/attendance'))
 const TeacherTopics = lazy(() => import('@/pages/teacher/topics'))
 const TeacherMeetings = lazy(() => import('@/pages/teacher/meetings'))
 const TeacherMaterials = lazy(() => import('@/pages/teacher/materials'))
+const TeacherRecordings = lazy(() => import('@/pages/teacher/recordings'))
 const TeacherGradebook = lazy(() => import('@/pages/teacher/gradebook'))
 const TeacherInsights = lazy(() => import('@/pages/teacher/insights'))
 const TeacherTimetable = lazy(() => import('@/pages/teacher/timetable'))
@@ -181,8 +186,15 @@ export function AppRoutes() {
             administrator. The old URL redirects rather than 404s, because it
             was linked from the login screen for several releases. */}
         <Route path="/register" element={<Navigate to="/login" replace />} />
+        {/* The link in a "forgot password" email. Public, and not redirected
+            when signed in: somebody may reset a password from a shared device. */}
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
 
         <Route element={<RequireAuth />}>
+          {/* Outside the shell: a class is full-screen. The links stored on
+              class rooms, sessions and tuition classes point here, so a
+              signed-out visitor is sent to log in and brought straight back. */}
+          <Route path="/call/:kind/:entityId" element={<CallPage />} />
           <Route element={<AppShell />}>
             <Route path="/" element={<RoleHomeRedirect />} />
             <Route path="/profile" element={<ProfilePage />} />
@@ -279,6 +291,7 @@ export function AppRoutes() {
                 <Route path="/teacher/topics" element={<TeacherTopics />} />
                 <Route path="/teacher/meetings" element={<TeacherMeetings />} />
                 <Route path="/teacher/materials" element={<TeacherMaterials />} />
+                <Route path="/teacher/recordings" element={<TeacherRecordings />} />
                 <Route path="/teacher/gradebook" element={<TeacherGradebook />} />
                 <Route path="/teacher/insights" element={<TeacherInsights />} />
                 <Route path="/teacher/timetable" element={<TeacherTimetable />} />
