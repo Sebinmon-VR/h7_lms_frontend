@@ -8,6 +8,7 @@ import { ApiError } from '@/api/errors'
 import type {
   AdminLiveMeetingCreate,
   AdminStudyMaterialCreate,
+  AdminStudyMaterialLinkCreate,
   ClassRoomCreate,
   ClassRoomOut,
   ClassRoomUpdate,
@@ -1138,6 +1139,20 @@ export function useAdminUploadMaterial(onProgress?: (percent: number) => void) {
       } else {
         toast.success(`“${created.title}” uploaded`)
       }
+    },
+  })
+}
+
+export function useAdminShareLink() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: AdminStudyMaterialLinkCreate) => adminApi.shareLink(body),
+    onSuccess: (created) => {
+      qc.setQueryData<StudyMaterialOut[]>(qk.admin.materials(), (prev) =>
+        prev ? [created, ...prev] : prev,
+      )
+      invalidateMaterials(qc)
+      toast.success(`“${created.title}” shared`)
     },
   })
 }

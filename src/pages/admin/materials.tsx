@@ -1,4 +1,4 @@
-import { Grid3x3, HardDrive, LayoutList, Library, Upload, UploadCloud } from 'lucide-react'
+import { Grid3x3, HardDrive, LayoutList, Library, Link2, Upload, UploadCloud } from 'lucide-react'
 import * as React from 'react'
 import { Link } from 'react-router-dom'
 
@@ -6,6 +6,7 @@ import type { StudyMaterialOut } from '@/api/types'
 import {
   useAdminDeleteMaterial,
   useAdminMaterials,
+  useAdminShareLink,
   useAdminUpdateMaterial,
   useAdminUploadMaterial,
   useMappings,
@@ -17,12 +18,13 @@ import { cn } from '@/lib/cn'
 import { MATERIAL_TYPE_PRESETS } from '@/lib/constants'
 import { MAX_UPLOAD_BYTES, fileNameFromUrl, formatFileSize, storageLabel } from '@/lib/files'
 import { isClassVideo } from '@/lib/materials'
+import { isLinkMaterial, isWebUrl, normaliseUrl } from '@/lib/links'
 import { buildDirectory, subjectName, teacherName } from '@/lib/select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Combobox } from '@/components/ui/combobox'
-import { Input } from '@/components/ui/input'
+import { Input, Textarea } from '@/components/ui/input'
 import { ProgressBar } from '@/components/ui/progress'
 import { Segmented } from '@/components/ui/segmented'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -36,12 +38,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { FileTypeIcon } from '@/components/domain/file-type-icon'
+import { LinkSourceField } from '@/components/domain/link-preview'
 import { EmptyState } from '@/components/feedback/states'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field, FormError } from '@/components/forms/field'
 import { PageHeader } from '@/components/layout/page-header'
-import { MaterialCard } from '@/pages/teacher/materials'
+import { AUTO_TYPE, MaterialCard, type AddMode } from '@/pages/teacher/materials'
 
 /**
  * Filing the upload under the acting admin.
@@ -62,14 +65,21 @@ const SELF = '__self'
 function AdminUploadDialog({
   open,
   onOpenChange,
+  initialMode = 'file',
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
+  initialMode?: AddMode
 }) {
   const teachersQuery = useTeachingStaff()
   const mappingsQuery = useMappings()
   const [percent, setPercent] = React.useState(0)
   const uploadMaterial = useAdminUploadMaterial(setPercent)
+  const shareLink = useAdminShareLink()
+  const [mode, setMode] = React.useState<AddMode>(initialMode)
+  const [linkUrl, setLinkUrl] = React.useState('')
+  const [description, setDescription] = React.useState('')
+  const pending = uploadMaterial.isPending || shareLink.isPending
 
   const [teacherId, setTeacherId] = React.useState(SELF)
   const [classId, setClassId] = React.useState('')
@@ -87,11 +97,15 @@ function AdminUploadDialog({
     setClassId('')
     setSubjectId('')
     setTitle('')
-    setMaterialType('NOTES')
+    setMaterialType(initialMode === 'link' ? AUTO_TYPE : 'NOTES')
     setCustomType('')
     setFile(null)
     setError(null)
     setPercent(0)
+    setMode(initialMode)
+    setLinkUrl('')
+    setDescription('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   /**
@@ -129,12 +143,38 @@ function AdminUploadDialog({
     if (!title.trim()) setTitle(next.name.replace(/\.[^.]+$/, ''))
   }
 
+  const switchMode = (next: AddMode) => {
+    setMode(next)
+    setError(null)
+    if (next === 'link' && materialType === 'NOTES') setMaterialType(AUTO_TYPE)
+    if (next === 'file' && materialType === AUTO_TYPE) setMaterialType('NOTES')
+  }
+
   const resolvedType = materialType === '__custom' ? customType.trim().toUpperCase() : materialType
-  const ready = !!classId && !!subjectId && title.trim().length > 1 && !!file && !!resolvedType
+  const source = mode === 'file' ? !!file : isWebUrl(linkUrl)
+  const ready = !!classId && !!subjectId && title.trim().length > 1 && source && !!resolvedType
 
   const submit = async () => {
-    if (!ready || !file) return
+    if (!ready) return
     setError(null)
+    if (mode === 'link') {
+      try {
+        await shareLink.mutateAsync({
+          teacher_id: teacherId === SELF ? null : Number(teacherId),
+          class_id: Number(classId),
+          subject_id: Number(subjectId),
+          title: title.trim(),
+          external_url: normaliseUrl(linkUrl),
+          material_type: resolvedType === AUTO_TYPE ? null : resolvedType,
+          description: description.trim() || null,
+        })
+        onOpenChange(false)
+      } catch (err) {
+        setError((err as { message?: string })?.message ?? 'Could not share the link.')
+      }
+      return
+    }
+    if (!file) return
     try {
       await uploadMaterial.mutateAsync({
         teacher_id: teacherId === SELF ? null : Number(teacherId),
@@ -158,10 +198,10 @@ function AdminUploadDialog({
   ]
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !uploadMaterial.isPending && onOpenChange(v)}>
+    <Dialog open={open} onOpenChange={(v) => !pending && onOpenChange(v)}>
       <DialogContent size="lg">
         <DialogHeader>
-          <DialogTitle>Upload study material</DialogTitle>
+          <DialogTitle>Add to the library</DialogTitle>
           <DialogDescription>
             Shared with every student in the selected class, whoever it is filed under.
           </DialogDescription>
@@ -169,6 +209,27 @@ function AdminUploadDialog({
         <DialogBody className="space-y-5">
           <FormError message={error} />
 
+          <Segmented
+            layoutId="admin-material-add-mode"
+            value={mode}
+            onChange={switchMode}
+            aria-label="What to add"
+            options={[
+              { value: 'file', label: 'Upload a file', icon: <UploadCloud /> },
+              { value: 'link', label: 'Share a link', icon: <Link2 /> },
+            ]}
+          />
+
+          {mode === 'link' ? (
+            <LinkSourceField
+              id="admin-material-link"
+              url={linkUrl}
+              onUrlChange={setLinkUrl}
+              title={title}
+              onSuggestTitle={setTitle}
+              disabled={pending}
+            />
+          ) : (
           <div
             onDragOver={(e) => {
               e.preventDefault()
@@ -224,6 +285,7 @@ function AdminUploadDialog({
               </>
             )}
           </div>
+          )}
 
           <Field
             id="admin-material-teacher"
@@ -276,8 +338,30 @@ function AdminUploadDialog({
             />
           </Field>
 
-          <Field id="admin-material-type" label="Type" hint="Any label works; these are the common ones.">
+          <Field
+            id="admin-material-type"
+            label="Type"
+            hint={
+              mode === 'link'
+                ? 'Automatic files a YouTube video under Videos and any other page as a link.'
+                : 'Any label works; these are the common ones.'
+            }
+          >
             <div className="flex flex-wrap gap-2">
+              {mode === 'link' && (
+                <button
+                  type="button"
+                  onClick={() => setMaterialType(AUTO_TYPE)}
+                  className={cn(
+                    'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                    materialType === AUTO_TYPE
+                      ? 'border-primary bg-primary/12 text-primary'
+                      : 'border-border text-muted-foreground hover:border-primary/40',
+                  )}
+                >
+                  Automatic
+                </button>
+              )}
               {MATERIAL_TYPE_PRESETS.map((preset) => (
                 <button
                   key={preset}
@@ -316,6 +400,22 @@ function AdminUploadDialog({
             )}
           </Field>
 
+          {mode === 'link' && (
+            <Field
+              id="admin-material-description"
+              label="Note for students"
+              hint="Optional — what to watch for, or which part matters."
+            >
+              <Textarea
+                id="admin-material-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                maxLength={2000}
+                className="min-h-20"
+              />
+            </Field>
+          )}
+
           {uploadMaterial.isPending && (
             <div>
               <div className="mb-1.5 flex justify-between text-xs text-muted-foreground">
@@ -327,17 +427,17 @@ function AdminUploadDialog({
           )}
         </DialogBody>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={uploadMaterial.isPending}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
             Cancel
           </Button>
           <Button
             variant="primary"
-            icon={<Upload />}
+            icon={mode === 'link' ? <Link2 /> : <Upload />}
             disabled={!ready}
-            loading={uploadMaterial.isPending}
+            loading={pending}
             onClick={submit}
           >
-            Upload
+            {mode === 'link' ? 'Share link' : 'Upload'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -355,20 +455,33 @@ function EditMaterialDialog({
   const updateMaterial = useAdminUpdateMaterial()
   const [title, setTitle] = React.useState('')
   const [type, setType] = React.useState('')
+  const [linkUrl, setLinkUrl] = React.useState('')
+  const [description, setDescription] = React.useState('')
   const [error, setError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     if (!material) return
     setTitle(material.title)
     setType(material.material_type)
+    setLinkUrl(material.external_url ?? '')
+    setDescription(material.description ?? '')
     setError(null)
   }, [material])
 
+  const isLink = !!material && isLinkMaterial(material)
   const trimmedTitle = title.trim()
   const trimmedType = type.trim().toUpperCase()
+  const nextUrl = isLink ? normaliseUrl(linkUrl) : ''
+  const urlChanged = isLink && nextUrl !== material?.external_url
+  const descriptionChanged = isLink && description.trim() !== (material?.description ?? '')
   const dirty =
-    !!material && (trimmedTitle !== material.title || trimmedType !== material.material_type)
-  const ready = trimmedTitle.length > 1 && trimmedType.length > 0 && dirty
+    !!material &&
+    (trimmedTitle !== material.title ||
+      trimmedType !== material.material_type ||
+      urlChanged ||
+      descriptionChanged)
+  const ready =
+    trimmedTitle.length > 1 && trimmedType.length > 0 && dirty && (!isLink || isWebUrl(linkUrl))
 
   const submit = async () => {
     if (!material || !ready) return
@@ -379,6 +492,8 @@ function EditMaterialDialog({
         body: {
           ...(trimmedTitle !== material.title && { title: trimmedTitle }),
           ...(trimmedType !== material.material_type && { material_type: trimmedType }),
+          ...(urlChanged && { external_url: nextUrl }),
+          ...(descriptionChanged && { description: description.trim() }),
         },
       })
       onClose()
@@ -391,21 +506,33 @@ function EditMaterialDialog({
     <Dialog open={!!material} onOpenChange={(v) => !v && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit material</DialogTitle>
+          <DialogTitle>{isLink ? 'Edit link' : 'Edit material'}</DialogTitle>
           <DialogDescription>
-            Only the title and type can change. To replace the file itself, delete this material and
-            upload the new version.
+            {isLink
+              ? 'Change where the link points, its title, type or note.'
+              : 'Only the title and type can change. To replace the file itself, delete this material and upload the new version.'}
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="space-y-5">
           <FormError message={error} />
 
-          <div className="flex items-center gap-3 rounded-lg border border-dashed border-border px-3 py-2.5">
-            <FileTypeIcon url={material?.file_url ?? ''} />
-            <p className="min-w-0 truncate text-xs text-muted-foreground">
-              {material ? fileNameFromUrl(material.file_url) : ''}
-            </p>
-          </div>
+          {isLink ? (
+            <LinkSourceField
+              id="admin-edit-material-link"
+              url={linkUrl}
+              onUrlChange={setLinkUrl}
+              title={title}
+              onSuggestTitle={setTitle}
+              disabled={updateMaterial.isPending}
+            />
+          ) : (
+            <div className="flex items-center gap-3 rounded-lg border border-dashed border-border px-3 py-2.5">
+              <FileTypeIcon url={material?.file_url ?? ''} />
+              <p className="min-w-0 truncate text-xs text-muted-foreground">
+                {material ? fileNameFromUrl(material.file_url) : ''}
+              </p>
+            </div>
+          )}
 
           <Field id="admin-edit-material-title" label="Title" required>
             <Input
@@ -441,6 +568,18 @@ function EditMaterialDialog({
               placeholder="WORKSHEET"
             />
           </Field>
+
+          {isLink && (
+            <Field id="admin-edit-material-description" label="Note for students">
+              <Textarea
+                id="admin-edit-material-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                maxLength={2000}
+                className="min-h-20"
+              />
+            </Field>
+          )}
         </DialogBody>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={updateMaterial.isPending}>
@@ -462,6 +601,11 @@ export default function AdminMaterialsPage() {
   const deleteMaterial = useAdminDeleteMaterial()
 
   const [dialogOpen, setDialogOpen] = React.useState(false)
+  const [addMode, setAddMode] = React.useState<AddMode>('file')
+  const openAdd = (mode: AddMode) => {
+    setAddMode(mode)
+    setDialogOpen(true)
+  }
   const [editing, setEditing] = React.useState<StudyMaterialOut | null>(null)
   const [deleting, setDeleting] = React.useState<StudyMaterialOut | null>(null)
   const [keepFile, setKeepFile] = React.useState(false)
@@ -522,7 +666,10 @@ export default function AdminMaterialsPage() {
                 { value: 'list', label: 'List', icon: <LayoutList /> },
               ]}
             />
-            <Button variant="primary" icon={<Upload />} onClick={() => setDialogOpen(true)}>
+            <Button variant="outline" icon={<Link2 />} onClick={() => openAdd('link')}>
+              Share link
+            </Button>
+            <Button variant="primary" icon={<Upload />} onClick={() => openAdd('file')}>
               Upload
             </Button>
           </>
@@ -598,7 +745,7 @@ export default function AdminMaterialsPage() {
             title="No materials yet"
             description="Nobody has uploaded anything. You can upload on a teacher's behalf to get started."
             action={
-              <Button variant="primary" icon={<Upload />} onClick={() => setDialogOpen(true)}>
+              <Button variant="primary" icon={<Upload />} onClick={() => openAdd('file')}>
                 Upload material
               </Button>
             }
@@ -628,7 +775,7 @@ export default function AdminMaterialsPage() {
         )}
       </QueryBoundary>
 
-      <AdminUploadDialog open={dialogOpen} onOpenChange={setDialogOpen} />
+      <AdminUploadDialog open={dialogOpen} onOpenChange={setDialogOpen} initialMode={addMode} />
       <EditMaterialDialog material={editing} onClose={() => setEditing(null)} />
 
       <ConfirmDialog
@@ -654,7 +801,7 @@ export default function AdminMaterialsPage() {
           )
         }}
       >
-        {deleting && !isClassVideo(deleting) && (
+        {deleting && !isClassVideo(deleting) && !isLinkMaterial(deleting) && (
           <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5">
             <Checkbox
               checked={keepFile}

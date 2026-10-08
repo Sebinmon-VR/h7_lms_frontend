@@ -772,6 +772,15 @@ export interface StudyMaterialOut {
    * unpublishes it — the video stays in the teacher's Recordings.
    */
   recording_key?: string | null
+  /**
+   * Set on a shared web link (`storage_provider` 'EXTERNAL'). `file_url`
+   * carries the same address so file-only screens still open it.
+   */
+  external_url?: string | null
+  /** 'YOUTUBE' plays in place via `youtube_id`; 'WEB' opens in a new tab. */
+  link_kind?: 'YOUTUBE' | 'WEB' | string | null
+  youtube_id?: string | null
+  description?: string | null
 }
 
 /**
@@ -787,6 +796,27 @@ export type StorageProvider = 'AZURE_BLOB' | 'LOCAL' | 'GCS' | 'DRIVE'
 export interface StudyMaterialUpdate {
   title?: string
   material_type?: string
+  description?: string
+  /** Only on a shared link; the backend re-checks it. */
+  external_url?: string
+}
+
+/**
+ * POST /teachers/materials/links — a web page or YouTube video instead of a
+ * file. `material_type` defaults to VIDEO for YouTube and LINK otherwise.
+ */
+export interface StudyMaterialLinkCreate {
+  class_id: number
+  subject_id: number
+  title: string
+  external_url: string
+  material_type?: string | null
+  description?: string | null
+}
+
+/** POST /admin/materials/links — plus attribution, like the upload. */
+export interface AdminStudyMaterialLinkCreate extends StudyMaterialLinkCreate {
+  teacher_id?: number | null
 }
 
 /** multipart/form-data; the file field is named exactly `file`. */

@@ -156,6 +156,7 @@ function buildAchievements(opts: {
 }
 
 const SHORTCUTS = [
+  { to: '/student/arena', label: 'Games', emoji: '🎮', tone: 8 },
   { to: '/student/timetable', label: 'My timetable', emoji: '🗓️', tone: 7 },
   { to: '/student/materials', label: 'Library', emoji: '📚', tone: 5 },
   { to: '/student/grades', label: 'My marks', emoji: '⭐', tone: 3 },
@@ -646,7 +647,7 @@ export default function StudentDashboardPage() {
 
       {/* -------------------------------------------------------- shortcuts */}
       <WaveDivider className="mt-7" />
-      <Stagger className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <Stagger className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {SHORTCUTS.map((item) => (
           <Appear key={item.to}>
             <Pressable style={toneStyle(item.tone)} className="sticker">

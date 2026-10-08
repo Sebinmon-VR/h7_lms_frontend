@@ -5,7 +5,8 @@
     "exclude": [
       "/assets/*",
       "/*.{css,js,map,svg,png,jpg,jpeg,ico,webp,woff,woff2}",
-      "/legal/*"
+      "/legal/*",
+      "/arena/*"
     ]
   },
   "mimeTypes": {

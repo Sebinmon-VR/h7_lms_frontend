@@ -155,6 +155,26 @@ const ReportCardDetail = lazy(() =>
   import('@/pages/exams/report-cards').then((m) => ({ default: m.ReportCardDetailPage })),
 )
 
+// The arena (quiz battles). Students play under /student/arena; teachers and
+// admins share the set-up screens, mounted under both prefixes like the exams.
+const ArenaHub = lazy(() => import('@/pages/student/arena/hub'))
+const ArenaHome = lazy(() => import('@/pages/student/arena/home'))
+const ArenaBattle = lazy(() => import('@/pages/student/arena/battle'))
+const ArenaLeaderboard = lazy(() => import('@/pages/student/arena/leaderboard'))
+const ArenaLocker = lazy(() => import('@/pages/student/arena/locker'))
+const ArenaSyllabus = lazy(() => import('@/pages/arena-manage/syllabus'))
+const ArenaStaffBoards = lazy(() => import('@/pages/arena-manage/leaderboards'))
+const ArenaGlobal = lazy(() => import('@/pages/arena-manage/global'))
+
+function arenaManageRoutes(prefix: '/admin' | '/teacher') {
+  return (
+    <>
+      <Route path={`${prefix}/arena/syllabus`} element={<ArenaSyllabus />} />
+      <Route path={`${prefix}/arena/leaderboards`} element={<ArenaStaffBoards />} />
+    </>
+  )
+}
+
 function examRoutes(prefix: '/admin' | '/teacher') {
   return (
     <>
@@ -274,6 +294,8 @@ export function AppRoutes() {
               <Route path="/admin/tuition/admissions" element={<AdminTuitionAdmissions />} />
 
               {examRoutes('/admin')}
+              {arenaManageRoutes('/admin')}
+              <Route path="/admin/arena/global" element={<ArenaGlobal />} />
             </Route>
 
             {/* Admins may open teacher pages; those views explain the scoping
@@ -301,6 +323,7 @@ export function AppRoutes() {
                     hold an extra session for. */}
                 <Route path="/teacher/leave" element={<LeavePage />} />
                 <Route path="/teacher/extra-classes" element={<ExtraClassesPage />} />
+                {arenaManageRoutes('/teacher')}
               </Route>
 
               {/* Deliberately OUTSIDE that gate. The exam engine serves both
@@ -331,6 +354,11 @@ export function AppRoutes() {
                 <Route path="/student/fees" element={<StudentFees />} />
                 <Route path="/student/fees/pay" element={<StudentPayFees />} />
                 <Route path="/student/fees/pay/:invoiceId" element={<StudentPayFees />} />
+                <Route path="/student/arena" element={<ArenaHub />} />
+                <Route path="/student/arena/quiz" element={<ArenaHome />} />
+                <Route path="/student/arena/battle/:matchId" element={<ArenaBattle />} />
+                <Route path="/student/arena/leaderboard" element={<ArenaLeaderboard />} />
+                <Route path="/student/arena/locker" element={<ArenaLocker />} />
               </Route>
 
               {/* Sitting ONE paper stays open to both products, and only this

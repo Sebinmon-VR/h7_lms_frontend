@@ -1,4 +1,5 @@
 import {
+  Backpack,
   BadgeCheck,
   BarChart3,
   Bell,
@@ -15,6 +16,7 @@ import {
   Disc,
   FileBadge,
   FileText,
+  Globe,
   GraduationCap,
   Home,
   Inbox,
@@ -23,6 +25,7 @@ import {
   LifeBuoy,
   Library,
   LineChart,
+  ListChecks,
   Link2,
   Megaphone,
   NotebookPen,
@@ -31,6 +34,8 @@ import {
   Radio,
   Receipt,
   Settings2,
+  Swords,
+  Trophy,
   ShieldCheck,
   UserRound,
   Users,
@@ -154,6 +159,29 @@ const ADMIN_NAV: NavSection[] = [
     ],
   },
   {
+    heading: 'Arena',
+    items: [
+      {
+        to: '/admin/arena/syllabus',
+        label: 'Chapters & Questions',
+        icon: ListChecks,
+        description: 'Each class and subject’s chapters, and the quiz questions students battle on',
+      },
+      {
+        to: '/admin/arena/global',
+        label: 'Global Challenges',
+        icon: Globe,
+        description: 'The school-wide question pool and the challenges built on it',
+      },
+      {
+        to: '/admin/arena/leaderboards',
+        label: 'Arena Leaderboards',
+        icon: Trophy,
+        description: 'Class and global standings',
+      },
+    ],
+  },
+  {
     heading: 'Money',
     items: [
       {
@@ -263,6 +291,23 @@ const TEACHER_NAV: NavSection[] = [
     ],
   },
   {
+    heading: 'Arena',
+    items: [
+      {
+        to: '/teacher/arena/syllabus',
+        label: 'Chapters & Questions',
+        icon: ListChecks,
+        description: 'Chapters for your subjects, and the quiz questions students battle on',
+      },
+      {
+        to: '/teacher/arena/leaderboards',
+        label: 'Arena Leaderboards',
+        icon: Trophy,
+        description: 'How your classes are doing in the arena',
+      },
+    ],
+  },
+  {
     heading: 'Your time',
     items: [
       {
@@ -318,6 +363,14 @@ const STUDENT_NAV: NavSection[] = [
         icon: NotebookPen,
         description: 'Work you have been set, and handing it in',
       },
+    ],
+  },
+  {
+    heading: 'Play',
+    items: [
+      { to: '/student/arena', label: 'Games', icon: Swords, description: 'Quiz Battle and more games to learn by playing' },
+      { to: '/student/arena/leaderboard', label: 'Leaderboard', icon: Trophy, description: 'Your class and the whole school' },
+      { to: '/student/arena/locker', label: 'Locker & Badges', icon: Backpack, description: 'Unlock items and see your badges' },
     ],
   },
   {

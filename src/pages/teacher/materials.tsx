@@ -5,6 +5,7 @@ import {
   Info,
   LayoutList,
   Library,
+  Link2,
   MoreHorizontal,
   Pencil,
   Trash2,
@@ -18,6 +19,7 @@ import type { StudyMaterialOut } from '@/api/types'
 import {
   useDeleteMaterial,
   useMyClasses,
+  useShareLink,
   useTeacherMaterials,
   useUpdateMaterial,
   useUploadMaterial,
@@ -25,6 +27,7 @@ import {
 import { cn } from '@/lib/cn'
 import { MATERIAL_TYPE_PRESETS } from '@/lib/constants'
 import { isClassVideo } from '@/lib/materials'
+import { isLinkMaterial, isWebUrl, linkHost, materialYoutubeId, normaliseUrl } from '@/lib/links'
 import { formatDateTime, formatRelative } from '@/lib/datetime'
 import {
   MAX_UPLOAD_BYTES,
@@ -38,7 +41,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Combobox } from '@/components/ui/combobox'
-import { Input } from '@/components/ui/input'
+import { Input, Textarea } from '@/components/ui/input'
 import { ProgressBar } from '@/components/ui/progress'
 import { Segmented } from '@/components/ui/segmented'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -61,6 +64,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { FreeformBadge } from '@/components/domain/badges'
 import { FileTypeIcon } from '@/components/domain/file-type-icon'
+import { LinkSourceField, LinkTypeIcon, YouTubePreview } from '@/components/domain/link-preview'
 import { FiledBy } from '@/components/domain/filed-by'
 import { EmptyState } from '@/components/feedback/states'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
@@ -70,19 +74,31 @@ import { PageHeader } from '@/components/layout/page-header'
 import { useClassSubjectSelection } from './class-subject-picker'
 import { AdminTeacherNotice, useIsAdminViewingTeacher } from './teacher-guard'
 
+/** In link mode: let the server pick VIDEO for YouTube and LINK otherwise. */
+export const AUTO_TYPE = '__auto'
+
+export type AddMode = 'file' | 'link'
+
 function UploadDialog({
   open,
   onOpenChange,
   existing,
+  initialMode = 'file',
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   existing: StudyMaterialOut[]
+  initialMode?: AddMode
 }) {
   const mappingsQuery = useMyClasses()
   const selection = useClassSubjectSelection(mappingsQuery.data)
   const [percent, setPercent] = React.useState(0)
   const uploadMaterial = useUploadMaterial(setPercent)
+  const shareLink = useShareLink()
+  const [mode, setMode] = React.useState<AddMode>(initialMode)
+  const [linkUrl, setLinkUrl] = React.useState('')
+  const [description, setDescription] = React.useState('')
+  const pending = uploadMaterial.isPending || shareLink.isPending
 
   const [classId, setClassId] = React.useState<string>('')
   const [subjectId, setSubjectId] = React.useState<string>('')
@@ -98,11 +114,14 @@ function UploadDialog({
       setClassId(selection.classId ? String(selection.classId) : '')
       setSubjectId(selection.subjectId ? String(selection.subjectId) : '')
       setTitle('')
-      setMaterialType('NOTES')
+      setMaterialType(initialMode === 'link' ? AUTO_TYPE : 'NOTES')
       setCustomType('')
       setFile(null)
       setError(null)
       setPercent(0)
+      setMode(initialMode)
+      setLinkUrl('')
+      setDescription('')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
@@ -140,12 +159,37 @@ function UploadDialog({
     if (!title.trim()) setTitle(next.name.replace(/\.[^.]+$/, ''))
   }
 
+  const switchMode = (next: AddMode) => {
+    setMode(next)
+    setError(null)
+    if (next === 'link' && materialType === 'NOTES') setMaterialType(AUTO_TYPE)
+    if (next === 'file' && materialType === AUTO_TYPE) setMaterialType('NOTES')
+  }
+
   const resolvedType = materialType === '__custom' ? customType.trim().toUpperCase() : materialType
-  const ready = !!classId && !!subjectId && title.trim().length > 1 && !!file && !!resolvedType
+  const source = mode === 'file' ? !!file : isWebUrl(linkUrl)
+  const ready = !!classId && !!subjectId && title.trim().length > 1 && source && !!resolvedType
 
   const submit = async () => {
-    if (!ready || !file) return
+    if (!ready) return
     setError(null)
+    if (mode === 'link') {
+      try {
+        await shareLink.mutateAsync({
+          class_id: Number(classId),
+          subject_id: Number(subjectId),
+          title: title.trim(),
+          external_url: normaliseUrl(linkUrl),
+          material_type: resolvedType === AUTO_TYPE ? null : resolvedType,
+          description: description.trim() || null,
+        })
+        onOpenChange(false)
+      } catch (err) {
+        setError((err as { message?: string })?.message ?? 'Could not share the link.')
+      }
+      return
+    }
+    if (!file) return
     try {
       await uploadMaterial.mutateAsync({
         class_id: Number(classId),
@@ -161,10 +205,10 @@ function UploadDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !uploadMaterial.isPending && onOpenChange(v)}>
+    <Dialog open={open} onOpenChange={(v) => !pending && onOpenChange(v)}>
       <DialogContent size="lg">
         <DialogHeader>
-          <DialogTitle>Upload study material</DialogTitle>
+          <DialogTitle>Add to the library</DialogTitle>
           <DialogDescription>Shared with every student in the selected class.</DialogDescription>
         </DialogHeader>
         <DialogBody className="space-y-5">
@@ -172,7 +216,27 @@ function UploadDialog({
             <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger">{error}</p>
           )}
 
-          {/* ------------------------------------------------- dropzone */}
+          <Segmented
+            layoutId="material-add-mode"
+            value={mode}
+            onChange={switchMode}
+            aria-label="What to add"
+            options={[
+              { value: 'file', label: 'Upload a file', icon: <UploadCloud /> },
+              { value: 'link', label: 'Share a link', icon: <Link2 /> },
+            ]}
+          />
+
+          {mode === 'link' ? (
+            <LinkSourceField
+              id="material-link"
+              url={linkUrl}
+              onUrlChange={setLinkUrl}
+              title={title}
+              onSuggestTitle={setTitle}
+              disabled={pending}
+            />
+          ) : (
           <div
             onDragOver={(e) => {
               e.preventDefault()
@@ -221,8 +285,9 @@ function UploadDialog({
               </>
             )}
           </div>
+          )}
 
-          {duplicateName && (
+          {mode === 'file' && duplicateName && (
             <div className="flex items-start gap-2.5 rounded-lg border border-border bg-surface px-3 py-2.5 text-xs">
               <Info className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
               <span className="text-muted-foreground">
@@ -266,8 +331,30 @@ function UploadDialog({
             />
           </Field>
 
-          <Field id="material-type" label="Type" hint="Any label works; these are the common ones.">
+          <Field
+            id="material-type"
+            label="Type"
+            hint={
+              mode === 'link'
+                ? 'Automatic files a YouTube video under Videos and any other page as a link.'
+                : 'Any label works; these are the common ones.'
+            }
+          >
             <div className="flex flex-wrap gap-2">
+              {mode === 'link' && (
+                <button
+                  type="button"
+                  onClick={() => setMaterialType(AUTO_TYPE)}
+                  className={cn(
+                    'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                    materialType === AUTO_TYPE
+                      ? 'border-primary bg-primary/12 text-primary'
+                      : 'border-border text-muted-foreground hover:border-primary/40',
+                  )}
+                >
+                  Automatic
+                </button>
+              )}
               {MATERIAL_TYPE_PRESETS.map((preset) => (
                 <button
                   key={preset}
@@ -306,6 +393,23 @@ function UploadDialog({
             )}
           </Field>
 
+          {mode === 'link' && (
+            <Field
+              id="material-description"
+              label="Note for students"
+              hint="Optional — what to watch for, or which part matters."
+            >
+              <Textarea
+                id="material-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                maxLength={2000}
+                placeholder="Watch up to 6:30, then try the questions in your notebook."
+                className="min-h-20"
+              />
+            </Field>
+          )}
+
           {uploadMaterial.isPending && (
             <div>
               <div className="mb-1.5 flex justify-between text-xs text-muted-foreground">
@@ -317,11 +421,17 @@ function UploadDialog({
           )}
         </DialogBody>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={uploadMaterial.isPending}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
             Cancel
           </Button>
-          <Button variant="primary" icon={<Upload />} disabled={!ready} loading={uploadMaterial.isPending} onClick={submit}>
-            Upload
+          <Button
+            variant="primary"
+            icon={mode === 'link' ? <Link2 /> : <Upload />}
+            disabled={!ready}
+            loading={pending}
+            onClick={submit}
+          >
+            {mode === 'link' ? 'Share link' : 'Upload'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -343,14 +453,17 @@ export function MaterialCard({
   onEdit?: (material: StudyMaterialOut) => void
   onDelete?: (material: StudyMaterialOut) => void
 }) {
-  const url = resolveFileUrl(material.file_url)
+  const isLink = isLinkMaterial(material)
+  const youtubeId = materialYoutubeId(material)
+  const url = isLink ? material.external_url! : resolveFileUrl(material.file_url)
   const provider = material.storage_provider
   const showActions = !!onEdit || !!onDelete
 
   return (
     <Card className="flex flex-col p-4">
+      {youtubeId && <YouTubePreview videoId={youtubeId} title={material.title} className="mb-3" />}
       <div className="flex items-start gap-3">
-        <FileTypeIcon url={material.file_url} />
+        {isLink ? <LinkTypeIcon youtube={!!youtubeId} /> : <FileTypeIcon url={material.file_url} />}
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <p className="truncate text-sm font-medium">{material.title}</p>
@@ -375,7 +488,7 @@ export function MaterialCard({
                     {onEdit && (
                       <DropdownMenuItem onSelect={() => onEdit(material)}>
                         <Pencil />
-                        Rename or retype
+                        {isLink ? 'Edit link' : 'Rename or retype'}
                       </DropdownMenuItem>
                     )}
                     {onDelete && (
@@ -389,9 +502,16 @@ export function MaterialCard({
               )}
             </div>
           </div>
-          <p className="truncate text-xs text-muted-foreground">{fileNameFromUrl(material.file_url)}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {isLink ? linkHost(url) : fileNameFromUrl(material.file_url)}
+          </p>
         </div>
       </div>
+      {material.description && (
+        <p className="mt-2 line-clamp-3 whitespace-pre-line text-xs text-muted-foreground">
+          {material.description}
+        </p>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
         {/* A published class recording, not an upload: it is managed from
@@ -412,7 +532,7 @@ export function MaterialCard({
         </Badge>
         <FiledBy teacherId={material.teacher_id} teacher={material.teacher} />
         {meta}
-        {provider && (
+        {provider && !isLink && (
           <Tooltip>
             <TooltipTrigger asChild>
               {/* A warning means the file did NOT land where it was meant to,
@@ -467,20 +587,33 @@ function EditMaterialDialog({
   const updateMaterial = useUpdateMaterial()
   const [title, setTitle] = React.useState('')
   const [type, setType] = React.useState('')
+  const [linkUrl, setLinkUrl] = React.useState('')
+  const [description, setDescription] = React.useState('')
   const [error, setError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     if (!material) return
     setTitle(material.title)
     setType(material.material_type)
+    setLinkUrl(material.external_url ?? '')
+    setDescription(material.description ?? '')
     setError(null)
   }, [material])
 
+  const isLink = !!material && isLinkMaterial(material)
   const trimmedTitle = title.trim()
   const trimmedType = type.trim().toUpperCase()
+  const nextUrl = isLink ? normaliseUrl(linkUrl) : ''
+  const urlChanged = isLink && nextUrl !== material?.external_url
+  const descriptionChanged = isLink && description.trim() !== (material?.description ?? '')
   const dirty =
-    !!material && (trimmedTitle !== material.title || trimmedType !== material.material_type)
-  const ready = trimmedTitle.length > 1 && trimmedType.length > 0 && dirty
+    !!material &&
+    (trimmedTitle !== material.title ||
+      trimmedType !== material.material_type ||
+      urlChanged ||
+      descriptionChanged)
+  const ready =
+    trimmedTitle.length > 1 && trimmedType.length > 0 && dirty && (!isLink || isWebUrl(linkUrl))
 
   const submit = async () => {
     if (!material || !ready) return
@@ -491,6 +624,8 @@ function EditMaterialDialog({
         body: {
           ...(trimmedTitle !== material.title && { title: trimmedTitle }),
           ...(trimmedType !== material.material_type && { material_type: trimmedType }),
+          ...(urlChanged && { external_url: nextUrl }),
+          ...(descriptionChanged && { description: description.trim() }),
         },
       })
       onClose()
@@ -503,21 +638,33 @@ function EditMaterialDialog({
     <Dialog open={!!material} onOpenChange={(v) => !v && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit material</DialogTitle>
+          <DialogTitle>{isLink ? 'Edit link' : 'Edit material'}</DialogTitle>
           <DialogDescription>
-            Only the title and type can change. To replace the file itself, delete this material and
-            upload the new version.
+            {isLink
+              ? 'Change where the link points, its title, type or note.'
+              : 'Only the title and type can change. To replace the file itself, delete this material and upload the new version.'}
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="space-y-5">
           <FormError message={error} />
 
-          <div className="flex items-center gap-3 rounded-lg border border-dashed border-border px-3 py-2.5">
-            <FileTypeIcon url={material?.file_url ?? ''} />
-            <p className="min-w-0 truncate text-xs text-muted-foreground">
-              {material ? fileNameFromUrl(material.file_url) : ''}
-            </p>
-          </div>
+          {isLink ? (
+            <LinkSourceField
+              id="edit-material-link"
+              url={linkUrl}
+              onUrlChange={setLinkUrl}
+              title={title}
+              onSuggestTitle={setTitle}
+              disabled={updateMaterial.isPending}
+            />
+          ) : (
+            <div className="flex items-center gap-3 rounded-lg border border-dashed border-border px-3 py-2.5">
+              <FileTypeIcon url={material?.file_url ?? ''} />
+              <p className="min-w-0 truncate text-xs text-muted-foreground">
+                {material ? fileNameFromUrl(material.file_url) : ''}
+              </p>
+            </div>
+          )}
 
           <Field id="edit-material-title" label="Title" required>
             <Input
@@ -553,6 +700,18 @@ function EditMaterialDialog({
               placeholder="WORKSHEET"
             />
           </Field>
+
+          {isLink && (
+            <Field id="edit-material-description" label="Note for students">
+              <Textarea
+                id="edit-material-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                maxLength={2000}
+                className="min-h-20"
+              />
+            </Field>
+          )}
         </DialogBody>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={updateMaterial.isPending}>
@@ -577,6 +736,11 @@ export default function TeacherMaterialsPage() {
   const materialsQuery = useTeacherMaterials(!isAdmin)
   const deleteMaterial = useDeleteMaterial()
   const [dialogOpen, setDialogOpen] = React.useState(false)
+  const [addMode, setAddMode] = React.useState<AddMode>('file')
+  const openAdd = (mode: AddMode) => {
+    setAddMode(mode)
+    setDialogOpen(true)
+  }
   const [editing, setEditing] = React.useState<StudyMaterialOut | null>(null)
   const [deleting, setDeleting] = React.useState<StudyMaterialOut | null>(null)
   const [keepFile, setKeepFile] = React.useState(false)
@@ -619,7 +783,7 @@ export default function TeacherMaterialsPage() {
     <>
       <PageHeader
         title="Materials"
-        description="Notes, books and worksheets shared with your classes."
+        description="Notes, books, worksheets and links shared with your classes."
         actions={
           <>
             <Segmented
@@ -633,7 +797,10 @@ export default function TeacherMaterialsPage() {
                 { value: 'list', label: 'List', icon: <LayoutList /> },
               ]}
             />
-            <Button variant="primary" icon={<Upload />} onClick={() => setDialogOpen(true)}>
+            <Button variant="outline" icon={<Link2 />} onClick={() => openAdd('link')}>
+              Share link
+            </Button>
+            <Button variant="primary" icon={<Upload />} onClick={() => openAdd('file')}>
               Upload
             </Button>
           </>
@@ -686,9 +853,9 @@ export default function TeacherMaterialsPage() {
           <EmptyState
             icon={<Library />}
             title="No materials yet"
-            description="Upload notes, a book chapter or a worksheet, and every student in the class will see it."
+            description="Upload notes, a book chapter or a worksheet, or share a YouTube video, and every student in the class will see it."
             action={
-              <Button variant="primary" icon={<Upload />} onClick={() => setDialogOpen(true)}>
+              <Button variant="primary" icon={<Upload />} onClick={() => openAdd('file')}>
                 Upload material
               </Button>
             }
@@ -713,7 +880,12 @@ export default function TeacherMaterialsPage() {
         )}
       </QueryBoundary>
 
-      <UploadDialog open={dialogOpen} onOpenChange={setDialogOpen} existing={materials} />
+      <UploadDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        existing={materials}
+        initialMode={addMode}
+      />
       <EditMaterialDialog material={editing} onClose={() => setEditing(null)} />
 
       <ConfirmDialog
@@ -739,7 +911,7 @@ export default function TeacherMaterialsPage() {
           )
         }}
       >
-        {deleting && !isClassVideo(deleting) && (
+        {deleting && !isClassVideo(deleting) && !isLinkMaterial(deleting) && (
           <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5">
             <Checkbox
               checked={keepFile}

@@ -15,6 +15,7 @@ import type {
   LiveMeetingUpdate,
   PendingTopicOut,
   StudyMaterialCreate,
+  StudyMaterialLinkCreate,
   StudyMaterialOut,
   StudyMaterialUpdate,
   TeacherMappingOut,
@@ -186,6 +187,9 @@ export const teacherApi = {
       },
     })
   },
+
+  /** A web page or YouTube video; nothing is uploaded. */
+  shareLink: (body: StudyMaterialLinkCreate) => post<StudyMaterialOut>('/teachers/materials/links', body),
 
   /** Metadata only — the stored file cannot be swapped, only re-uploaded. */
   updateMaterial: (materialId: number, body: StudyMaterialUpdate) =>

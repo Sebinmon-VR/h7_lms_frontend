@@ -14,6 +14,7 @@ import type {
   LiveMeetingOut,
   LiveMeetingUpdate,
   StudyMaterialCreate,
+  StudyMaterialLinkCreate,
   StudyMaterialOut,
   StudyMaterialUpdate,
   TopicCreate,
@@ -509,6 +510,20 @@ export function useUploadMaterial(onProgress?: (percent: number) => void) {
       } else {
         toast.success(`“${created.title}” uploaded`)
       }
+    },
+  })
+}
+
+export function useShareLink() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: StudyMaterialLinkCreate) => teacherApi.shareLink(body),
+    onSuccess: (created) => {
+      qc.setQueryData<StudyMaterialOut[]>(qk.teacher.materials(), (prev) =>
+        prev ? [created, ...prev] : prev,
+      )
+      void qc.invalidateQueries({ queryKey: qk.teacher.materials() })
+      toast.success(`“${created.title}” shared`)
     },
   })
 }

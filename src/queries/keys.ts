@@ -619,6 +619,33 @@ export const qk = {
     myPrograms: () => ['support', 'my-programs'] as const,
   },
 
+  /** Quiz battles, rewards and leaderboards. */
+  arena: {
+    root: ['arena'] as const,
+    home: () => ['arena', 'home'] as const,
+    catalog: () => ['arena', 'catalog'] as const,
+    classmates: () => ['arena', 'classmates'] as const,
+    match: (matchId: number) => ['arena', 'match', matchId] as const,
+    queue: () => ['arena', 'queue'] as const,
+    leaderboardRoot: () => ['arena', 'leaderboard'] as const,
+    leaderboard: (board: string, period: string, id?: number) =>
+      ['arena', 'leaderboard', board, period, id ?? 'mine'] as const,
+    profile: (studentId: number) => ['arena', 'profile', studentId] as const,
+    challenges: () => ['arena', 'challenges'] as const,
+  },
+
+  /** Teachers and admins setting up the arena. */
+  arenaManage: {
+    root: ['arena-manage'] as const,
+    scopes: () => ['arena-manage', 'scopes'] as const,
+    classes: () => ['arena-manage', 'classes'] as const,
+    chapters: (classId: number, subjectId: number) => ['arena-manage', 'chapters', classId, subjectId] as const,
+    chaptersRoot: () => ['arena-manage', 'chapters'] as const,
+    chapterQuestions: (chapterId: number) => ['arena-manage', 'questions', 'chapter', chapterId] as const,
+    globalQuestions: () => ['arena-manage', 'questions', 'global'] as const,
+    challenges: () => ['arena-manage', 'challenges'] as const,
+  },
+
   /** Admin-only oversight reports. Expensive; see `STALE.expensive`. */
   oversight: {
     root: ['oversight'] as const,

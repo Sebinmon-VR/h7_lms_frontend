@@ -2,6 +2,7 @@ import { cleanParams, del, delWithBody, get, post, put } from './client'
 import type {
   AdminLiveMeetingCreate,
   AdminStudyMaterialCreate,
+  AdminStudyMaterialLinkCreate,
   ApiDate,
   ClassRoomCreate,
   ClassRoomEventOut,
@@ -293,6 +294,9 @@ export const adminApi = {
       },
     })
   },
+
+  /** A web page or YouTube video; nothing is uploaded. */
+  shareLink: (body: AdminStudyMaterialLinkCreate) => post<StudyMaterialOut>('/admin/materials/links', body),
 
   /** Metadata only — the stored file cannot be swapped, only re-uploaded. */
   updateMaterial: (materialId: number, body: StudyMaterialUpdate) =>

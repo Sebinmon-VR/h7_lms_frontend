@@ -1,4 +1,13 @@
-import { ArrowRight, BookOpen, ExternalLink, Film, FolderOpen, NotebookText, Search } from 'lucide-react'
+import {
+  ArrowRight,
+  BookOpen,
+  ExternalLink,
+  Film,
+  FolderOpen,
+  NotebookText,
+  Play,
+  Search,
+} from 'lucide-react'
 import * as React from 'react'
 import { useSearchParams } from 'react-router-dom'
 
@@ -11,6 +20,7 @@ import { fileNameFromUrl, resolveFileUrl } from '@/lib/files'
 import { humanize } from '@/lib/format'
 import { usePersistentState } from '@/lib/hooks'
 import { LIBRARY_SHELVES, isClassVideo, libraryShelf, type LibraryShelf } from '@/lib/materials'
+import { isLinkMaterial, linkHost, materialYoutubeId, youtubeThumbnail } from '@/lib/links'
 import { subjectName } from '@/lib/select'
 import { subjectLook, toneStyle } from '@/lib/subjects'
 import { cn } from '@/lib/cn'
@@ -20,6 +30,7 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { FileTypeIcon } from '@/components/domain/file-type-icon'
+import { LinkTypeIcon } from '@/components/domain/link-preview'
 import { VideoPlayerDialog, VideoPoster } from '@/components/domain/class-video'
 import { ErrorState } from '@/components/feedback/states'
 import { Appear, Stagger } from '@/components/fun/motion'
@@ -49,7 +60,7 @@ const SHELF_LOOK: Record<
     emoji: '🎬',
     empty: {
       title: 'No class videos yet',
-      body: 'When your teacher publishes a recording of a class, you can watch it here as many times as you like.',
+      body: 'Recordings of your classes and videos your teachers share will be here to watch as many times as you like.',
     },
   },
   notes: {
@@ -99,6 +110,7 @@ function VideoCard({
   className?: string
 }) {
   const subject = subjectName(material)
+  const youtubeId = materialYoutubeId(material)
 
   return (
     <Appear
@@ -112,7 +124,26 @@ function VideoCard({
         aria-label={`Watch ${material.title}`}
       >
         <div className="relative">
-          <VideoPoster subject={subject} caption={subject} />
+          {youtubeId ? (
+            <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black">
+              <img
+                src={youtubeThumbnail(youtubeId)}
+                alt=""
+                loading="lazy"
+                className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
+              />
+              <span className="absolute inset-0 flex items-center justify-center">
+                <span className="flex h-10 w-14 items-center justify-center rounded-xl bg-[#ff0000] text-white shadow-lg transition-transform duration-200 group-hover:scale-110">
+                  <Play className="size-5 translate-x-[1px] fill-current" />
+                </span>
+              </span>
+              <span className="absolute bottom-2 left-2 rounded-md bg-black/65 px-1.5 py-0.5 text-2xs font-semibold text-white">
+                {subject}
+              </span>
+            </div>
+          ) : (
+            <VideoPoster subject={subject} caption={subject} />
+          )}
           {isNew && (
             <Badge tone="primary" size="sm" className="absolute left-2 top-2 animate-wiggle bg-card">
               New!
@@ -143,13 +174,14 @@ function DocumentCard({
   /** The "Other" shelf mixes kinds, so there the type is worth a chip. */
   showType?: boolean
 }) {
-  const url = resolveFileUrl(material.file_url)
+  const isLink = isLinkMaterial(material)
+  const url = isLink ? material.external_url! : resolveFileUrl(material.file_url)
   const subject = subjectName(material)
 
   return (
     <Appear style={toneStyle(subjectLook(subject).tone)} className="sticker flex flex-col p-4">
       <div className="flex items-start gap-3">
-        <FileTypeIcon url={material.file_url} />
+        {isLink ? <LinkTypeIcon /> : <FileTypeIcon url={material.file_url} />}
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <p className="line-clamp-2 text-sm font-bold leading-snug">{material.title}</p>
@@ -172,8 +204,15 @@ function DocumentCard({
             {humanize(material.material_type)}
           </Badge>
         )}
-        <span className="min-w-0 truncate">{fileNameFromUrl(material.file_url)}</span>
+        <span className="min-w-0 truncate">
+          {isLink ? linkHost(url) : fileNameFromUrl(material.file_url)}
+        </span>
       </div>
+      {material.description && (
+        <p className="mt-2 line-clamp-3 whitespace-pre-line text-xs text-muted-foreground">
+          {material.description}
+        </p>
+      )}
 
       <div className="mt-auto flex items-end justify-between gap-2 pt-3">
         <div className="min-w-0 text-xs text-muted-foreground">
@@ -257,7 +296,8 @@ export default function StudentLibraryPage() {
       if (needles.length === 0) return true
       const haystack = [
         m.title,
-        fileNameFromUrl(m.file_url),
+        isLinkMaterial(m) ? linkHost(m.external_url) : fileNameFromUrl(m.file_url),
+        m.description ?? '',
         subjectName(m),
         m.material_type,
         m.teacher?.full_name ?? '',
@@ -282,6 +322,7 @@ export default function StudentLibraryPage() {
   // Follow the live copy, so a refetch (fresh signed links) reaches an open player.
   const playing = playingId != null ? (materials.find((m) => m.id === playingId) ?? null) : null
   const playingUrl = playing ? resolveFileUrl(playing.file_url) : null
+  const playingYoutubeId = playing ? materialYoutubeId(playing) : null
 
   const filtering = !!subjectFilter || search.trim().length > 0
   const clearFilters = () => {
@@ -514,12 +555,17 @@ export default function StudentLibraryPage() {
                 .join(' · ')
             : undefined
         }
-        parts={playingUrl ? [{ url: playingUrl }] : []}
+        parts={playingUrl ? [{ url: playingUrl, label: playing?.title, youtubeId: playingYoutubeId }] : []}
         allowDownload={false}
         onRefresh={() => void materialsQuery.refetch()}
         meta={
           playing && (
             <>
+              {playing.description && (
+                <p className="w-full whitespace-pre-line text-sm text-muted-foreground">
+                  {playing.description}
+                </p>
+              )}
               <Badge tone="accent" size="sm">
                 {subjectLook(subjectName(playing)).emoji} {subjectName(playing)}
               </Badge>
@@ -527,6 +573,11 @@ export default function StudentLibraryPage() {
                 <Badge tone="primary" size="sm">
                   <Film />
                   Class video
+                </Badge>
+              )}
+              {playingYoutubeId && (
+                <Badge tone="outline" size="sm">
+                  YouTube
                 </Badge>
               )}
               {playing.teacher && (

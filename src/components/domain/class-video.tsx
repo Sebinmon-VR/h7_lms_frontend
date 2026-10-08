@@ -4,6 +4,7 @@ import * as React from 'react'
 import { cn } from '@/lib/cn'
 import { subjectLook, toneStyle } from '@/lib/subjects'
 import { Button } from '@/components/ui/button'
+import { YouTubePlayer } from '@/components/domain/link-preview'
 import {
   Dialog,
   DialogBody,
@@ -117,6 +118,8 @@ export interface VideoPart {
   url: string
   /** Shown above the video when there is more than one part. */
   label?: string
+  /** A YouTube video shared into the library: played in YouTube's embed instead. */
+  youtubeId?: string | null
 }
 
 /**
@@ -137,6 +140,10 @@ function PartPlayer({
   const [failed, setFailed] = React.useState(false)
 
   React.useEffect(() => setFailed(false), [part.url])
+
+  if (part.youtubeId) {
+    return <YouTubePlayer videoId={part.youtubeId} title={part.label ?? 'Video'} autoplay />
+  }
 
   if (failed) {
     return (

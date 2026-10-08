@@ -123,6 +123,8 @@ export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 export const STORAGE_LABEL: Record<string, string> = {
   AZURE_BLOB: 'Azure Storage',
   LOCAL: 'Server disk',
+  // A shared web link: nothing is stored.
+  EXTERNAL: 'Web link',
   // Legacy values on old records; those files were lost with Google.
   GCS: 'Google (retired)',
   DRIVE: 'Google (retired)',
