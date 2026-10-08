@@ -103,15 +103,4 @@ export const GAMES: GameEntry[] = [
     players: 'Solo',
     tags: ['Data', 'AI'],
   },
-  {
-    id: 'alchemy',
-    title: 'Element Alchemy',
-    genre: 'Chemistry',
-    blurb: 'Combine elements to discover compounds and fill your discovery book.',
-    art: 'alembic',
-    sideArt: 'voltage',
-    colors: ['#ca8a04', '#854d0e'],
-    players: 'Solo',
-    tags: ['Chemistry'],
-  },
 ]
