@@ -23,7 +23,10 @@ import { useAcceptInvite, useArenaHome } from '@/queries/arena.queries'
 import { useAuth } from '@/providers/auth-provider'
 import { cn } from '@/lib/cn'
 import { AdminStudentNotice, useIsAdminViewingStudent } from '../student-guard'
-import { GAMES, type GameEntry } from './games'
+import { GAMES as ALL_GAMES, type GameEntry } from './games'
+
+/** Playable games lead the shelf; the announced ones follow, each group in catalogue order. */
+const GAMES = [...ALL_GAMES.filter((g) => g.to), ...ALL_GAMES.filter((g) => !g.to)]
 
 /**
  * The Arena's front door, full screen: the game under the pointer (or the one
