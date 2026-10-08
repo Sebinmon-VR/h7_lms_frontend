@@ -162,15 +162,18 @@ const ArenaHome = lazy(() => import('@/pages/student/arena/home'))
 const ArenaBattle = lazy(() => import('@/pages/student/arena/battle'))
 const ArenaLeaderboard = lazy(() => import('@/pages/student/arena/leaderboard'))
 const ArenaLocker = lazy(() => import('@/pages/student/arena/locker'))
+const VirtualLab = lazy(() => import('@/pages/student/lab/lab'))
 const ArenaSyllabus = lazy(() => import('@/pages/arena-manage/syllabus'))
 const ArenaStaffBoards = lazy(() => import('@/pages/arena-manage/leaderboards'))
 const ArenaGlobal = lazy(() => import('@/pages/arena-manage/global'))
+const LabExperiments = lazy(() => import('@/pages/arena-manage/lab-experiments'))
 
 function arenaManageRoutes(prefix: '/admin' | '/teacher') {
   return (
     <>
       <Route path={`${prefix}/arena/syllabus`} element={<ArenaSyllabus />} />
       <Route path={`${prefix}/arena/leaderboards`} element={<ArenaStaffBoards />} />
+      <Route path={`${prefix}/arena/lab`} element={<LabExperiments />} />
     </>
   )
 }
@@ -359,6 +362,7 @@ export function AppRoutes() {
                 <Route path="/student/arena/battle/:matchId" element={<ArenaBattle />} />
                 <Route path="/student/arena/leaderboard" element={<ArenaLeaderboard />} />
                 <Route path="/student/arena/locker" element={<ArenaLocker />} />
+                <Route path="/student/arena/lab" element={<VirtualLab />} />
               </Route>
 
               {/* Sitting ONE paper stays open to both products, and only this

@@ -634,6 +634,14 @@ export const qk = {
     challenges: () => ['arena', 'challenges'] as const,
   },
 
+  /** The virtual lab: assignments and results. */
+  lab: {
+    root: ['lab'] as const,
+    mine: () => ['lab', 'mine'] as const,
+    manage: (classId: number) => ['lab', 'manage', classId] as const,
+    results: (id: number) => ['lab', 'results', id] as const,
+  },
+
   /** Teachers and admins setting up the arena. */
   arenaManage: {
     root: ['arena-manage'] as const,

@@ -16,6 +16,7 @@ import {
   Disc,
   FileBadge,
   FileText,
+  FlaskConical,
   Globe,
   GraduationCap,
   Home,
@@ -168,6 +169,12 @@ const ADMIN_NAV: NavSection[] = [
         description: 'Each class and subject’s chapters, and the quiz questions students battle on',
       },
       {
+        to: '/admin/arena/lab',
+        label: 'Lab Experiments',
+        icon: FlaskConical,
+        description: 'Set virtual chemistry experiments for a class and see the results',
+      },
+      {
         to: '/admin/arena/global',
         label: 'Global Challenges',
         icon: Globe,
@@ -298,6 +305,12 @@ const TEACHER_NAV: NavSection[] = [
         label: 'Chapters & Questions',
         icon: ListChecks,
         description: 'Chapters for your subjects, and the quiz questions students battle on',
+      },
+      {
+        to: '/teacher/arena/lab',
+        label: 'Lab Experiments',
+        icon: FlaskConical,
+        description: 'Set virtual chemistry experiments for your classes and see the results',
       },
       {
         to: '/teacher/arena/leaderboards',
