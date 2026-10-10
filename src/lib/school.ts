@@ -64,32 +64,74 @@ export const YEAR_STATUS_HINT: Record<AcademicYearStatus, string> = {
 
 // ============================================================ admission requests
 
+/** In pipeline order, so a list sorted by it reads like the journey. */
 export const REQUEST_STATUSES: AdmissionRequestStatus[] = [
   'NEW',
   'UNDER_REVIEW',
   'WAITLISTED',
+  'DOCUMENTS_REQUESTED',
+  'DOCUMENTS_SUBMITTED',
+  'DOCUMENTS_VERIFIED',
+  'PAYMENT_REQUESTED',
+  'PAYMENT_SUBMITTED',
+  'PAYMENT_VERIFIED',
   'ADMITTED',
   'REJECTED',
 ]
 
+/**
+ * Worded for the office's next move: "Documents to verify" says whose turn
+ * it is, where "Documents submitted" would only say what happened.
+ */
 export const REQUEST_STATUS_LABEL: Record<AdmissionRequestStatus, string> = {
   NEW: 'New',
   UNDER_REVIEW: 'Under review',
   WAITLISTED: 'Waitlisted',
+  DOCUMENTS_REQUESTED: 'Documents requested',
+  DOCUMENTS_SUBMITTED: 'Documents to verify',
+  DOCUMENTS_VERIFIED: 'Documents verified',
+  PAYMENT_REQUESTED: 'Payment requested',
+  PAYMENT_SUBMITTED: 'Payment to verify',
+  PAYMENT_VERIFIED: 'Payment confirmed',
   ADMITTED: 'Admitted',
   REJECTED: 'Declined',
 }
 
+/** Neutral while the family has the next step, primary when the office does. */
 export const REQUEST_STATUS_TONE: Record<AdmissionRequestStatus, Tone> = {
   NEW: 'primary',
   UNDER_REVIEW: 'info',
   WAITLISTED: 'warning',
+  DOCUMENTS_REQUESTED: 'neutral',
+  DOCUMENTS_SUBMITTED: 'primary',
+  DOCUMENTS_VERIFIED: 'info',
+  PAYMENT_REQUESTED: 'neutral',
+  PAYMENT_SUBMITTED: 'primary',
+  PAYMENT_VERIFIED: 'accent',
   ADMITTED: 'success',
   REJECTED: 'neutral',
 }
 
-/** Requests still waiting on a decision — the office's actual to-do list. */
-export const OPEN_REQUEST_STATUSES: AdmissionRequestStatus[] = ['NEW', 'UNDER_REVIEW', 'WAITLISTED']
+/** Requests still in play — everything but the two ends. */
+export const OPEN_REQUEST_STATUSES: AdmissionRequestStatus[] = REQUEST_STATUSES.filter(
+  (s) => s !== 'ADMITTED' && s !== 'REJECTED',
+)
+
+/** Waiting on the office: somebody here has to look at it next. */
+export const ACTION_REQUEST_STATUSES: AdmissionRequestStatus[] = [
+  'NEW',
+  'DOCUMENTS_SUBMITTED',
+  'PAYMENT_SUBMITTED',
+  'PAYMENT_VERIFIED',
+]
+
+/** Moving, but the next step is the family's (or a quick follow-up by the office). */
+export const IN_PROGRESS_REQUEST_STATUSES: AdmissionRequestStatus[] = [
+  'UNDER_REVIEW',
+  'DOCUMENTS_REQUESTED',
+  'DOCUMENTS_VERIFIED',
+  'PAYMENT_REQUESTED',
+]
 
 // ====================================================================== families
 

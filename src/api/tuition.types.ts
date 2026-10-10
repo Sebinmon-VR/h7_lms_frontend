@@ -1399,6 +1399,22 @@ export interface ProgramSettingsUpdate {
   admission_id_prefix?: string
   employee_id_mode?: IdentifierMode
   employee_id_prefix?: string
+
+  /**
+   * LMS only. How the school presents itself in emails to families — the
+   * name at the top, who to contact, where the apps are, and the page the
+   * admission portal lives on. GET always returns every key, already
+   * resolved: a blank value saved here restores the deployment's default.
+   */
+  school_name?: string | null
+  school_contact_email?: string | null
+  school_contact_phone?: string | null
+  school_address?: string | null
+  school_website_url?: string | null
+  school_logo_url?: string | null
+  web_app_url?: string | null
+  mobile_app_url?: string | null
+  admission_portal_url?: string | null
 }
 
 /** GET /admin/tuition/settings/{program}. LMS reads back only the shared half. */

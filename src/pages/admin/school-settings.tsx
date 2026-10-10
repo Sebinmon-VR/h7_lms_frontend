@@ -1,11 +1,11 @@
-import { AlertTriangle, BadgeCheck, CalendarPlus, Library, Video } from 'lucide-react'
+import { AlertTriangle, BadgeCheck, Building2, CalendarPlus, Library, Video } from 'lucide-react'
 import * as React from 'react'
 
 import type { IdentifierMode, ProgramSettingsUpdate } from '@/api/types'
 import { useProgramSettings, useUpdateProgramSettings } from '@/queries/tuition.queries'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
+import { Input, Textarea } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -47,6 +47,85 @@ const MODES: { value: IdentifierMode; label: string; hint: string }[] = [
   },
 ]
 
+type ProfileKey =
+  | 'school_name'
+  | 'school_contact_email'
+  | 'school_contact_phone'
+  | 'school_website_url'
+  | 'school_logo_url'
+  | 'web_app_url'
+  | 'mobile_app_url'
+  | 'admission_portal_url'
+
+/**
+ * The school profile, as a table. Every one of these lands in the emails a
+ * family receives — the acknowledgement, the document and fee requests, the
+ * welcome email — so the hints say where each one shows up.
+ */
+const PROFILE_FIELDS: {
+  key: ProfileKey
+  label: string
+  hint: string
+  placeholder: string
+  type?: 'email' | 'tel' | 'url'
+}[] = [
+  {
+    key: 'school_name',
+    label: 'School name',
+    hint: 'The name at the top of every email to families.',
+    placeholder: 'St. Mary’s Public School',
+  },
+  {
+    key: 'school_contact_email',
+    label: 'Contact email',
+    hint: 'Where families are told to write with questions.',
+    placeholder: 'office@school.edu.in',
+    type: 'email',
+  },
+  {
+    key: 'school_contact_phone',
+    label: 'Contact phone',
+    hint: 'Shown in the footer of each email.',
+    placeholder: '+91 98765 43210',
+    type: 'tel',
+  },
+  {
+    key: 'school_website_url',
+    label: 'Website',
+    hint: 'Linked from the school name in emails.',
+    placeholder: 'https://www.school.edu.in',
+    type: 'url',
+  },
+  {
+    key: 'school_logo_url',
+    label: 'Logo URL',
+    hint: 'A public image link (PNG or JPG). Shown at the top of emails.',
+    placeholder: 'https://www.school.edu.in/logo.png',
+    type: 'url',
+  },
+  {
+    key: 'web_app_url',
+    label: 'Web app URL',
+    hint: 'Where students and parents sign in. Sent in the welcome email.',
+    placeholder: 'https://app.school.edu.in',
+    type: 'url',
+  },
+  {
+    key: 'mobile_app_url',
+    label: 'Mobile app link',
+    hint: 'A Play Store, App Store or download page. Sent in the welcome email.',
+    placeholder: 'https://play.google.com/store/apps/details?id=…',
+    type: 'url',
+  },
+  {
+    key: 'admission_portal_url',
+    label: 'Admission portal page',
+    hint: 'The page on the school website that hosts the family’s application portal.',
+    placeholder: 'https://www.school.edu.in/admission-status',
+    type: 'url',
+  },
+]
+
 function num(value: string, fallback: number): number {
   const n = Number(value)
   return Number.isFinite(n) && n >= 0 ? n : fallback
@@ -85,7 +164,7 @@ export default function AdminSchoolSettingsPage() {
     <div>
       <PageHeader
         title="School settings"
-        description="Identifier formats, the live-class clock, extra-class approval and what students may do in the library."
+        description="How the school appears to families, identifier formats, the live-class clock, extra-class approval and what students may do in the library."
         actions={
           <Button onClick={save} loading={update.isPending} disabled={!dirty}>
             Save changes
@@ -105,6 +184,53 @@ export default function AdminSchoolSettingsPage() {
       >
         {() => (
           <div className="max-w-3xl space-y-5">
+            {/* -------------------------------------------- school profile */}
+            <Card className="space-y-4 p-5">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Building2 className="size-4 text-muted-foreground" />
+                  <h3 className="text-sm font-semibold">School profile</h3>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  How the school appears in emails to families: admission updates, document and
+                  fee requests, and the welcome email with login details.
+                </p>
+              </div>
+
+              <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
+                {PROFILE_FIELDS.map((f) => (
+                  <Field key={f.key} id={`profile-${f.key}`} label={f.label} hint={f.hint}>
+                    <Input
+                      id={`profile-${f.key}`}
+                      type={f.type ?? 'text'}
+                      value={read(f.key) ?? ''}
+                      placeholder={f.placeholder}
+                      onChange={(e) => set(f.key, e.target.value)}
+                    />
+                  </Field>
+                ))}
+                <Field
+                  id="profile-address"
+                  label="Address"
+                  hint="Printed in the footer of each email."
+                  className="sm:col-span-2"
+                >
+                  <Textarea
+                    id="profile-address"
+                    rows={2}
+                    value={read('school_address') ?? ''}
+                    placeholder="12 Church Road, Kochi, Kerala 682001"
+                    onChange={(e) => set('school_address', e.target.value)}
+                  />
+                </Field>
+              </div>
+
+              <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                Clearing a field and saving restores the default set up for this school, so an
+                email never goes out with a blank where the school’s name or contact should be.
+              </p>
+            </Card>
+
             {/* ---------------------------------------------- identifiers */}
             <Card className="space-y-4 p-5">
               <div className="flex items-center gap-2">

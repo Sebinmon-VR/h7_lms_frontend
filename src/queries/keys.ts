@@ -371,6 +371,8 @@ export const qk = {
     list: (program?: Program) => ['admission-requests', 'list', program ?? 'ALL'] as const,
     summary: (program?: Program) => ['admission-requests', 'summary', program ?? 'ALL'] as const,
     detail: (requestId: number) => ['admission-requests', 'detail', requestId] as const,
+    /** Gateway, currency and mail status — what the pipeline dialogs need. */
+    config: (program: Program) => ['admission-requests', 'config', program] as const,
   },
 
   /**
