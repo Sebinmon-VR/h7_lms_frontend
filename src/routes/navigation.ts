@@ -687,6 +687,12 @@ const STUDENT_TUITION_NAV: NavSection[] = [
         description: 'Announcements from the tuition office and your tutors',
       },
       {
+        to: '/tuition/student/games',
+        label: 'Games',
+        icon: Swords,
+        description: 'Quiz Battle against a bot, the Virtual Lab, and your locker',
+      },
+      {
         to: '/tuition/student/reports',
         label: 'My Attendance',
         icon: BarChart3,

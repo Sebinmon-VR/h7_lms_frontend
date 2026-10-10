@@ -192,6 +192,48 @@ export interface UserProfileFields {
    * creation, so null means "never set" and should be read as enabled.
    */
   reminder_opt_in?: boolean | null
+
+  /**
+   * Demo account: a prospective family trying the LMS before admission.
+   * Classes are always open; every other module is locked unless listed in
+   * `demo_modules`. Works through `demo_expires_on`, then is erased by the
+   * server. See src/lib/demo.ts.
+   */
+  is_demo?: boolean | null
+  demo_expires_on?: ApiDate | null
+  demo_modules?: DemoModuleKey[] | null
+}
+
+/** Keys of `GET /admin/demo/modules`. */
+export type DemoModuleKey =
+  | 'attendance'
+  | 'syllabus'
+  | 'library'
+  | 'exams'
+  | 'report_cards'
+  | 'games'
+  | 'fees'
+  | 'notices'
+  | 'calendar'
+  | 'support'
+
+export interface DemoModule {
+  key: DemoModuleKey
+  label: string
+  description: string
+}
+
+/** One row of `GET /admin/demo/accounts`. */
+export interface DemoAccountSummary {
+  id: number
+  full_name: string
+  email: string
+  role: UserRole
+  programs: string[]
+  demo_expires_on: ApiDate | null
+  days_left: number | null
+  demo_modules: DemoModuleKey[]
+  expired: boolean
 }
 
 export interface UserOut extends UserProfileFields {

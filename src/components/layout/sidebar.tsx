@@ -1,9 +1,10 @@
 import { motion } from 'framer-motion'
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { Lock, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { NavLink, useLocation } from 'react-router-dom'
 
 import { useAuth } from '@/providers/auth-provider'
 import { cn } from '@/lib/cn'
+import { lockedModuleFor } from '@/lib/demo'
 import { STORAGE_KEYS } from '@/lib/constants'
 import { usePersistentState } from '@/lib/hooks'
 import { PORTAL_LABEL, navigationFor, programForPath } from '@/routes/navigation'
@@ -47,6 +48,9 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             <ul className="space-y-0.5">
               {section.items.map((item) => {
                 const Icon = item.icon
+                // A demo account sees every module, padlocked until the school
+                // unlocks it; opening one shows what it is and how to get it.
+                const locked = !!lockedModuleFor(user, item.to)
                 const link = (
                   <NavLink
                     to={item.to}
@@ -59,6 +63,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                         isActive
                           ? 'text-primary'
                           : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                        locked && !isActive && 'opacity-60',
                       )
                     }
                   >
@@ -73,6 +78,9 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                         )}
                         <Icon className="relative z-10 size-4 shrink-0" />
                         {!collapsed && <span className="relative z-10 truncate">{item.label}</span>}
+                        {locked && !collapsed && (
+                          <Lock className="relative z-10 ml-auto size-3.5 shrink-0" aria-label="Locked on your demo account" />
+                        )}
                       </>
                     )}
                   </NavLink>
@@ -83,7 +91,10 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                     {collapsed ? (
                       <Tooltip>
                         <TooltipTrigger asChild>{link}</TooltipTrigger>
-                        <TooltipContent side="right">{item.label}</TooltipContent>
+                        <TooltipContent side="right">
+                          {item.label}
+                          {locked ? ' (locked on your demo)' : ''}
+                        </TooltipContent>
                       </Tooltip>
                     ) : (
                       link

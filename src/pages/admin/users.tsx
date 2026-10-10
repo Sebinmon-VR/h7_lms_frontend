@@ -363,11 +363,27 @@ export default function AdminUsersPage() {
       {
         id: 'status',
         header: 'Status',
-        accessorFn: (row) => (row.is_active ? 'Active' : 'Inactive'),
+        // An active demo account files under "Demo", so the Status filter can pick them out
+        // with a true count; the cell still shows both tags.
+        accessorFn: (row) => (!row.is_active ? 'Inactive' : row.is_demo ? 'Demo' : 'Active'),
         filterFn: (row, id, value: string[]) => value.includes(row.getValue(id)),
         cell: ({ row }) => (
           <div className="flex flex-wrap items-center gap-1.5">
             <ActiveBadge active={row.original.is_active} />
+            {row.original.is_demo && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge tone="primary" size="sm">
+                    Demo
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {row.original.demo_expires_on
+                    ? `Demo account — works until ${row.original.demo_expires_on}, then deleted automatically.`
+                    : 'Demo account.'}
+                </TooltipContent>
+              </Tooltip>
+            )}
             {/* Only ever a positive claim. The API has no "has credentials"
                 flag, so we can say what we issued this session but never that
                 a user is missing credentials. */}
@@ -467,6 +483,7 @@ export default function AdminUsersPage() {
       classTeachers: users.filter((u) => u.role === 'CLASS_TEACHER').length,
       students: users.filter((u) => u.role === 'STUDENT').length,
       inactive: users.filter((u) => !u.is_active).length,
+      demo: users.filter((u) => u.is_active && u.is_demo).length,
     }
   }, [usersQuery.data])
 
@@ -500,6 +517,7 @@ export default function AdminUsersPage() {
             <Badge tone="warning">{counts.classTeachers} lead a class</Badge>
           )}
           <Badge tone="accent">{counts.students} students</Badge>
+          {counts.demo > 0 && <Badge tone="primary">{counts.demo} demo</Badge>}
           {counts.inactive > 0 && <Badge tone="warning">{counts.inactive} inactive</Badge>}
         </div>
       </PageHeader>
@@ -565,6 +583,7 @@ export default function AdminUsersPage() {
             label: 'Status',
             options: [
               { value: 'Active', label: 'Active' },
+              { value: 'Demo', label: 'Demo account' },
               { value: 'Inactive', label: 'Inactive' },
             ],
           },
@@ -578,6 +597,7 @@ export default function AdminUsersPage() {
             // Absent reads as school-only, matching the backend's own default.
             { header: 'Programmes', value: (u) => (u.programs?.length ? u.programs : ['LMS']).join(' + ') },
             { header: 'Active', value: (u) => (u.is_active ? 'Yes' : 'No') },
+            { header: 'Demo ends', value: (u) => (u.is_demo ? u.demo_expires_on ?? '' : '') },
             { header: 'Created', value: (u) => u.created_at },
           ],
         }}

@@ -1,7 +1,7 @@
 import { AlertTriangle, Inbox, Lock, RefreshCw, SearchX, ServerCrash, WifiOff } from 'lucide-react'
 import * as React from 'react'
 
-import { ApiError, errorDescription, errorTitle } from '@/api/errors'
+import { ApiError, errorDescription, errorTitle, toApiError } from '@/api/errors'
 import { cn } from '@/lib/cn'
 import { IS_DEV } from '@/lib/env'
 import { Button } from '@/components/ui/button'
@@ -67,7 +67,8 @@ export function ErrorState({
   className?: string
   compact?: boolean
 }) {
-  const apiError = error instanceof ApiError ? error : new ApiError({ message: String(error), status: null })
+  // Through toApiError, so a stray JavaScript error reads as the standard sentence too.
+  const apiError = error instanceof ApiError ? error : toApiError(error)
 
   const Icon = apiError.isNetwork ? WifiOff : apiError.isForbiddenRole ? Lock : apiError.isServer ? ServerCrash : AlertTriangle
   const tone = apiError.isForbiddenRole ? 'text-warning' : 'text-danger'
@@ -93,7 +94,8 @@ export function ErrorState({
         </pre>
       )}
 
-      {onRetry && (
+      {/* Retrying a demo lock only asks the same question again. */}
+      {onRetry && !apiError.isDemoLocked && !apiError.isDemoExpired && (
         <Button variant="outline" size="sm" className="mt-5" icon={<RefreshCw />} onClick={onRetry}>
           Try again
         </Button>

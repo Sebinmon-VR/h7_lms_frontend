@@ -1,5 +1,7 @@
 import type { ArtName } from '@/components/arena/arena-art'
 
+import { arenaPaths } from './arena-paths'
+
 /**
  * The games on the Arena shelf. Quiz Battle is live; the rest are announced
  * so students see what is coming — each becomes playable by giving it a `to`.
@@ -104,3 +106,36 @@ export const GAMES: GameEntry[] = [
     tags: ['Data', 'AI'],
   },
 ]
+
+/** Announced games built around classmates, which online tuition does not have. */
+const CLASS_GAMES = new Set(['world-builder', 'code-quest'])
+
+/**
+ * The shelf for a programme. Online tuition gets the solo games: Quiz Battle
+ * against the bot on the global challenges (no class, so no syllabus and no
+ * classmates), and the lab without teacher-set experiments.
+ */
+export function gamesFor(tuition: boolean): GameEntry[] {
+  if (!tuition) return GAMES
+  const paths = arenaPaths(true)
+  return GAMES.filter((g) => !CLASS_GAMES.has(g.id)).map((g) => {
+    if (g.id === 'quiz-battle') {
+      return {
+        ...g,
+        genre: 'Vs bot',
+        blurb: 'Take on a bot in a global challenge: general knowledge, science, maths and more. Fastest right answer wins.',
+        to: paths.quiz,
+        players: '1 player vs bot',
+        tags: ['Global challenges', 'XP and coins'],
+      }
+    }
+    if (g.id === 'virtual-lab') {
+      return {
+        ...g,
+        blurb: 'A chemistry lab bench: mix any chemicals, heat, test gases and run guided experiments.',
+        to: paths.lab,
+      }
+    }
+    return g
+  })
+}

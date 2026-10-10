@@ -129,7 +129,7 @@ function AttachmentPreview({ attachment }: { attachment: AttachmentOut }) {
           <p className="truncate text-sm font-medium">{name}</p>
           <p className="text-2xs text-muted-foreground">
             {attachment.uploaded_at ? `Uploaded ${formatRelative(attachment.uploaded_at)}` : ''}
-            {attachment.storage_warning ? ' · stored on the server disk' : ''}
+            {attachment.storage_warning ? ' · saved' : ''}
           </p>
         </div>
         {(kind === 'image' || kind === 'pdf') && (

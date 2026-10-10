@@ -1,4 +1,4 @@
-import { CalendarClock, Video } from 'lucide-react'
+import { CalendarClock, Hourglass, Video } from 'lucide-react'
 import * as React from 'react'
 
 import type { TuitionSessionOut, TuitionSessionStatus } from '@/api/types'
@@ -9,7 +9,7 @@ import {
   useTuitionSessions,
 } from '@/queries/tuition.queries'
 import { shiftApiDate, todayApiDate } from '@/lib/datetime'
-import { SESSION_STATUS_LABEL, isClosed } from '@/lib/tuition'
+import { SESSION_STATUS_LABEL, isClosed, isLive } from '@/lib/tuition'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import { DatePicker } from '@/components/ui/date-picker'
@@ -154,8 +154,9 @@ export default function TuitionStudentSessionsPage() {
                 key={String(session.id)}
                 session={session}
                 viewerIsTeacher={false}
+                // Join only once the class has begun; see the tuition home.
                 actions={
-                  !isClosed(session) ? (
+                  isLive(session) ? (
                     <Button
                       size="sm"
                       loading={join.isPending && join.variables === String(session.id)}
@@ -164,6 +165,11 @@ export default function TuitionStudentSessionsPage() {
                       <Video />
                       Join
                     </Button>
+                  ) : !isClosed(session) ? (
+                    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Hourglass className="size-3.5" />
+                      Join opens when the class starts
+                    </span>
                   ) : undefined
                 }
               />

@@ -29,6 +29,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { ActiveBadge, RoleBadge } from '@/components/domain/badges'
 import { ProfileNotes, ProfileSummary } from '@/components/domain/profile-summary'
+import { DemoAccountCard, DemoBadge } from '@/components/domain/demo-account'
 
 /**
  * Everything the API knows about one person, assembled from the lists already
@@ -81,6 +82,7 @@ export function UserDetailSheet({
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <RoleBadge role={user.role} size="sm" />
                     <ActiveBadge active={user.is_active} />
+                    <DemoBadge user={user} />
                   </div>
                 </div>
               </div>
@@ -99,6 +101,8 @@ export function UserDetailSheet({
                   </div>
                 )}
               </dl>
+
+              <DemoAccountCard user={user} onChange={() => onEdit(user)} />
 
               <ProfileSummary user={user} />
               <ProfileNotes notes={user.notes} />

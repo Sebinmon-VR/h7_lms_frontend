@@ -23,10 +23,13 @@ import { useAcceptInvite, useArenaHome } from '@/queries/arena.queries'
 import { useAuth } from '@/providers/auth-provider'
 import { cn } from '@/lib/cn'
 import { AdminStudentNotice, useIsAdminViewingStudent } from '../student-guard'
-import { GAMES as ALL_GAMES, type GameEntry } from './games'
+import { useArenaPaths } from './arena-paths'
+import { gamesFor, type GameEntry } from './games'
 
 /** Playable games lead the shelf; the announced ones follow, each group in catalogue order. */
-const GAMES = [...ALL_GAMES.filter((g) => g.to), ...ALL_GAMES.filter((g) => !g.to)]
+function shelfOrder(all: GameEntry[]) {
+  return [...all.filter((g) => g.to), ...all.filter((g) => !g.to)]
+}
 
 /**
  * The Arena's front door, full screen: the game under the pointer (or the one
@@ -49,6 +52,8 @@ export default function ArenaHub() {
 function Hub() {
   const homeQuery = useArenaHome()
   const home = homeQuery.data
+  const paths = useArenaPaths()
+  const GAMES = React.useMemo(() => shelfOrder(gamesFor(paths.tuition)), [paths.tuition])
   const { user } = useAuth()
   const navigate = useNavigate()
   const reduce = useReducedMotion()
@@ -60,7 +65,7 @@ function Hub() {
   const needle = search.trim().toLowerCase()
   const games = React.useMemo(
     () => (needle ? GAMES.filter((g) => [g.title, g.genre, ...g.tags].join(' ').toLowerCase().includes(needle)) : GAMES),
-    [needle],
+    [needle, GAMES],
   )
   const active = GAMES.find((g) => g.id === (preview ?? selected)) ?? GAMES[0]
   const invite = home?.invites[0]
@@ -123,10 +128,12 @@ function Hub() {
           ) : (
             <Skeleton className="h-10 w-40 rounded-full" />
           )}
-          <IconLink to="/student/arena/leaderboard" label="Leaderboard">
-            <Trophy className="text-warning" />
-          </IconLink>
-          <IconLink to="/student/arena/locker" label="Locker">
+          {paths.leaderboard && (
+            <IconLink to={paths.leaderboard} label="Leaderboard">
+              <Trophy className="text-warning" />
+            </IconLink>
+          )}
+          <IconLink to={paths.locker} label="Locker">
             <Backpack className="text-primary" />
           </IconLink>
         </div>
@@ -136,7 +143,7 @@ function Hub() {
         <InviteBanner invite={invite} more={(home?.invites.length ?? 1) - 1} />
       ) : home?.active_match_id ? (
         <Link
-          to={`/student/arena/battle/${home.active_match_id}`}
+          to={paths.battle(home.active_match_id)}
           className="mt-3 flex items-center gap-2.5 rounded-full border border-primary/40 bg-primary/10 py-1.5 pl-3 pr-2 text-xs font-bold transition-colors hover:bg-primary/15 sm:w-fit"
         >
           <span className="relative flex size-2">
@@ -724,6 +731,7 @@ type Invite = NonNullable<ReturnType<typeof useArenaHome>['data']>['invites'][nu
 function InviteBanner({ invite, more }: { invite: Invite; more: number }) {
   const navigate = useNavigate()
   const accept = useAcceptInvite()
+  const paths = useArenaPaths()
   return (
     <motion.div
       initial={{ opacity: 0, y: -8 }}
@@ -740,12 +748,12 @@ function InviteBanner({ invite, more }: { invite: Invite; more: number }) {
         variant="gold"
         className="rounded-full"
         loading={accept.isPending}
-        onClick={() => accept.mutate(invite.id, { onSuccess: (view) => navigate(`/student/arena/battle/${view.id}`) })}
+        onClick={() => accept.mutate(invite.id, { onSuccess: (view) => navigate(paths.battle(view.id)) })}
       >
         Accept
       </ArenaButton>
       <ArenaButton asChild size="sm" variant="ghost" className="rounded-full">
-        <Link to="/student/arena/quiz">View</Link>
+        <Link to={paths.quiz}>View</Link>
       </ArenaButton>
     </motion.div>
   )

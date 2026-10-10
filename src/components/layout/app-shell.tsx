@@ -3,6 +3,8 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Outlet, useLocation } from 'react-router-dom'
 
 import { useAuth } from '@/providers/auth-provider'
+import { isDemo, lockedModuleFor } from '@/lib/demo'
+import { DemoBanner, DemoLockedScreen } from '@/components/domain/demo-account'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { RouteErrorBoundary } from '@/components/feedback/error-boundary'
 import { Scenery } from '@/components/fun/scenery'
@@ -12,7 +14,7 @@ import { Topbar } from './topbar'
 
 export function AppShell() {
   const location = useLocation()
-  const { role } = useAuth()
+  const { role, user } = useAuth()
   const [mobileOpen, setMobileOpen] = React.useState(false)
   const [commandOpen, setCommandOpen] = React.useState(false)
 
@@ -25,6 +27,11 @@ export function AppShell() {
    * that portal was warmer language, not a redecoration.
    */
   const decorated = location.pathname.startsWith('/student') || role === 'STUDENT'
+
+  // A demo account opening a module it has not been given sees what it is and
+  // how to get it, rather than a page whose every request is refused.
+  const lockedModule = lockedModuleFor(user, location.pathname)
+  const demoHome = location.pathname.startsWith('/tuition') ? '/tuition/student' : '/student'
 
   React.useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -82,8 +89,9 @@ export function AppShell() {
               >
                 {/* Contains a crash to the page body — the shell and nav
                     survive, so there is always a way out. */}
+                {user && isDemo(user) && <DemoBanner user={user} />}
                 <RouteErrorBoundary path={location.pathname}>
-                  <Outlet />
+                  {lockedModule ? <DemoLockedScreen module={lockedModule} homeTo={demoHome} /> : <Outlet />}
                 </RouteErrorBoundary>
               </motion.div>
             </AnimatePresence>

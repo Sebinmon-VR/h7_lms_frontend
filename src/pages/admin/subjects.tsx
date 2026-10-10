@@ -363,7 +363,7 @@ export default function AdminSubjectsPage() {
         onOpenChange={(v) => !v && setDeleting(null)}
         resourceLabel="subject"
         resourceName={deleting?.name ?? ''}
-        description="Teacher assignments and every attendance record, topic, meeting, material and grade filed under this subject reference it. The server checks first and will refuse if any still exist."
+        description="Teacher assignments and every attendance record, topic, meeting, material and grade filed under this subject reference it. It can't be deleted while any of these still exist."
         onDelete={(force) => deleteSubject.mutateAsync({ subjectId: deleting!.id, force })}
       />
     </>

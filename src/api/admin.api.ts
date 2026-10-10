@@ -12,6 +12,8 @@ import type {
   ClassTeacherMappingCreate,
   ClassTeacherMappingOut,
   CredentialsIssued,
+  DemoAccountSummary,
+  DemoModule,
   GenerateCredentialsRequest,
   IntegrationsHealth,
   JobAccepted,
@@ -110,6 +112,15 @@ export const adminApi = {
 
   /** Re-enables a deactivated account and its sign-in. */
   reactivateUser: (userId: number) => post<UserOut>(`/admin/users/${userId}/reactivate`),
+
+  /** What a demo account can have unlocked. Classes are always open and not listed. */
+  demoModules: () => get<DemoModule[]>('/admin/demo/modules'),
+
+  /** Every demo account, soonest to expire first. */
+  demoAccounts: () => get<DemoAccountSummary[]>('/admin/demo/accounts'),
+
+  /** Erase expired demo accounts now rather than at the next maintenance sweep. */
+  purgeDemoAccounts: () => post<{ detail: string }>('/admin/demo/purge'),
 
   listClasses: () => get<ClassRoomOut[]>('/admin/classes'),
   createClass: (body: ClassRoomCreate) => post<ClassRoomOut>('/admin/classes', body),

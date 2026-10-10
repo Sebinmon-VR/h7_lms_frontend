@@ -31,10 +31,10 @@ function DegradedScreen() {
     <div className="flex h-dvh flex-col items-center justify-center gap-4 bg-background px-6 text-center">
       <ServerCrash className="size-10 text-danger" />
       <div>
-        <h1 className="text-lg font-semibold">Cannot reach the server</h1>
+        <h1 className="text-lg font-semibold">Can't connect right now</h1>
         <p className="mt-1 max-w-md text-sm text-muted-foreground">
-          Your session is still valid, but the API did not respond. Make sure the backend is running on the
-          configured address, then try again.
+          You are still signed in, but we couldn't load your account just now. Check your internet
+          connection and try again in a moment.
         </p>
       </div>
       <div className="flex gap-2">

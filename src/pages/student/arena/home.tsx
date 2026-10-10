@@ -20,6 +20,7 @@ import { unlockArenaAudio, useArenaAudioUnlock } from '@/lib/arena-sound'
 import { cn } from '@/lib/cn'
 import { useAcceptInvite, useArenaHome, useDeclineInvite } from '@/queries/arena.queries'
 import { AdminStudentNotice, useIsAdminViewingStudent } from '../student-guard'
+import { useArenaPaths } from './arena-paths'
 import { BattleSettingsDialog, ModePill, RoomDialog, useBattleSetup } from './components/battle-builder'
 import { ClassmatesDialog } from './components/classmates-dialog'
 import { ArenaConfirm, ArenaSkeleton, busyMatchId, errorMessage, MuteToggle } from './components/helpers'
@@ -112,10 +113,13 @@ function Lobby({ home }: { home: ArenaHome }) {
   const [menu, setMenu] = React.useState<MenuDialog>(null)
   const [profileOpen, setProfileOpen] = React.useState(false)
   const setup = useBattleSetup(home, setBusyId)
+  const paths = useArenaPaths()
+  // Online tuition plays the bot only: no friends, rooms, quick match or ranks.
+  const solo = paths.tuition
 
   const p = home.profile
   const activeId = home.active_match_id ?? p.active_match_id
-  const go = (id: number) => navigate(`/student/arena/battle/${id}`)
+  const go = (id: number) => navigate(paths.battle(id))
 
   const onAccept = (invite: ArenaInvite) => {
     unlockArenaAudio()
@@ -155,7 +159,7 @@ function Lobby({ home }: { home: ArenaHome }) {
           {/* ---------------------------------------------------- top bar */}
           <header className="relative z-10 flex items-center gap-1.5 sm:gap-2">
             <ArenaButton asChild variant="secondary" size="icon" className="size-9 shrink-0">
-              <Link to="/student/arena" aria-label="Back to games">
+              <Link to={paths.shelf} aria-label="Back to games">
                 <ChevronLeft />
               </Link>
             </ArenaButton>
@@ -199,12 +203,16 @@ function Lobby({ home }: { home: ArenaHome }) {
           {/* ------------------------------------------- hero + side menus */}
           <div className="relative flex flex-1 items-center justify-center py-4">
             <nav aria-label="Lobby menu" className="absolute left-0 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-3">
-              <SideButton label="Friends" tone="accent" onClick={() => setup.setClassmatesOpen(true)}>
-                <Users />
-              </SideButton>
-              <SideButton label="Room" tone="success" onClick={() => setMenu('room')}>
-                <DoorOpen />
-              </SideButton>
+              {!solo && (
+                <>
+                  <SideButton label="Friends" tone="accent" onClick={() => setup.setClassmatesOpen(true)}>
+                    <Users />
+                  </SideButton>
+                  <SideButton label="Room" tone="success" onClick={() => setMenu('room')}>
+                    <DoorOpen />
+                  </SideButton>
+                </>
+              )}
               <SideButton label="History" tone="info" onClick={() => setMenu('history')}>
                 <History />
               </SideButton>
@@ -213,10 +221,12 @@ function Lobby({ home }: { home: ArenaHome }) {
             <Hero home={home} />
 
             <nav aria-label="Progress" className="absolute right-0 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-3">
-              <SideButton label="Ranks" tone="warning" to="/student/arena/leaderboard">
-                <Trophy />
-              </SideButton>
-              <SideButton label="Locker" tone="primary" to="/student/arena/locker">
+              {paths.leaderboard && (
+                <SideButton label="Ranks" tone="warning" to={paths.leaderboard}>
+                  <Trophy />
+                </SideButton>
+              )}
+              <SideButton label="Locker" tone="primary" to={paths.locker}>
                 <Backpack />
               </SideButton>
             </nav>
@@ -244,8 +254,9 @@ function Lobby({ home }: { home: ArenaHome }) {
 
       {/* ------------------------------------------------------- dialogs */}
       <BattleSettingsDialog setup={setup} open={menu === 'settings'} onOpenChange={(o) => setMenu(o ? 'settings' : null)} />
-      <RoomDialog setup={setup} open={menu === 'room'} onOpenChange={(o) => setMenu(o ? 'room' : null)} />
+      {!solo && <RoomDialog setup={setup} open={menu === 'room'} onOpenChange={(o) => setMenu(o ? 'room' : null)} />}
       <HistoryDialog recent={home.recent} open={menu === 'history'} onOpenChange={(o) => setMenu(o ? 'history' : null)} />
+      {!solo && (
       <ClassmatesDialog
         open={setup.classmatesOpen}
         onOpenChange={setup.setClassmatesOpen}
@@ -254,6 +265,8 @@ function Lobby({ home }: { home: ArenaHome }) {
         blockedReason={friendsBlocked}
         onSend={(ids) => setup.challengeClassmates(ids, () => setup.setClassmatesOpen(false))}
       />
+      )}
+      {!solo && (
       <QuickMatchDialog
         request={setup.queueRequest}
         title={setup.title}
@@ -266,6 +279,7 @@ function Lobby({ home }: { home: ArenaHome }) {
         botLoading={setup.creating}
         onPlayBot={setup.playBotInstead}
       />
+      )}
       <ProfileCardDialog studentId={profileOpen ? p.student_id : null} onClose={() => setProfileOpen(false)} />
       <ArenaConfirm
         open={busyId != null}
@@ -335,6 +349,7 @@ function SideButton({
 
 /** The player's character on the spotlight, with a frame-coloured glow and the title plate. */
 function Hero({ home }: { home: ArenaHome }) {
+  const paths = useArenaPaths()
   const look = home.profile.look
   const title = look.title?.text
   const rarity = RARITY_STYLE[look.title?.rarity ?? 'COMMON']
@@ -351,7 +366,7 @@ function Hero({ home }: { home: ArenaHome }) {
         style={{ boxShadow: '0 0 30px hsl(var(--primary) / 0.35)' }}
       />
       <Link
-        to="/student/arena/locker"
+        to={paths.locker}
         aria-label="Change your look in the locker"
         className="relative rounded-full focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring"
       >

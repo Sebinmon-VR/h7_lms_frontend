@@ -376,7 +376,7 @@ export function AttachmentList({
               <p className="text-xs text-muted-foreground">
                 {kindLabel(attachment.kind)}
                 {attachment.size_bytes ? ` · ${formatFileSize(attachment.size_bytes)}` : ''}
-                {attachment.storage_warning ? ' · stored on the server disk' : ''}
+                {attachment.storage_warning ? ' · saved' : ''}
               </p>
               {attachment.kind === 'AUDIO' && url && (
                 <audio controls preload="metadata" src={url} className="mt-1.5 h-8 w-full max-w-xs" />

@@ -9,6 +9,7 @@ import type {
   GradingScheme,
   ReportCardOut,
   SubjectOut,
+  UserProfileFields,
 } from './types'
 // Imported from its own module rather than through the `types` barrel: this
 // file is one of the two that barrel re-exports, and going back through it
@@ -146,7 +147,8 @@ export interface TuitionUserSummary {
  * omitted; `password` is issued later with
  * `POST /admin/users/{id}/generate-credentials`, which emails it.
  */
-export interface TuitionAccountCreate {
+export interface TuitionAccountCreate
+  extends Pick<UserProfileFields, 'is_demo' | 'demo_expires_on' | 'demo_modules'> {
   full_name: string
   email?: string | null
   password?: string | null

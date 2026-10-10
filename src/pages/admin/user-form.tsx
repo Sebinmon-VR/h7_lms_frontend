@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { IdCard, Save, ShieldCheck, UserPlus } from 'lucide-react'
+import { FlaskConical, IdCard, Save, ShieldCheck, UserPlus } from 'lucide-react'
 import * as React from 'react'
 import { useForm } from 'react-hook-form'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -26,6 +26,14 @@ import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { FormActions, FormPage, FormSection } from '@/components/forms/form-page'
 import { ActiveBadge, RoleBadge } from '@/components/domain/badges'
 import { ProfileFieldsSection } from '@/components/domain/profile-fields'
+import {
+  DemoAccessFields,
+  DemoBadge,
+  demoAccessOf,
+  demoAccessPayload,
+  demoAccessProblem,
+  type DemoAccessValue,
+} from '@/components/domain/demo-account'
 import { EmptyState } from '@/components/feedback/states'
 import {
   ProgramsField,
@@ -79,6 +87,32 @@ function AccountSection({
   )
 }
 
+/**
+ * Demo access, for students only: a family trying the school before admission.
+ * See src/lib/demo.ts for what it locks and app/core/demo.py for the rule.
+ */
+function DemoSection({
+  value,
+  onChange,
+  error,
+}: {
+  value: DemoAccessValue
+  onChange: (next: DemoAccessValue) => void
+  error: string | null
+}) {
+  return (
+    <FormSection
+      icon={<FlaskConical />}
+      title="Demo access"
+      description="Give a prospective student a trial login with classes only, ending on a date you choose."
+    >
+      <div className="sm:col-span-2 lg:col-span-3">
+        <DemoAccessFields value={value} onChange={onChange} error={error} />
+      </div>
+    </FormSection>
+  )
+}
+
 // ===================================================================== create
 
 function CreateUserForm() {
@@ -86,6 +120,8 @@ function CreateUserForm() {
   const createUser = useCreateUser()
   const [profile, setProfile] = React.useState<UserProfileFields>({})
   const [overrideEmail, setOverrideEmail] = React.useState(false)
+  const [demoAccess, setDemoAccess] = React.useState<DemoAccessValue>(() => demoAccessOf())
+  const [demoError, setDemoError] = React.useState<string | null>(null)
 
   const form = useForm<CreateValues>({
     resolver: zodResolver(createSchema),
@@ -99,9 +135,14 @@ function CreateUserForm() {
 
   const onSubmit = async (values: CreateValues) => {
     const email = values.email.trim()
+    const isStudent = values.role === 'STUDENT'
+    const problem = isStudent ? demoAccessProblem(demoAccess) : null
+    setDemoError(problem)
+    if (problem) return
     try {
       const created = await createUser.mutateAsync({
         ...profile,
+        ...(isStudent && demoAccess.is_demo ? demoAccessPayload(demoAccess) : {}),
         full_name: values.full_name,
         role: values.role,
         programs: values.programs,
@@ -116,11 +157,11 @@ function CreateUserForm() {
       if (/already exists/i.test(message)) {
         setOverrideEmail(true)
         form.setError('email', { message: 'An account already uses this email.' })
-      } else if (/email domain/i.test(message)) {
+      } else if (/email domain/i.test(String((error as { detail?: unknown })?.detail ?? message))) {
         setOverrideEmail(true)
         form.setError('root', {
           message:
-            'The server has no email domain configured, so it cannot generate an address. Set USER_EMAIL_DOMAIN on the backend, or enter an email manually.',
+            "An email address couldn't be created automatically. Please enter one.",
         })
       } else {
         form.setError('root', { message: message || 'Could not create the account.' })
@@ -188,7 +229,7 @@ function CreateUserForm() {
               id="email"
               label="Email"
               error={form.formState.errors.email?.message}
-              hint="Leave blank and the server derives one from the name."
+              hint="Leave blank to create one from the name."
             >
               <Input id="email" type="email" {...form.register('email')} />
             </Field>
@@ -232,7 +273,7 @@ function CreateUserForm() {
       <FormSection
         icon={<IdCard />}
         title="Profile detail"
-        description="All optional. A school onboarding a hundred students has partial data for most of them, and the API is built to accept that."
+        description="All optional. You can fill these in later."
       >
         <ProfileFieldsSection
           role={role}
@@ -242,6 +283,10 @@ function CreateUserForm() {
           layout="page"
         />
       </FormSection>
+
+      {role === 'STUDENT' && (
+        <DemoSection value={demoAccess} onChange={setDemoAccess} error={demoError} />
+      )}
     </FormPage>
   )
 }
@@ -254,6 +299,8 @@ function EditUserForm({ user }: { user: UserOut }) {
   const [profile, setProfile] = React.useState<UserProfileFields>(() => profileOf(user))
   /** Holds a pending role change until it is confirmed. */
   const [confirmRole, setConfirmRole] = React.useState<EditValues | null>(null)
+  const [demoAccess, setDemoAccess] = React.useState<DemoAccessValue>(() => demoAccessOf(user))
+  const [demoError, setDemoError] = React.useState<string | null>(null)
 
   const form = useForm<EditValues>({
     resolver: zodResolver(editSchema),
@@ -269,11 +316,17 @@ function EditUserForm({ user }: { user: UserOut }) {
   })
 
   const save = async (values: EditValues) => {
+    const isStudent = values.role === 'STUDENT'
+    const problem = isStudent ? demoAccessProblem(demoAccess) : null
+    setDemoError(problem)
+    if (problem) return
     try {
       await updateUser.mutateAsync({
         userId: user.id,
         body: {
           ...profile,
+          // Sent when it is or was a demo, so switching it off reaches the server.
+          ...(isStudent && (demoAccess.is_demo || user.is_demo) ? demoAccessPayload(demoAccess) : {}),
           full_name: values.full_name,
           email: values.email,
           is_active: values.is_active,
@@ -317,6 +370,7 @@ function EditUserForm({ user }: { user: UserOut }) {
         <>
           <RoleBadge role={user.role} />
           <ActiveBadge active={user.is_active} />
+          <DemoBadge user={user} />
           {user.admission_number && (
             <Badge tone="outline" size="sm">
               {user.admission_number}
@@ -458,6 +512,10 @@ function EditUserForm({ user }: { user: UserOut }) {
           layout="page"
         />
       </FormSection>
+
+      {role === 'STUDENT' && (
+        <DemoSection value={demoAccess} onChange={setDemoAccess} error={demoError} />
+      )}
 
       <ConfirmDialog
         open={!!confirmRole}

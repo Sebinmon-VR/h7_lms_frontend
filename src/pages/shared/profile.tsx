@@ -276,17 +276,20 @@ export default function ProfilePage() {
               <CardTitle>About</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <div className="flex items-start gap-2">
-                <Server className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">API endpoint</p>
-                  <p className="truncate font-mono text-xs">{API_BASE || '(same origin)'}</p>
+              {/* The server address is for whoever runs the system, not for students and parents. */}
+              {user?.role === 'ADMIN' && (
+                <div className="flex items-start gap-2">
+                  <Server className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Server address</p>
+                    <p className="truncate font-mono text-xs">{API_BASE || '(same origin)'}</p>
+                  </div>
                 </div>
-              </div>
+              )}
               <div className="flex items-start gap-2">
                 <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                 <p className="text-xs text-muted-foreground">
-                  Roles can only be changed by an administrator — the API has no self-service endpoint for that.
+                  Only an administrator can change your role.
                 </p>
               </div>
             </CardContent>

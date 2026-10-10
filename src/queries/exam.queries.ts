@@ -197,8 +197,9 @@ export function useUploadPaper(onProgress?: (percent: number) => void) {
     onSuccess: (updated) => {
       write(updated)
       if (updated.question_paper_warning) {
-        toast.warning('Question paper stored on the server disk', {
-          description: updated.question_paper_warning,
+        // The upload landed on backup storage. Worth a word, not the technical reason.
+        toast.warning('Question paper saved', {
+          description: 'It was saved to backup storage. If it does not open later, please upload it again.',
           duration: 10_000,
         })
       } else {
@@ -495,7 +496,9 @@ export function useUploadAnswerSheet(onProgress?: (percent: number) => void) {
       write(updated)
       const stored = updated.attachments[updated.attachments.length - 1]
       if (stored?.storage_warning) {
-        toast.warning(`“${file.name}” was stored on the server disk`, { description: stored.storage_warning })
+        toast.warning(`“${file.name}” saved`, {
+          description: 'It was saved to backup storage. If it does not open later, please upload it again.',
+        })
       } else {
         toast.success(`“${file.name}” uploaded`)
       }

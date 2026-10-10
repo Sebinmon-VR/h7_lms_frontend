@@ -1,4 +1,4 @@
-import { ArrowRight, BookOpen, CalendarClock, Video } from 'lucide-react'
+import { ArrowRight, BookOpen, CalendarClock, Hourglass, Video } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import {
@@ -11,7 +11,7 @@ import {
 } from '@/queries/tuition.queries'
 import { greeting } from '@/lib/format'
 import { DAY_SHORT } from '@/lib/timetable'
-import { isClosed, shortTime, sortSlots } from '@/lib/tuition'
+import { isClosed, isLive, shortTime, sortSlots } from '@/lib/tuition'
 import { useAuth } from '@/providers/auth-provider'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -91,8 +91,10 @@ export default function TuitionStudentDashboardPage() {
                     key={String(session.id)}
                     session={session}
                     viewerIsTeacher={false}
+                    // Join only once the class has begun: the tutor pressed start, or it
+                    // opened on time under auto-start. The server refuses earlier.
                     actions={
-                      !isClosed(session) ? (
+                      isLive(session) ? (
                         <Button
                           size="sm"
                           loading={join.isPending && join.variables === String(session.id)}
@@ -108,6 +110,11 @@ export default function TuitionStudentDashboardPage() {
                           <Video />
                           Join
                         </Button>
+                      ) : !isClosed(session) ? (
+                        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <Hourglass className="size-3.5" />
+                          Join opens when the class starts
+                        </span>
                       ) : undefined
                     }
                   />

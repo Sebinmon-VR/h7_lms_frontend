@@ -13,7 +13,8 @@ import { BattleCountdown, BattleLobby } from './components/battle-lobby'
 import { EmoteBar, useEmoteBubbles } from './components/battle-players'
 import { BattleResults } from './components/battle-results'
 import { type AnswerState, BattleRound, roundOptions } from './components/battle-round'
-import { ArenaConfirm, ArenaSkeleton, errorMessage, OPTION_LETTERS, parseServerTime, QUIZ_LOBBY, useServerClock } from './components/helpers'
+import { ArenaConfirm, ArenaSkeleton, errorMessage, OPTION_LETTERS, parseServerTime, useServerClock } from './components/helpers'
+import { useArenaPaths } from './arena-paths'
 
 /**
  * One battle, start to finish. The server derives the phase from its clock,
@@ -49,9 +50,10 @@ function Frame({ children }: { children: React.ReactNode }) {
 }
 
 function BackToLobby() {
+  const paths = useArenaPaths()
   return (
     <ArenaButton asChild variant="primary">
-      <Link to={QUIZ_LOBBY}>
+      <Link to={paths.quiz}>
         <ArrowLeft />
         Back to the lobby
       </Link>
@@ -82,6 +84,7 @@ const PLAYING = new Set(['COUNTDOWN', 'QUESTION', 'REVEAL'])
 
 function BattleScreen({ matchId }: { matchId: number }) {
   const navigate = useNavigate()
+  const paths = useArenaPaths()
   const query = useArenaMatch(matchId)
   const catalog = useArenaCatalog()
   const { mutate: sendAnswer } = useAnswer(matchId)
@@ -186,7 +189,7 @@ function BattleScreen({ matchId }: { matchId: number }) {
     }
   }, [wholeSeconds, phase, round, answeredNow])
 
-  const goLobby = () => navigate(QUIZ_LOBBY)
+  const goLobby = () => navigate(paths.quiz)
   const doLeave = () =>
     leave.mutate(matchId, {
       onSuccess: () => {
@@ -268,7 +271,7 @@ function BattleScreen({ matchId }: { matchId: number }) {
           view={view}
           bubbles={bubbles}
           rematching={rematch.isPending}
-          onRematch={() => rematch.mutate(view.id, { onSuccess: (next) => navigate(`/student/arena/battle/${next.id}`) })}
+          onRematch={() => rematch.mutate(view.id, { onSuccess: (next) => navigate(paths.battle(next.id)) })}
         />
       )}
 

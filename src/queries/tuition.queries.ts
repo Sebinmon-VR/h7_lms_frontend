@@ -449,6 +449,9 @@ export function useTuitionSessions(
       })
     },
     staleTime: STALE.transactional,
+    // A student's list carries the Join button, which appears only once the class has
+    // begun; without a refresh it would not appear until the page was reloaded.
+    refetchInterval: scope === 'student' ? KEEP_LIVE : false,
     enabled,
   })
 }

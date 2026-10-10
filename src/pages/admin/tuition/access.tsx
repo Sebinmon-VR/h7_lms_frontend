@@ -21,6 +21,13 @@ import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field } from '@/components/forms/field'
 import { BROWSER_ZONE, TimezonePicker } from '@/components/domain/timezone-picker'
 import { UserCell } from '@/components/domain/user-cell'
+import {
+  DemoAccessFields,
+  demoAccessOf,
+  demoAccessPayload,
+  demoAccessProblem,
+  type DemoAccessValue,
+} from '@/components/domain/demo-account'
 import { PageHeader } from '@/components/layout/page-header'
 
 /**
@@ -67,9 +74,13 @@ function AddPersonDialog({
   const [timezone, setTimezone] = React.useState<string | null>(null)
   const [alsoLms, setAlsoLms] = React.useState(false)
   const [subjectIds, setSubjectIds] = React.useState<number[]>([])
+  const [demoAccess, setDemoAccess] = React.useState<DemoAccessValue>(() => demoAccessOf())
+  const [demoError, setDemoError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     if (!role) return
+    setDemoAccess(demoAccessOf())
+    setDemoError(null)
     setFullName('')
     setEmail('')
     setPhone('')
@@ -91,8 +102,12 @@ function AddPersonDialog({
       description="Creates a new account with tuition access. Everything but the name is optional - an email is derived from it, and credentials are issued separately."
       onConfirm={() => {
         if (!fullName.trim()) return
+        const problem = isStudent ? demoAccessProblem(demoAccess) : null
+        setDemoError(problem)
+        if (problem) return
         create.mutate(
           {
+            ...(isStudent && demoAccess.is_demo ? demoAccessPayload(demoAccess) : {}),
             full_name: fullName.trim(),
             email: email.trim() || null,
             phone: phone.trim() || null,
@@ -186,6 +201,10 @@ function AddPersonDialog({
             suggested={BROWSER_ZONE}
           />
         </Field>
+
+        {isStudent && (
+          <DemoAccessFields value={demoAccess} onChange={setDemoAccess} error={demoError} compact />
+        )}
 
         {/* Off by default, and worth stating why: an account added here that
             silently also reached the school's classes and marks would be a

@@ -7,6 +7,7 @@ import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, Dia
 import { cn } from '@/lib/cn'
 import { formatRelative } from '@/lib/datetime'
 import { ARENA_DIALOG } from './helpers'
+import { useArenaPaths } from '../arena-paths'
 
 const OUTCOME: Record<ArenaOutcome, { letter: string; name: string; tile: string }> = {
   WIN: { letter: 'W', name: 'Win', tile: 'bg-success text-success-foreground' },
@@ -32,6 +33,7 @@ export function HistoryDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const wins = recent.filter((m) => m.outcome === 'WIN').length
+  const paths = useArenaPaths()
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="sm" className={ARENA_DIALOG.content}>
@@ -55,7 +57,7 @@ export function HistoryDialog({
                 return (
                   <li key={m.match_id}>
                     <Link
-                      to={`/student/arena/battle/${m.match_id}`}
+                      to={paths.battle(m.match_id)}
                       className="flex h-14 min-w-0 items-center gap-3 rounded-xl px-2 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <span className={cn('flex size-9 shrink-0 -skew-x-6 items-center justify-center rounded-lg text-sm font-black italic', o.tile)}>

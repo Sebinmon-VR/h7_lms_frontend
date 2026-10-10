@@ -744,7 +744,7 @@ export default function AdminClassesPage() {
         onOpenChange={(v) => !v && setDeleting(null)}
         resourceLabel="class"
         resourceName={deleting?.name ?? ''}
-        description="Enrollments, teacher assignments and every attendance record, topic, meeting, material and grade for this class point at it. The server checks first and will refuse if any still exist."
+        description="Enrollments, teacher assignments and every attendance record, topic, meeting, material and grade for this class point at it. It can't be deleted while any of these still exist."
         onDelete={(force) => deleteClass.mutateAsync({ classId: deleting!.id, force })}
       />
     </>

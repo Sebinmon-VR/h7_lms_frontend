@@ -2493,12 +2493,16 @@ function RequestDetailSheet({
                   <Detail label="Address" value={address} />
                 </div>
                 <Detail label="Sibling here" value={request.sibling_name} />
-                <Detail label="Transport" value={request.transport_required ? 'Required' : 'Not needed'} />
+                {/* The website form no longer asks about transport or medical needs; older
+                    applications that answered still show it. */}
+                {request.transport_required && <Detail label="Transport" value="Required" />}
                 <Detail label="How they heard of us" value={request.how_heard} />
                 <Detail label="Submitted" value={formatDateTime(request.submitted_at)} />
-                <div className="sm:col-span-2">
-                  <Detail label="Medical or support needs" value={request.medical_notes} />
-                </div>
+                {request.medical_notes && (
+                  <div className="sm:col-span-2">
+                    <Detail label="Medical or support needs" value={request.medical_notes} />
+                  </div>
+                )}
                 <div className="sm:col-span-2">
                   <Detail label="Message from the family" value={request.message} />
                 </div>

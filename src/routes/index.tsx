@@ -434,6 +434,14 @@ export function AppRoutes() {
                   path="/tuition/student/report-cards/:cardId"
                   element={<TuitionStudentReportCardDetail />}
                 />
+                {/* The school's games screens, solo half only: the bot, the lab
+                    and the locker. They read the /tuition prefix to keep their
+                    links (and this menu) on the tuition side. */}
+                <Route path="/tuition/student/games" element={<ArenaHub />} />
+                <Route path="/tuition/student/games/quiz" element={<ArenaHome />} />
+                <Route path="/tuition/student/games/battle/:matchId" element={<ArenaBattle />} />
+                <Route path="/tuition/student/games/locker" element={<ArenaLocker />} />
+                <Route path="/tuition/student/games/lab" element={<VirtualLab />} />
               </Route>
             </Route>
 

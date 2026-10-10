@@ -10,6 +10,7 @@ import { useMediaQuery } from '@/lib/hooks'
 import { useMyLabAssignments, useRecordLabAttempt } from '@/queries/lab.queries'
 import { toast } from 'sonner'
 import { AdminStudentNotice, useIsAdminViewingStudent } from '../student-guard'
+import { useArenaPaths } from '../arena/arena-paths'
 import { Bench, GhostArt } from './bench'
 import { Cabinet } from './cabinet'
 import { DragProvider } from './drag'
@@ -62,6 +63,8 @@ export default function LabPage({ onExperimentComplete }: LabPageProps) {
 function ConnectedLab({ onExperimentComplete }: LabPageProps) {
   const assignmentsQuery = useMyLabAssignments()
   const record = useRecordLabAttempt()
+  // Online tuition has no teacher-set experiments, so nobody to save a run "for".
+  const { tuition } = useArenaPaths()
   const assigned = React.useMemo<AssignedExperiment[]>(
     () =>
       (assignmentsQuery.data ?? []).map((a) => {
@@ -94,7 +97,7 @@ function ConnectedLab({ onExperimentComplete }: LabPageProps) {
         onSuccess: (r) => {
           if (r.first_time) {
             toast.success(`+${r.xp} XP · +${r.coins} coins`, {
-              description: r.new_badges.length ? `New badge: ${r.new_badges.map((b) => b.name).join(', ')}` : 'Saved for your teacher.',
+              description: r.new_badges.length ? `New badge: ${r.new_badges.map((b) => b.name).join(', ')}` : tuition ? 'Saved to your lab record.' : 'Saved for your teacher.',
             })
           } else {
             toast('Result saved', { description: 'Rewards are paid the first time you complete an experiment.' })
@@ -355,10 +358,11 @@ function TopBar({
   onMute: () => void
   onIdea: (id: string) => void
 }) {
+  const paths = useArenaPaths()
   return (
     <header className="flex flex-wrap items-center gap-2">
       <ArenaButton asChild variant="secondary" size="icon" className="shrink-0">
-        <Link to="/student/arena" aria-label="Back to games">
+        <Link to={paths.shelf} aria-label="Back to games">
           <ChevronLeft />
         </Link>
       </ArenaButton>

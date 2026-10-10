@@ -19,6 +19,7 @@ import { unlockArenaAudio } from '@/lib/arena-sound'
 import { cn } from '@/lib/cn'
 import { useCreateMatch, useJoinByCode, useJoinQueue, useLeaveQueue } from '@/queries/arena.queries'
 import { ARENA_DIALOG, ARENA_INPUT, botArt, busyMatchId } from './helpers'
+import { useArenaPaths } from '../arena-paths'
 
 type Source =
   | { kind: 'class'; subjectId: number | null; chapterId: number | null }
@@ -35,10 +36,10 @@ function challengePlayable(c: ArenaChallenge, min: number) {
   return c.is_open && c.question_count >= min
 }
 
-function initialSource(home: ArenaHome): Source {
-  if (home.class && home.subjects.some((s) => s.playable)) return { kind: 'class', subjectId: null, chapterId: null }
+function initialSource(home: ArenaHome, solo: boolean): Source {
+  if (!solo && home.class && home.subjects.some((s) => s.playable)) return { kind: 'class', subjectId: null, chapterId: null }
   const open = home.challenges.find((c) => challengePlayable(c, home.min_questions))
-  if (open) return { kind: 'global', challengeId: open.id }
+  if (open || solo) return { kind: 'global', challengeId: open?.id ?? null }
   return { kind: 'class', subjectId: null, chapterId: null }
 }
 
@@ -51,11 +52,14 @@ function initialSource(home: ArenaHome): Source {
  */
 export function useBattleSetup(home: ArenaHome, onBusy: (matchId: number) => void) {
   const navigate = useNavigate()
+  const paths = useArenaPaths()
+  // Online tuition: the bot on a global challenge, nothing else (no class, no classmates).
+  const solo = paths.tuition
   const create = useCreateMatch()
   const joinQueue = useJoinQueue()
   const leaveQueue = useLeaveQueue()
 
-  const [source, setSource] = React.useState<Source>(() => initialSource(home))
+  const [source, setSource] = React.useState<Source>(() => initialSource(home, solo))
   const [rounds, setRounds] = React.useState<Rounds>('7')
   const [opponent, setOpponent] = React.useState<Opponent>('BOT')
   const [botLevel, setBotLevel] = React.useState<ArenaBotLevel>('MEDIUM')
@@ -88,7 +92,7 @@ export function useBattleSetup(home: ArenaHome, onBusy: (matchId: number) => voi
       ? { scope: 'GLOBAL', challenge_id: source.challengeId }
       : { scope: 'CLASS', subject_id: source.subjectId, chapter_id: source.chapterId }
 
-  const go = (matchId: number) => navigate(`/student/arena/battle/${matchId}`)
+  const go = (matchId: number) => navigate(paths.battle(matchId))
 
   const onError = (error: unknown) => {
     const busy = busyMatchId(error)
@@ -162,6 +166,7 @@ export function useBattleSetup(home: ArenaHome, onBusy: (matchId: number) => voi
 
   return {
     home,
+    solo,
     source,
     setSource,
     rounds,
@@ -327,7 +332,8 @@ export function BattleSettingsDialog({
         <DialogBody className="space-y-5 px-4 sm:px-6">
           {/* Opponent */}
           <section className="space-y-2">
-            <Label>Opponent</Label>
+            <Label>{setup.solo ? 'Bot' : 'Opponent'}</Label>
+            {!setup.solo && (
             <div role="group" aria-label="Opponent" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {MODES.map((m) => (
                 <Tile key={m.value} active={opponent === m.value} onClick={() => setup.setOpponent(m.value)} className="h-[6.5rem]">
@@ -340,6 +346,7 @@ export function BattleSettingsDialog({
                 </Tile>
               ))}
             </div>
+            )}
             {opponent === 'BOT' && home.bots.length > 0 && (
               <div role="group" aria-label="Bot difficulty" className="grid grid-cols-3 gap-2 pt-1">
                 {home.bots.map((b) => (
@@ -373,7 +380,8 @@ export function BattleSettingsDialog({
           {/* Questions */}
           <section className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <Label>Questions</Label>
+              <Label>{setup.solo ? 'Global challenge' : 'Questions'}</Label>
+              {!setup.solo && (
               <ArenaTabs
                 size="sm"
                 aria-label="Question source"
@@ -384,6 +392,7 @@ export function BattleSettingsDialog({
                   { value: 'global', label: 'Global', icon: <Globe />, count: home.challenges.length || undefined },
                 ]}
               />
+              )}
             </div>
 
             {source.kind === 'class' ? (
@@ -516,6 +525,7 @@ export function BattleSettingsDialog({
 /** Host a private room on the current questions, or join a friend's with a code. */
 export function RoomDialog({ setup, open, onOpenChange }: { setup: BattleSetup; open: boolean; onOpenChange: (open: boolean) => void }) {
   const navigate = useNavigate()
+  const paths = useArenaPaths()
   const join = useJoinByCode()
   const [code, setCode] = React.useState('')
   const valid = code.length === 6
@@ -529,7 +539,7 @@ export function RoomDialog({ setup, open, onOpenChange }: { setup: BattleSetup; 
     if (!valid) return
     unlockArenaAudio()
     join.mutate(code, {
-      onSuccess: (view) => navigate(`/student/arena/battle/${view.id}`),
+      onSuccess: (view) => navigate(paths.battle(view.id)),
       onError: (error) => {
         const busy = busyMatchId(error)
         if (busy != null) {

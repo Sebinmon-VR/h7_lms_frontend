@@ -53,9 +53,6 @@ export function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : 'That did not work. Please try again.'
 }
 
-/** Where the quiz battle lobby lives; every "back" from a battle lands here. */
-export const QUIZ_LOBBY = '/student/arena/quiz'
-
 /**
  * One accent per answer slot, from the theme. The letter badge carries the
  * identity, so colour is never the only cue.

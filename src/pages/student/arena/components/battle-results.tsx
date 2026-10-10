@@ -11,7 +11,8 @@ import { arenaSound } from '@/lib/arena-sound'
 import { cn } from '@/lib/cn'
 import { useCountUp } from '@/lib/hooks'
 import { type EmoteBubble, PortraitCard } from './battle-players'
-import { medalArt, ordinal, QUIZ_LOBBY } from './helpers'
+import { medalArt, ordinal } from './helpers'
+import { useArenaPaths } from '../arena-paths'
 
 const OUTCOME: Record<ArenaOutcome, { word: string; line: string; text: string; bar: string; art: ArtName | null }> = {
   WIN: {
@@ -161,6 +162,7 @@ export function BattleResults({
   rematching: boolean
 }) {
   const reduced = useReducedMotion()
+  const paths = useArenaPaths()
   const [confetti, fire] = useCelebration()
   const [badgesShown, setBadgesShown] = React.useState(0)
   const [reviewOpen, setReviewOpen] = React.useState(false)
@@ -372,16 +374,18 @@ export function BattleResults({
         </ArenaButton>
         <div className="flex gap-2">
           <ArenaButton asChild variant="secondary" size="lg" className="h-12">
-            <Link to={QUIZ_LOBBY}>
+            <Link to={paths.quiz}>
               <ArrowLeft />
               Lobby
             </Link>
           </ArenaButton>
-          <ArenaButton asChild variant="secondary" size="icon" className="size-12">
-            <Link to="/student/arena/leaderboard" aria-label="Leaderboard">
-              <Trophy className="text-warning" />
-            </Link>
-          </ArenaButton>
+          {paths.leaderboard && (
+            <ArenaButton asChild variant="secondary" size="icon" className="size-12">
+              <Link to={paths.leaderboard} aria-label="Leaderboard">
+                <Trophy className="text-warning" />
+              </Link>
+            </ArenaButton>
+          )}
         </div>
       </div>
 

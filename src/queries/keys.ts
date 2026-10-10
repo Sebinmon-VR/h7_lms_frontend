@@ -77,6 +77,8 @@ export const qk = {
     root: ['admin'] as const,
     users: (role?: UserRole) => ['admin', 'users', role ?? 'ALL'] as const,
     usersRoot: () => ['admin', 'users'] as const,
+    /** The demo module catalogue; it lives in code on the server, so it never changes. */
+    demoModules: () => ['admin', 'demo', 'modules'] as const,
     /** Who is online; polled, its own key so it never drags the user list along. */
     presence: () => ['admin', 'presence'] as const,
     classes: () => ['admin', 'classes'] as const,

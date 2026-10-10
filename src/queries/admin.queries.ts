@@ -50,6 +50,16 @@ export function useUsers(role?: UserRole) {
   })
 }
 
+/** The modules a demo account can have unlocked, for the user forms. */
+export function useDemoModules(enabled = true) {
+  return useQuery({
+    queryKey: qk.admin.demoModules(),
+    queryFn: () => adminApi.demoModules(),
+    staleTime: Infinity,
+    enabled,
+  })
+}
+
 /**
  * Who is online. Polled every 30 seconds under its own key, so the dots move
  * without the whole user list refetching. A user is online when the server

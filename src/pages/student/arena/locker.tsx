@@ -8,6 +8,7 @@ import { useAuth } from '@/providers/auth-provider'
 import { ArenaButton, ArenaEmpty, ArenaHeader, ArenaShell, ArenaTabs, ResourcePill } from '@/components/arena/arena-theme'
 import { ArenaErrorNotice, Bone, ProfileCardState, type SlotTotals } from '@/components/arena/profile-card'
 import { AdminStudentNotice, useIsAdminViewingStudent } from '../student-guard'
+import { useArenaPaths } from './arena-paths'
 import { BadgesTab } from './locker-parts/badges'
 import { ConfirmBuy, ShopGrid, UnlockReveal } from './locker-parts/shop'
 import { Showcase, TryOnBar, useOnScreen } from './locker-parts/showcase'
@@ -24,6 +25,7 @@ type LockerTab = 'shop' | 'badges' | 'card'
 
 export default function ArenaLockerPage() {
   const isAdmin = useIsAdminViewingStudent()
+  const paths = useArenaPaths()
   const { user } = useAuth()
   const [params, setParams] = useSearchParams()
   const tabParam = params.get('tab')
@@ -58,7 +60,7 @@ export default function ArenaLockerPage() {
   const header = (
     <div className="flex items-start gap-2">
       <ArenaButton asChild variant="secondary" size="icon" className="mt-0.5">
-        <Link to="/student/arena" aria-label="Back to the arena">
+        <Link to={paths.shelf} aria-label="Back to the arena">
           <ChevronLeft />
         </Link>
       </ArenaButton>
