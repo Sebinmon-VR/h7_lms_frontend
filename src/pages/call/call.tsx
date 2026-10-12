@@ -1,14 +1,17 @@
-import type { CallAgent } from '@azure/communication-calling'
+import { LocalVideoStream, type CallAgent } from '@azure/communication-calling'
 import { AzureCommunicationTokenCredential } from '@azure/communication-common'
 import {
   CallComposite,
+  COMPOSITE_LOCALE_EN_US,
   createAzureCommunicationCallAdapterFromClient,
   createStatefulCallClient,
   darkTheme,
   lightTheme,
   type CallAdapter,
+  type CallCompositeIcons,
+  type CompositeLocale,
 } from '@azure/communication-react'
-import { AlertCircle, ArrowLeft, Circle, Loader2, PhoneOff, RotateCcw, Square } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Circle, Loader2, PhoneOff, Presentation, RotateCcw, Square, X } from 'lucide-react'
 import * as React from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -16,9 +19,34 @@ import { toast } from 'sonner'
 import { CALL_KINDS, callsApi, reportLeftOnUnload, type CallKind, type CallSession } from '@/api/calls.api'
 import { ApiError } from '@/api/errors'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/cn'
 import { formatDateTime } from '@/lib/datetime'
 import { roleHome, useAuth } from '@/providers/auth-provider'
 import { useTheme } from '@/providers/theme-provider'
+
+import { Whiteboard } from './whiteboard'
+
+// The calling UI's notices close with an icon it never registers itself, so
+// the close button drew as an empty, invisible box.
+const CALL_ICONS = { Cancel: <X className="size-4" /> } as unknown as CallCompositeIcons
+
+// Its recording notice speaks of "consent to be transcribed"; classes are
+// recorded, not transcribed.
+const callStrings = COMPOSITE_LOCALE_EN_US.component.strings
+const CALL_LOCALE: CompositeLocale = {
+  ...COMPOSITE_LOCALE_EN_US,
+  component: {
+    ...COMPOSITE_LOCALE_EN_US.component,
+    strings: {
+      ...callStrings,
+      notificationStack: {
+        ...callStrings.notificationStack,
+        recordingStarted: { title: 'This class is being recorded.', dismissButtonAriaLabel: 'Close' },
+        recordingStopped: { title: 'Recording stopped.', dismissButtonAriaLabel: 'Close' },
+      },
+    },
+  },
+}
 
 type Phase =
   | { name: 'loading' }
@@ -38,6 +66,9 @@ type Phase =
  * The page tells the server two things the office relies on: when the call
  * actually connected (the join in the attendance log, and the teacher's cue to
  * start recording) and when the person left (the leave, and stopping it).
+ *
+ * The teacher also has a whiteboard. It is shown to the class as the teacher's
+ * screen share, so students need nothing extra to see it.
  */
 export default function CallPage() {
   const { kind: rawKind = '', entityId = '' } = useParams()
@@ -49,6 +80,18 @@ export default function CallPage() {
   const [attempt, setAttempt] = React.useState(0)
   const [recording, setRecording] = React.useState(false)
   const [recordingBusy, setRecordingBusy] = React.useState(false)
+  const [connected, setConnected] = React.useState(false)
+  // The board is mounted on first open and then only hidden, so its pages last
+  // the whole call.
+  const [boardMounted, setBoardMounted] = React.useState(false)
+  const [boardOpen, setBoardOpen] = React.useState(false)
+  const [boardShared, setBoardShared] = React.useState(false)
+  const [boardSharing, setBoardSharing] = React.useState(false)
+  const boardCanvasRef = React.useRef<HTMLCanvasElement | null>(null)
+  const boardStreamRef = React.useRef<MediaStream | null>(null)
+  // Show the board to the class as soon as the call connects, unless the
+  // teacher hid it.
+  const boardWantedRef = React.useRef(false)
 
   const agentRef = React.useRef<CallAgent | null>(null)
   // True between the call connecting and this person leaving it, so a leave is
@@ -61,6 +104,12 @@ export default function CallPage() {
     } catch {
       return null
     }
+  }, [])
+
+  const releaseBoardStream = React.useCallback(() => {
+    boardStreamRef.current?.getTracks().forEach((track) => track.stop())
+    boardStreamRef.current = null
+    setBoardShared(false)
   }, [])
 
   React.useEffect(() => {
@@ -118,7 +167,17 @@ export default function CallPage() {
       agentRef.current = agent
       setRecording(session.recording_active)
 
+      let screenSharing = false
       adapter.onStateChange((state) => {
+        setConnected(state.call?.state === 'Connected')
+        // Sharing stopped from the call's own controls (or by the browser)
+        // takes the board off the class's screens too.
+        const sharingNow = Boolean(state.call?.isScreenSharingOn)
+        if (screenSharing && !sharingNow && boardStreamRef.current) {
+          boardWantedRef.current = false
+          releaseBoardStream()
+        }
+        screenSharing = sharingNow
         if (state.call?.state === 'Connected' && !inCallRef.current) {
           inCallRef.current = true
           void serverCallId().then((id) =>
@@ -138,6 +197,8 @@ export default function CallPage() {
           void callsApi.left(kind, entityId).catch(() => undefined)
         }
         setRecording(false)
+        setConnected(false)
+        releaseBoardStream()
         setPhase({ name: 'left', session })
       })
 
@@ -153,10 +214,12 @@ export default function CallPage() {
         void callsApi.left(kind, entityId).catch(() => undefined)
       }
       agentRef.current = null
+      releaseBoardStream()
+      setConnected(false)
       adapter?.dispose()
       agent?.dispose()
     }
-  }, [kind, entityId, attempt, serverCallId])
+  }, [kind, entityId, attempt, serverCallId, releaseBoardStream])
 
   // A closing tab cancels ordinary requests, so the leave goes out as a
   // keep-alive request instead.
@@ -168,6 +231,57 @@ export default function CallPage() {
     window.addEventListener('pagehide', onUnload)
     return () => window.removeEventListener('pagehide', onUnload)
   }, [kind, entityId])
+
+  const showBoard = React.useCallback(async () => {
+    const call = agentRef.current?.calls[0]
+    const canvas = boardCanvasRef.current
+    if (!call || !canvas || boardStreamRef.current) return
+    boardWantedRef.current = true
+    setBoardSharing(true)
+    const media = canvas.captureStream(15)
+    try {
+      // One screen share at a time: the board replaces a shared window.
+      if (call.isScreenSharingOn) await call.stopScreenSharing()
+      boardStreamRef.current = media
+      await call.startScreenSharing(new LocalVideoStream(media))
+      setBoardShared(true)
+    } catch (error) {
+      console.error('Could not show the whiteboard', error)
+      boardWantedRef.current = false
+      releaseBoardStream()
+      media.getTracks().forEach((track) => track.stop())
+      toast.error('The whiteboard could not be shown to the class. Try again.')
+    } finally {
+      setBoardSharing(false)
+    }
+  }, [releaseBoardStream])
+
+  const hideBoard = React.useCallback(async () => {
+    boardWantedRef.current = false
+    if (!boardStreamRef.current) return
+    const call = agentRef.current?.calls[0]
+    releaseBoardStream()
+    try {
+      if (call?.isScreenSharingOn) await call.stopScreenSharing()
+    } catch {
+      // The call may already be over.
+    }
+  }, [releaseBoardStream])
+
+  const openBoard = () => {
+    setBoardMounted(true)
+    setBoardOpen(true)
+    boardWantedRef.current = true
+  }
+
+  const closeBoard = () => {
+    setBoardOpen(false)
+    void hideBoard()
+  }
+
+  React.useEffect(() => {
+    if (connected && boardOpen && boardWantedRef.current && !boardStreamRef.current) void showBoard()
+  }, [connected, boardOpen, showBoard])
 
   const leaveTo = () => {
     if (window.history.length > 1) navigate(-1)
@@ -245,7 +359,7 @@ export default function CallPage() {
 
   const { session, adapter } = phase
   return (
-    <div className="flex h-dvh flex-col bg-background">
+    <div className="flex h-dvh flex-col overflow-hidden bg-background">
       <header className="flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3 py-1.5 sm:px-4">
         <Button variant="ghost" size="sm" icon={<ArrowLeft />} onClick={leaveTo} aria-label="Back to the LMS" />
         <div className="min-w-0 flex-1">
@@ -264,6 +378,17 @@ export default function CallPage() {
         )}
         {session.is_host && (
           <Button
+            variant={boardOpen ? 'solid' : 'outline'}
+            size="sm"
+            icon={<Presentation />}
+            onClick={boardOpen ? closeBoard : openBoard}
+            aria-pressed={boardOpen}
+          >
+            Whiteboard
+          </Button>
+        )}
+        {session.is_host && (
+          <Button
             variant="outline"
             size="sm"
             loading={recordingBusy}
@@ -274,12 +399,37 @@ export default function CallPage() {
           </Button>
         )}
       </header>
-      <div className="relative min-h-0 flex-1">
-        <CallComposite
-          adapter={adapter}
-          fluentTheme={resolved === 'dark' ? darkTheme : lightTheme}
-          formFactor={window.matchMedia('(max-width: 640px)').matches ? 'mobile' : 'desktop'}
-        />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+        {boardMounted && kind && (
+          <Whiteboard
+            storageKey={`h7lms.whiteboard.${new Date().toLocaleDateString('en-CA')}.${kind}.${entityId}`}
+            canvasRef={boardCanvasRef}
+            open={boardOpen}
+            shared={boardShared}
+            sharing={boardSharing}
+            canShare={connected}
+            onShare={() => void showBoard()}
+            onStopSharing={() => void hideBoard()}
+            onClose={closeBoard}
+            className="min-h-0 min-w-0 flex-[3]"
+          />
+        )}
+        <div
+          className={cn(
+            'relative min-h-0 min-w-0 flex-1',
+            // With the board open the call shrinks to a strip (phones) or a
+            // side column, still in the same place so it is not restarted.
+            boardOpen && 'h-56 flex-none border-t border-border lg:h-auto lg:w-[360px] lg:border-l lg:border-t-0',
+          )}
+        >
+          <CallComposite
+            adapter={adapter}
+            icons={CALL_ICONS}
+            locale={CALL_LOCALE}
+            fluentTheme={resolved === 'dark' ? darkTheme : lightTheme}
+            formFactor={window.matchMedia('(max-width: 640px)').matches ? 'mobile' : 'desktop'}
+          />
+        </div>
       </div>
     </div>
   )

@@ -177,7 +177,20 @@ export default function StudentDashboardPage() {
   const upcomingQuery = useStudentUpcoming(!enrollment.isAdmin)
   // The class's shared room: the one link the whole day happens in.
   const roomsQuery = useMyClassRooms(!enrollment.isAdmin)
-  const classRoom = roomsQuery.data?.[0] ?? null
+  const nextPeriod = (upcomingQuery.data ?? [])[0] ?? null
+  // A student in more than one class gets the room of the class whose period
+  // the card shows, not simply their first class's (which may have no room).
+  const classRoom = React.useMemo(() => {
+    const rooms = roomsQuery.data ?? []
+    const classId = nextPeriod?.entry.class_id
+    return (
+      (classId != null && rooms.find((room) => room.class_id === classId)) ||
+      rooms.find((room) => room.may_join) ||
+      rooms.find((room) => room.has_room) ||
+      rooms[0] ||
+      null
+    )
+  }, [roomsQuery.data, nextPeriod])
 
   const attendance = React.useMemo(() => attendanceQuery.data ?? [], [attendanceQuery.data])
   const grades = React.useMemo(() => gradesQuery.data ?? [], [gradesQuery.data])
@@ -190,8 +203,6 @@ export default function StudentDashboardPage() {
     () => nextMeeting(meetingsQuery.data ?? [], now),
     [meetingsQuery.data, now],
   )
-  const nextPeriod = (upcomingQuery.data ?? [])[0] ?? null
-
   const recentGrades = React.useMemo(
     () => [...grades].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 4),
     [grades],
