@@ -395,7 +395,6 @@ export default function StudentDashboardPage() {
                 asChild
                 variant={meetingLive ? 'primary' : 'outline'}
                 size="lg"
-                className={meetingLive ? 'animate-pulse-ring' : undefined}
               >
                 <a href={upcomingMeeting.meeting_link} target="_blank" rel="noopener noreferrer">
                   <Video className="size-4" />
