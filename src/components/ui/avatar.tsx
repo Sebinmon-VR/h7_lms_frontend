@@ -2,6 +2,7 @@ import * as React from 'react'
 import * as AvatarPrimitive from '@radix-ui/react-avatar'
 
 import { cn } from '@/lib/cn'
+import { resolveFileUrl } from '@/lib/files'
 import { initials } from '@/lib/format'
 
 const SIZES = {
@@ -39,8 +40,10 @@ export interface AvatarProps extends React.HTMLAttributes<HTMLSpanElement> {
   size?: keyof typeof SIZES
 }
 
-export function Avatar({ name, src, size = 'md', className, ...props }: AvatarProps) {
+export function Avatar({ name, src: stored, size = 'md', className, ...props }: AvatarProps) {
   const label = name ?? 'Unknown'
+  // An uploaded photo is a "/files/..." path on the API, not on this site.
+  const src = resolveFileUrl(stored)
   return (
     <AvatarPrimitive.Root
       className={cn(

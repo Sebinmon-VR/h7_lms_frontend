@@ -64,6 +64,9 @@ export default defineConfig(({ command, mode }) => {
         // values (`/uploads/...`) resolve without any rewriting.
         '/api': { target: BACKEND, changeOrigin: true },
         '/uploads': { target: BACKEND, changeOrigin: true },
+        // School files, profile photos included: the backend redirects these
+        // to a short-lived storage link.
+        '/files': { target: BACKEND, changeOrigin: true },
       },
     },
     build: {

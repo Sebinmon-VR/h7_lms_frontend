@@ -219,6 +219,8 @@ export function profileOf(user: UserOut): UserProfileFields {
     created_at: _created,
     updated_at: _updated,
     programs: _programs,
+    // Set by its own upload, never by the form: a stale copy would undo it.
+    photo_url: _photo,
     ...profile
   } = user
   return profile
@@ -343,6 +345,7 @@ export default function AdminUsersPage() {
             <UserCell
               name={row.original.full_name}
               email={row.original.email}
+              photo={row.original.photo_url}
               inactive={!row.original.is_active}
               presence={
                 presence.isPending

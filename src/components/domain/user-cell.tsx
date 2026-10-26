@@ -40,6 +40,7 @@ export function PresenceDot({ presence, className }: { presence: PresenceState; 
 export function UserCell({
   name,
   email,
+  photo,
   inactive,
   presence,
   size = 'sm',
@@ -47,6 +48,7 @@ export function UserCell({
 }: {
   name: string
   email?: string | null
+  photo?: string | null
   inactive?: boolean
   /** When given, the avatar carries the online/offline dot. */
   presence?: PresenceState | null
@@ -56,7 +58,7 @@ export function UserCell({
   return (
     <div className={cn('flex min-w-0 items-center gap-2.5', className)}>
       <span className="relative inline-flex shrink-0">
-        <Avatar name={name} size={size} className={inactive ? 'opacity-50 grayscale' : undefined} />
+        <Avatar name={name} src={photo} size={size} className={inactive ? 'opacity-50 grayscale' : undefined} />
         {presence && <PresenceDot presence={presence} />}
       </span>
       <div className="min-w-0">

@@ -243,7 +243,6 @@ const CONTACT_KEYS: (keyof UserProfileFields)[] = [
   'alternate_phone',
   'date_of_birth',
   'gender',
-  'photo_url',
 ]
 const ADDRESS_KEYS: (keyof UserProfileFields)[] = [
   'address_line1',
@@ -356,13 +355,6 @@ export function ProfileFieldsSection({
             </Select>
           </div>
         </div>
-        <TextField
-          id="pf-photo"
-          label="Photo URL"
-          value={value.photo_url}
-          onChange={set('photo_url')}
-          placeholder="https://…"
-        />
       </Section>
 
       <Section flat={flat} title="Address" filled={countFilled(value, ADDRESS_KEYS)}>

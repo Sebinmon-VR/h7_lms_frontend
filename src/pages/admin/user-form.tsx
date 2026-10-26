@@ -25,6 +25,7 @@ import { Field, FormError } from '@/components/forms/field'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { FormActions, FormPage, FormSection } from '@/components/forms/form-page'
 import { ActiveBadge, RoleBadge } from '@/components/domain/badges'
+import { PhotoField } from '@/components/domain/photo-field'
 import { ProfileFieldsSection } from '@/components/domain/profile-fields'
 import {
   DemoAccessFields,
@@ -384,29 +385,38 @@ function EditUserForm({ user }: { user: UserOut }) {
         </>
       }
       aside={
-        <Card className="space-y-3 p-5">
-          <h3 className="text-sm font-semibold">Account</h3>
-          <dl className="space-y-3">
-            <div className="space-y-1">
-              <dt className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">
-                Created
-              </dt>
-              <dd className="text-sm font-medium">{formatDateTime(user.created_at)}</dd>
-            </div>
-            {user.updated_at && (
+        <div className="space-y-4">
+          <Card className="space-y-3 p-5">
+            <h3 className="text-sm font-semibold">Photo</h3>
+            <PhotoField user={user} />
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Saved straight away. The middle of the picture is cropped to a square.
+            </p>
+          </Card>
+          <Card className="space-y-3 p-5">
+            <h3 className="text-sm font-semibold">Account</h3>
+            <dl className="space-y-3">
               <div className="space-y-1">
                 <dt className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Last updated
+                  Created
                 </dt>
-                <dd className="text-sm font-medium">{formatDateTime(user.updated_at)}</dd>
+                <dd className="text-sm font-medium">{formatDateTime(user.created_at)}</dd>
               </div>
-            )}
-          </dl>
-          <p className="border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
-            Emptying a profile field leaves the stored value unchanged — this endpoint cannot
-            clear one.
-          </p>
-        </Card>
+              {user.updated_at && (
+                <div className="space-y-1">
+                  <dt className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Last updated
+                  </dt>
+                  <dd className="text-sm font-medium">{formatDateTime(user.updated_at)}</dd>
+                </div>
+              )}
+            </dl>
+            <p className="border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
+              Emptying a profile field leaves the stored value unchanged — this endpoint cannot
+              clear one.
+            </p>
+          </Card>
+        </div>
       }
       footer={
         <FormActions

@@ -72,7 +72,7 @@ export function UserDetailSheet({
           {user && (
             <>
               <div className="flex items-center gap-4">
-                <Avatar name={user.full_name} size="xl" />
+                <Avatar name={user.full_name} src={user.photo_url} size="xl" />
                 <div className="min-w-0">
                   <p className="truncate text-lg font-semibold">{user.full_name}</p>
                   <p className="flex items-center gap-1.5 truncate text-sm text-muted-foreground">

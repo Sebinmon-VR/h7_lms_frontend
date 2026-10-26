@@ -747,6 +747,32 @@ export function useReactivateUser() {
   })
 }
 
+/** Puts the saved user straight into every cached list, so the new face shows at once. */
+function usePhotoMutation<TVars>(mutationFn: (vars: TVars) => Promise<UserOut>) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn,
+    onSuccess: (user) => {
+      qc.setQueriesData<UserOut[]>({ queryKey: qk.admin.usersRoot() }, (prev) =>
+        prev?.map((u) => (u.id === user.id ? user : u)),
+      )
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.admin.usersRoot() })
+    },
+  })
+}
+
+export function useUploadUserPhoto() {
+  return usePhotoMutation(({ userId, photo }: { userId: number; photo: Blob }) =>
+    adminApi.uploadUserPhoto(userId, photo),
+  )
+}
+
+export function useRemoveUserPhoto() {
+  return usePhotoMutation((userId: number) => adminApi.removeUserPhoto(userId))
+}
+
 export function useCreateClass() {
   const qc = useQueryClient()
   return useMutation({
