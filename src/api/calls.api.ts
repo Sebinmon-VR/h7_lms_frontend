@@ -9,9 +9,9 @@ import { API_BASE } from '@/lib/env'
  * server applies the same rules as every join button before it hands out a
  * token, so a bookmarked link is no way round a closed class.
  */
-export type CallKind = 'class' | 'meeting' | 'tuition'
+export type CallKind = 'class' | 'meeting' | 'tuition' | 'exam'
 
-export const CALL_KINDS: readonly CallKind[] = ['class', 'meeting', 'tuition']
+export const CALL_KINDS: readonly CallKind[] = ['class', 'meeting', 'tuition', 'exam']
 
 export interface CallSession {
   kind: CallKind

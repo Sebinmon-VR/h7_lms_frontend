@@ -47,6 +47,7 @@ import {
   type Achievement,
 } from '@/components/fun/fun-ui'
 import { HeroHeader } from '@/components/layout/page-header'
+import { ExamAlerts } from '@/components/domain/exam-alerts'
 import { AdminStudentNotice, NotEnrolledState, useEnrollmentStatus } from './student-guard'
 
 /**
@@ -312,6 +313,8 @@ export default function StudentDashboardPage() {
   return (
     <>
       {confetti}
+
+      <ExamAlerts />
 
       <FunHero
         greeting={`${friendlyGreeting(now)}, ${user?.full_name?.split(' ')[0] ?? 'there'}!`}

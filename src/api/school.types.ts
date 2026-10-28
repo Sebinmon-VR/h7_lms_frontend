@@ -1893,6 +1893,25 @@ export interface LeaveApply {
   reason?: string | null
   contact_during_leave?: string | null
   attachments?: LeaveAttachment[]
+  /** The classes that need a substitute, each with the teacher the applicant chose. */
+  cover_plan?: CoverPlanItem[]
+}
+
+/** One class a leave takes away, and who covers it. Applied to the leave's days on approval. */
+export interface CoverPlanItem {
+  timetable_entry_id: number
+  substitute_teacher_id: number | null
+  /** Filled in on the way out. */
+  substitute_teacher_name?: string | null
+}
+
+/** A period of an approved leave's plan that could not be covered, and why. */
+export interface CoverGap {
+  date: ApiDate
+  class_name?: string | null
+  subject_name?: string | null
+  start_time?: string | null
+  reason: string
 }
 
 export interface LeaveDecision {
@@ -1906,6 +1925,7 @@ export interface LeaveDecision {
 /** What the applicant was timetabled to take, snapshotted at application time. */
 export interface AffectedPeriod {
   date: ApiDate
+  timetable_entry_id?: number | null
   class_id?: number | null
   class_name?: string | null
   subject_name?: string | null
@@ -1916,6 +1936,10 @@ export interface AffectedPeriod {
 export interface LeaveRequestOut {
   id: number
   teacher_id: number
+  /** Timetable periods (by entry id) marked as needing a substitute. */
+  cover_entry_ids?: number[]
+  cover_plan?: CoverPlanItem[]
+  cover_gaps?: CoverGap[]
   teacher_name?: string | null
   employee_id?: string | null
   leave_type: LeaveType

@@ -53,10 +53,12 @@ const AdminFinance = lazy(() => import('@/pages/admin/finance'))
 const AdminNotices = lazy(() => import('@/pages/admin/notices'))
 const AdminOversight = lazy(() => import('@/pages/admin/oversight'))
 const AdminSchoolSettings = lazy(() => import('@/pages/admin/school-settings'))
+const AdminGuideVideos = lazy(() => import('@/pages/admin/guide-videos'))
 
 const NoticeFeed = lazy(() => import('@/pages/shared/notices'))
 const CalendarPage = lazy(() => import('@/pages/shared/calendar'))
 const SupportPage = lazy(() => import('@/pages/shared/support'))
+const UserGuidePage = lazy(() => import('@/pages/shared/user-guide'))
 const HomeworkPage = lazy(() => import('@/pages/shared/homework'))
 const LeavePage = lazy(() => import('@/pages/shared/leave'))
 const ExtraClassesPage = lazy(() => import('@/pages/shared/extra-classes'))
@@ -233,6 +235,7 @@ export function AppRoutes() {
             <Route path="/notices" element={<NoticeFeed />} />
             <Route path="/calendar" element={<CalendarPage />} />
             <Route path="/support" element={<SupportPage />} />
+            <Route path="/guide" element={<UserGuidePage />} />
 
             <Route element={<RequireRole allow={['ADMIN']} />}>
               <Route path="/admin" element={<AdminDashboard />} />
@@ -274,6 +277,7 @@ export function AppRoutes() {
               <Route path="/admin/notices" element={<AdminNotices />} />
               <Route path="/admin/oversight" element={<AdminOversight />} />
               <Route path="/admin/settings" element={<AdminSchoolSettings />} />
+              <Route path="/admin/guide-videos" element={<AdminGuideVideos />} />
               {/* Admins reach the approval queues at their own prefix, which
                   is what the navigation links to; the pages themselves read
                   the role and show the deciding half. */}

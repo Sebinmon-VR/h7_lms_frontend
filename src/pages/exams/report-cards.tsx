@@ -46,7 +46,7 @@ import { Input, Textarea } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
-import { PrintReportCardButton, ReportCardTile, ReportCardView } from '@/components/domain/report-card'
+import { PrintReportCardButton, ReportCardTile, ReportCardView, withRowTotals } from '@/components/domain/report-card'
 import { EmptyState, ErrorState, NoResults } from '@/components/feedback/states'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field } from '@/components/forms/field'
@@ -410,7 +410,7 @@ export default function ReportCardsPage() {
             grouped.map(([key, list]) => {
               const first = list[0]
               const released = list.filter((c) => c.is_published).length
-              const average = list.reduce((sum, c) => sum + c.overall_percentage, 0) / list.length
+              const average = list.reduce((sum, c) => sum + withRowTotals(c).overall_percentage, 0) / list.length
               return (
                 <section key={key}>
                   <div className="mb-2.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">

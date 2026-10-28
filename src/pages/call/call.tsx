@@ -11,7 +11,7 @@ import {
   type CallCompositeIcons,
   type CompositeLocale,
 } from '@azure/communication-react'
-import { AlertCircle, ArrowLeft, Circle, Loader2, PhoneOff, Presentation, RotateCcw, Square, X } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Circle, ClipboardCheck, Loader2, PhoneOff, Presentation, RotateCcw, Square, X } from 'lucide-react'
 import * as React from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -25,6 +25,10 @@ import { roleHome, useAuth } from '@/providers/auth-provider'
 import { useTheme } from '@/providers/theme-provider'
 
 import { Whiteboard } from './whiteboard'
+import { RegisterPanel, usePeriodRegister } from './register-panel'
+import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { InvigilatorPanel } from './invigilator-panel'
+import { StudentExamTakeView } from '@/pages/student/exam-take'
 
 // The calling UI's notices close with an icon it never registers itself, so
 // the close button drew as an empty, invisible box.
@@ -81,6 +85,20 @@ export default function CallPage() {
   const [recording, setRecording] = React.useState(false)
   const [recordingBusy, setRecordingBusy] = React.useState(false)
   const [connected, setConnected] = React.useState(false)
+  // In an exam room, the student's uploads are drawn here, under the cameras.
+  const [examSideSlot, setExamSideSlot] = React.useState<HTMLDivElement | null>(null)
+  // A teacher's period register in a class room: opened by itself, once, when they connect
+  // and it has not been taken yet, so each teacher coming in for their period is asked.
+  const [registerOpen, setRegisterOpen] = React.useState(false)
+  const registerAsked = React.useRef(false)
+  const teachesHere = kind === 'class' && phase.name === 'ready' && phase.session.is_host
+  const register = usePeriodRegister(Number(entityId), teachesHere && connected)
+  React.useEffect(() => {
+    if (register.data && !register.data.taken && !registerAsked.current) {
+      registerAsked.current = true
+      setRegisterOpen(true)
+    }
+  }, [register.data])
   // The board is mounted on first open and then only hidden, so its pages last
   // the whole call.
   const [boardMounted, setBoardMounted] = React.useState(false)
@@ -203,6 +221,26 @@ export default function CallPage() {
       })
 
       setPhase({ name: 'ready', session, adapter })
+
+      // An exam room joins by itself - nobody should be able to forget to press Start call.
+      // Cameras come on for everyone; students' microphones start off, so a full class is
+      // not one open line, and the invigilator's starts on.
+      if (kind === 'exam') {
+        const examAdapter = adapter
+        void (async () => {
+          try {
+            await examAdapter.askDevicePermission({ video: true, audio: true })
+            const cameras = await examAdapter.queryCameras()
+            if (cameras[0]) await examAdapter.setCamera(cameras[0])
+            await examAdapter.queryMicrophones()
+            await examAdapter.querySpeakers()
+          } catch {
+            // Permission refused or no device: join anyway; the call shows the camera off.
+          }
+          if (cancelled) return
+          examAdapter.joinCall({ cameraOn: true, microphoneOn: session.is_host })
+        })()
+      }
     }
 
     void start()
@@ -317,7 +355,7 @@ export default function CallPage() {
       <div className="grid min-h-dvh place-items-center bg-background">
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
           <Loader2 className="size-5 animate-spin" />
-          Opening your class…
+          {kind === 'exam' ? 'Opening the exam room…' : 'Opening your class…'}
         </div>
       </div>
     )
@@ -358,6 +396,82 @@ export default function CallPage() {
   }
 
   const { session, adapter } = phase
+  const isExam = kind === 'exam'
+  // In an exam room a student's column is narrow and the leaving goes through Leave on the
+  // exam bar (which warns that the clock keeps running), so the call keeps only what an
+  // exam needs: camera, microphone and a raised hand.
+  const examStudentControls = {
+    displayType: 'compact' as const,
+    endCallButton: false,
+    screenShareButton: false,
+    moreButton: false,
+    reactionButton: false,
+    peopleButton: false,
+    participantsButton: false,
+    devicesButton: false,
+    holdButton: false,
+    captionsButton: false,
+  }
+  const composite = (
+    <CallComposite
+      adapter={adapter}
+      icons={CALL_ICONS}
+      locale={CALL_LOCALE}
+      fluentTheme={resolved === 'dark' ? darkTheme : lightTheme}
+      formFactor={window.matchMedia('(max-width: 640px)').matches ? 'mobile' : 'desktop'}
+      options={
+        isExam
+          ? { callControls: session.is_host ? { screenShareButton: false } : examStudentControls }
+          : undefined
+      }
+    />
+  )
+
+  if (isExam) {
+    // A live-invigilated exam. A student answers the paper with the cameras beside it; the
+    // teacher watches the cameras with the class's progress and the paper beside them.
+    return (
+      <div className="flex h-dvh flex-col overflow-hidden bg-background">
+        <header className="flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3 py-1.5 sm:px-4">
+          {session.is_host && (
+            <Button variant="ghost" size="sm" icon={<ArrowLeft />} onClick={leaveTo} aria-label="Back to the LMS" />
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold">{session.title} · exam room</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {[session.subtitle, session.ends_at && `Open until ${formatDateTime(session.ends_at)}`]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+          </div>
+          {!session.is_host && (
+            <span className="rounded-full bg-warning/15 px-2.5 py-1 text-xs font-medium text-warning">
+              Keep your camera on
+            </span>
+          )}
+        </header>
+        {session.is_host ? (
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+            <div className="relative min-h-0 min-w-0 flex-1">{composite}</div>
+            <aside className="max-h-[45dvh] min-h-0 overflow-y-auto border-t border-border lg:max-h-none lg:w-[400px] lg:border-l lg:border-t-0">
+              <InvigilatorPanel examId={Number(entityId)} />
+            </aside>
+          </div>
+        ) : (
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+            <div className="min-h-0 min-w-0 flex-[3] overflow-y-auto p-3">
+              <StudentExamTakeView examId={Number(entityId)} inRoom sideSlot={examSideSlot} />
+            </div>
+            <div className="flex max-h-[55dvh] flex-none flex-col border-t border-border bg-card lg:max-h-none lg:w-[400px] lg:border-l lg:border-t-0">
+              <div className="relative h-60 flex-none overflow-hidden lg:h-[320px]">{composite}</div>
+              <div ref={setExamSideSlot} className="min-h-0 flex-1 overflow-y-auto border-t border-border" />
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background">
       <header className="flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3 py-1.5 sm:px-4">
@@ -375,6 +489,16 @@ export default function CallPage() {
             <Circle className="size-2.5 fill-current" />
             Recording
           </span>
+        )}
+        {kind === 'class' && session.is_host && (
+          <Button
+            variant={registerOpen ? 'solid' : 'outline'}
+            size="sm"
+            icon={<ClipboardCheck />}
+            onClick={() => setRegisterOpen(true)}
+          >
+            {register.data && !register.data.taken ? 'Attendance · not taken' : 'Attendance'}
+          </Button>
         )}
         {session.is_host && (
           <Button
@@ -431,6 +555,19 @@ export default function CallPage() {
           />
         </div>
       </div>
+
+      {kind === 'class' && session.is_host && (
+        <Sheet open={registerOpen} onOpenChange={setRegisterOpen}>
+          <SheetContent side="right" className="flex w-full max-w-md flex-col">
+            <SheetHeader>
+              <SheetTitle>Attendance for this period</SheetTitle>
+            </SheetHeader>
+            <SheetBody className="flex min-h-0 flex-1 flex-col">
+              <RegisterPanel classId={Number(entityId)} />
+            </SheetBody>
+          </SheetContent>
+        </Sheet>
+      )}
     </div>
   )
 }

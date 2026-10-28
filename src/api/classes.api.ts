@@ -91,6 +91,10 @@ export const liveClassApi = {
 
   /** Who is in the room right now, by name. Teachers of the class and admins; a student gets 403. */
   presence: (classId: number) => get<RoomPresenceOut>(`/classes/rooms/${classId}/presence`),
+  /** This teacher's period register, suggested from who joined the room. */
+  periodRegister: (classId: number) => get<PeriodRegisterOut>(`/classes/rooms/${classId}/register`),
+  savePeriodRegister: (classId: number, body: PeriodRegisterSave) =>
+    post<PeriodRegisterOut>(`/classes/rooms/${classId}/register`, body),
 }
 
 /**
@@ -173,4 +177,40 @@ export const calendarApi = {
         group_by_day: query.groupByDay,
       }),
     }),
+}
+
+export type RegisterStatus = 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED'
+
+export interface PeriodRegisterRow {
+  student_id: number
+  name: string
+  /** What the room's join log suggests for this period. */
+  suggested: RegisterStatus
+  /** The saved mark once the register is taken, otherwise the suggestion. */
+  status: RegisterStatus
+  saved_status: RegisterStatus | null
+  remarks: string | null
+  joined_at: string | null
+  minutes: number
+  in_room_now: boolean
+}
+
+export interface PeriodRegisterOut {
+  class_id: number
+  class_name: string
+  subject_id: number
+  subject_name: string | null
+  date: string
+  starts_at: string
+  ends_at: string
+  taken: boolean
+  taken_by: string | null
+  late_after_minutes: number
+  students: PeriodRegisterRow[]
+}
+
+export interface PeriodRegisterSave {
+  subject_id: number
+  date: string
+  attendance_list: { student_id: number; status: RegisterStatus; remarks?: string | null }[]
 }

@@ -26,12 +26,12 @@ import { parseApiDateTime } from './datetime'
 
 export const EXAM_MODE_LABEL: Record<ExamMode, string> = {
   ONLINE: 'Online',
-  OFFLINE: 'Offline',
+  OFFLINE: 'Upload paper',
 }
 
 export const EXAM_MODE_HELP: Record<ExamMode, string> = {
   ONLINE: 'Students answer a question form in the LMS. Objective questions can be marked automatically.',
-  OFFLINE: 'Students write on paper and upload a scan or photo of their answer sheet, or answer a form you set.',
+  OFFLINE: 'You upload the question paper as a PDF, Word document or image. Students download it and upload their answers as a PDF, Word document or photos.',
 }
 
 export const EXAM_STATUS_LABEL: Record<ExamStatus, string> = {

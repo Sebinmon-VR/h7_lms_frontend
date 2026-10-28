@@ -421,6 +421,23 @@ export function useMyExams(enabled = true, live = false) {
   })
 }
 
+/**
+ * The exam this student is sitting right now, if any: started, not handed in, and still
+ * open for hand-in. Only real exams and tests lock the app - homework or a project can run
+ * for days, and nobody should be shut out of everything else for that long.
+ */
+export function useActiveExam(enabled = true) {
+  const query = useMyExams(enabled, true)
+  return (
+    (query.data ?? []).find(
+      (e) =>
+        e.submission_status === 'IN_PROGRESS' &&
+        e.can_submit &&
+        (e.category === 'EXAM' || e.category === 'TEST'),
+    ) ?? null
+  )
+}
+
 export function useMyExam(examId: number | null, enabled = true) {
   return useQuery({
     queryKey: qk.student.exam(examId ?? 0),
@@ -482,6 +499,20 @@ export function useSaveAnswers() {
     mutationFn: ({ examId, body }: { examId: number; body: AnswerSaveIn }) =>
       examApi.saveAnswers(examId, body),
     onSuccess: write,
+  })
+}
+
+export function useRemoveAnswerFile() {
+  const write = useMyScriptWriter()
+  return useMutation({
+    meta: { silent: true },
+    mutationFn: ({ examId, index }: { examId: number; index: number }) =>
+      examApi.removeMyAnswerFile(examId, index),
+    onSuccess: (updated) => {
+      write(updated)
+      toast.success('File removed')
+    },
+    onError: (error) => toast.error('The file could not be removed', { description: describe(error) }),
   })
 }
 

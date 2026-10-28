@@ -156,9 +156,9 @@ export const qk = {
     root: ['student'] as const,
     myClasses: () => ['student', 'my-classes'] as const,
     attendance: () => ['student', 'attendance'] as const,
-    topics: () => ['student', 'topics'] as const,
+    topics: (classId?: number) => ['student', 'topics', classId ?? 'all'] as const,
     meetings: () => ['student', 'meetings'] as const,
-    materials: () => ['student', 'materials'] as const,
+    materials: (classId?: number) => ['student', 'materials', classId ?? 'all'] as const,
     grades: () => ['student', 'grades'] as const,
     timetable: () => ['student', 'timetable'] as const,
     timetableDay: (onDate?: string) => ['student', 'timetable', 'day', onDate ?? 'today'] as const,
@@ -585,9 +585,14 @@ export const qk = {
     submissionsRoot: () => ['homework', 'submissions'] as const,
   },
 
+  cover: {
+    root: ['cover'] as const,
+    day: (day: string, scope: 'admin' | 'mine') => ['cover', 'day', scope, day] as const,
+  },
   leave: {
     root: ['leave'] as const,
     mine: (status?: string) => ['leave', 'mine', status ?? 'ALL'] as const,
+    affected: (start: string, end: string) => ['leave', 'affected', start, end] as const,
     mineRoot: () => ['leave', 'mine'] as const,
     myBalance: (academicYearId?: number) =>
       ['leave', 'my-balance', academicYearId ?? 'current'] as const,

@@ -4,7 +4,6 @@ import {
   CalendarClock,
   CheckCheck,
   ClipboardList,
-  ExternalLink,
   Eye,
   FileText,
   Hourglass,
@@ -15,6 +14,7 @@ import {
   Play,
   RotateCcw,
   Send,
+  Video,
   Timer,
   Trash2,
   TriangleAlert,
@@ -51,6 +51,8 @@ import {
   sortBands,
 } from '@/lib/exams'
 import { MAX_UPLOAD_BYTES, fileNameFromUrl, formatFileSize, resolveFileUrl, storageLabel } from '@/lib/files'
+import { examApi } from '@/api/exam.api'
+import { InlineFileRow } from '@/components/domain/document-viewer'
 import { formatPercent, performanceTone } from '@/lib/format'
 import { className as classLabel, subjectName } from '@/lib/select'
 import { Badge } from '@/components/ui/badge'
@@ -79,7 +81,6 @@ import {
   SubmissionStatusBadge,
 } from '@/components/domain/badges'
 import { FiledBy } from '@/components/domain/filed-by'
-import { FileTypeIcon } from '@/components/domain/file-type-icon'
 import { UserCell } from '@/components/domain/user-cell'
 import { EmptyState, ErrorState } from '@/components/feedback/states'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
@@ -233,7 +234,7 @@ function PaperCard({ exam }: { exam: ExamOut }) {
           <h3 className="text-sm font-semibold">Question paper</h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {exam.mode === 'OFFLINE'
-              ? 'Students download this, write on paper and upload their answer sheet.'
+              ? 'Students download this, answer it, and upload their answers as a PDF, Word document or photos.'
               : 'Optional — a printable version of the paper for reference.'}
           </p>
         </div>
@@ -241,17 +242,13 @@ function PaperCard({ exam }: { exam: ExamOut }) {
       </div>
 
       {url ? (
-        <div className="mt-3 flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5">
-          <FileTypeIcon url={exam.question_paper_url} size="sm" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{fileNameFromUrl(exam.question_paper_url)}</p>
-            <p className="text-2xs text-muted-foreground">Stored on {storageLabel(exam.question_paper_provider)}</p>
-          </div>
-          <Button asChild variant="outline" size="sm" icon={<ExternalLink />}>
-            <a href={url} target="_blank" rel="noreferrer">
-              Open
-            </a>
-          </Button>
+        <div className="mt-3">
+          <InlineFileRow
+            name={fileNameFromUrl(exam.question_paper_url) ?? 'Question paper'}
+            meta={`Stored on ${storageLabel(exam.question_paper_provider)}`}
+            cacheKey={`paper-${exam.id}-${exam.question_paper_url}`}
+            load={() => examApi.paperFile(exam.id)}
+          />
         </div>
       ) : null}
 
@@ -293,7 +290,7 @@ function PaperCard({ exam }: { exam: ExamOut }) {
                 <input
                   type="file"
                   className="sr-only"
-                  accept=".pdf,.doc,.docx,image/*"
+                  accept=".pdf,.doc,.docx,.odt,.rtf,image/*"
                   onChange={(e) => {
                     choose(e.target.files?.[0] ?? null)
                     e.target.value = ''
@@ -371,6 +368,17 @@ function OverviewTab({ exam, stats, onGoTo }: { exam: ExamOut; stats: ExamStats 
               <p className="mt-0.5 text-xs text-muted-foreground">
                 Students see nothing until this exam is published. Here is what it still needs.
               </p>
+              {exam.auto_publish && (
+                <p className="mt-2 text-xs font-medium text-primary">
+                  Publishes automatically at {formatDateTime(exam.auto_publish_at ?? exam.starts_at)}.
+                </p>
+              )}
+              {exam.auto_publish_error && (
+                <p className="mt-2 flex items-start gap-2 text-xs text-warning">
+                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                  {exam.auto_publish_error}
+                </p>
+              )}
               <div className="mt-3">
                 <Readiness exam={exam} />
               </div>
@@ -912,6 +920,11 @@ export default function ExamDetailPage() {
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {exam.live_invigilation && exam.status === 'PUBLISHED' && (
+            <Button asChild variant="primary" icon={<Video />}>
+              <Link to={`/call/exam/${exam.id}`}>Open exam room</Link>
+            </Button>
+          )}
           {exam.status === 'DRAFT' && (
             <Tooltip>
               <TooltipTrigger asChild>

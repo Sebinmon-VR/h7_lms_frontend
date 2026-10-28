@@ -3,6 +3,8 @@ import * as React from 'react'
 import { Link } from 'react-router-dom'
 
 import { useStudentMaterials, useStudentTopics } from '@/queries/student.queries'
+import { ClassChips } from '@/components/domain/class-chips'
+import { CourseTabs } from '@/components/domain/course-tabs'
 import { syllabusProgress } from '@/lib/derive'
 import { formatDate, formatDayLabel } from '@/lib/datetime'
 import { formatPercent } from '@/lib/format'
@@ -22,13 +24,15 @@ import {
 } from '@/components/fun/fun-ui'
 import { PageHeader } from '@/components/layout/page-header'
 import { AdminStudentNotice, NotEnrolledState, useEnrollmentStatus } from './student-guard'
+import { useStudentClassScope } from './class-scope'
 
 export default function StudentSyllabusPage() {
   const enrollment = useEnrollmentStatus()
-  const topicsQuery = useStudentTopics(!enrollment.isAdmin)
+  const scope = useStudentClassScope(!enrollment.isAdmin)
+  const topicsQuery = useStudentTopics(!enrollment.isAdmin, scope.classId ?? undefined)
   // Only to know which subjects have class videos to point at; shares the
   // Library's cache, so it costs nothing once either page has loaded.
-  const materialsQuery = useStudentMaterials(!enrollment.isAdmin)
+  const materialsQuery = useStudentMaterials(!enrollment.isAdmin, scope.classId ?? undefined)
 
   const topics = React.useMemo(() => topicsQuery.data ?? [], [topicsQuery.data])
   const progress = React.useMemo(() => syllabusProgress(topics, (t) => subjectName(t)), [topics])
@@ -75,9 +79,29 @@ export default function StudentSyllabusPage() {
       <FunPageHeader
         emoji="🧗"
         tone={6}
-        title="What we have learned"
+        title="Lessons & Materials"
         description="Everything your class has covered so far."
       />
+
+      <div className="mb-6">
+        <CourseTabs
+          active="lessons"
+          lessonsTo="/student/syllabus"
+          materialsTo="/student/materials"
+          keepParams={['class']}
+        />
+      </div>
+
+      {scope.classes.length > 1 && scope.classId !== null && (
+        <div className="mb-6">
+          <ClassChips
+            label="Class"
+            options={scope.classes.map((c) => ({ value: String(c.id), label: c.name }))}
+            value={String(scope.classId)}
+            onChange={(value) => scope.setClassId(Number(value))}
+          />
+        </div>
+      )}
 
       {topicsQuery.isPending ? (
         <div className="space-y-4">

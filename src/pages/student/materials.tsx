@@ -13,6 +13,8 @@ import { useSearchParams } from 'react-router-dom'
 
 import type { StudyMaterialOut } from '@/api/types'
 import { useStudentMaterials } from '@/queries/student.queries'
+import { ClassChips } from '@/components/domain/class-chips'
+import { CourseTabs } from '@/components/domain/course-tabs'
 import { newSince } from '@/lib/derive'
 import { STORAGE_KEYS } from '@/lib/constants'
 import { formatDate, formatDateTime, formatRelative } from '@/lib/datetime'
@@ -37,6 +39,7 @@ import { Appear, Stagger } from '@/components/fun/motion'
 import { FunChip, FunEmpty, FunPageHeader, FunSection, SubjectTile } from '@/components/fun/fun-ui'
 import { PageHeader } from '@/components/layout/page-header'
 import { AdminStudentNotice, NotEnrolledState, useEnrollmentStatus } from './student-guard'
+import { useStudentClassScope } from './class-scope'
 
 /**
  * The student's Library — class videos, notes and books in one place.
@@ -236,7 +239,8 @@ function DocumentCard({
 
 export default function StudentLibraryPage() {
   const enrollment = useEnrollmentStatus()
-  const materialsQuery = useStudentMaterials(!enrollment.isAdmin)
+  const scope = useStudentClassScope(!enrollment.isAdmin)
+  const materialsQuery = useStudentMaterials(!enrollment.isAdmin, scope.classId ?? undefined)
   const [params, setParams] = useSearchParams()
 
   const [lastSeen, setLastSeen] = usePersistentState<string | null>(
@@ -459,7 +463,7 @@ export default function StudentLibraryPage() {
       <FunPageHeader
         emoji="📚"
         tone={5}
-        title="Library"
+        title="Lessons & Materials"
         description={
           newCount > 0
             ? `${newCount} new thing${newCount === 1 ? '' : 's'} since you last looked!`
@@ -467,6 +471,20 @@ export default function StudentLibraryPage() {
         }
       >
         <div className="flex flex-col gap-3">
+          <CourseTabs
+            active="materials"
+            lessonsTo="/student/syllabus"
+            materialsTo="/student/materials"
+            keepParams={['class']}
+          />
+          {scope.classes.length > 1 && scope.classId !== null && (
+            <ClassChips
+              label="Class"
+              options={scope.classes.map((c) => ({ value: String(c.id), label: c.name }))}
+              value={String(scope.classId)}
+              onChange={(value) => scope.setClassId(Number(value))}
+            />
+          )}
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}

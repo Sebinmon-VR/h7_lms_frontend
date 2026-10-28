@@ -1055,6 +1055,8 @@ export interface TimetableEntryOut {
   /** Null when no teacher is mapped to the subject and class. */
   teacher_id: number | null
   teacher: UserOut | null
+  /** Set only on a date a substitute is taking this period. */
+  substitution?: PeriodSubstitutionOut | null
   day_of_week: DayOfWeek
   start_time: ApiTime
   end_time: ApiTime
@@ -1113,6 +1115,29 @@ export interface TimetableBulkResult {
  * instants it maps to — so the client never redoes weekday or timezone maths.
  */
 export type PeriodTeacherStatus = 'UPCOMING' | 'IN' | 'LEFT' | 'NOT_YET' | 'ABSENT'
+
+/** A substitute taking one period on one date. The recurring timetable is unchanged. */
+export interface PeriodSubstitutionOut {
+  on_date: ApiDate
+  substitute_teacher_id: number
+  substitute_teacher: UserOut | null
+  original_teacher_id: number | null
+  original_teacher: UserOut | null
+  note: string | null
+}
+
+/** A teacher's name and id, for choosing a substitute. */
+export interface TeacherSummaryOut {
+  id: number
+  full_name: string
+}
+
+export interface CoverCreate {
+  timetable_entry_id: number
+  on_date: ApiDate
+  substitute_teacher_id: number
+  note?: string | null
+}
 
 export interface ScheduledPeriod {
   entry: TimetableEntryOut
@@ -1505,6 +1530,11 @@ interface ExamRules {
   shuffle_questions?: boolean
   auto_grade_objective?: boolean
   max_upload_files?: number
+  /** Release the draft by itself at `auto_publish_at`, or at `starts_at` when that is empty. */
+  auto_publish?: boolean
+  auto_publish_at?: ApiDateTime | null
+  /** Sit the exam in a live call, watched by the teacher. */
+  live_invigilation?: boolean
 }
 
 /** POST /exams. `teacher_id` is for an admin filing on a teacher's behalf. */
@@ -1545,6 +1575,10 @@ export interface ExamUpdate {
   shuffle_questions?: boolean
   auto_grade_objective?: boolean
   max_upload_files?: number
+  auto_publish?: boolean
+  auto_publish_at?: ApiDateTime | null
+  /** Sit the exam in a live call, watched by the teacher. */
+  live_invigilation?: boolean
 }
 
 /** PUT /exams/{id}/questions — replaces the whole form. Refused once scripts are in. */
@@ -1629,6 +1663,11 @@ export interface ExamOut {
   question_paper_provider: string | null
   question_paper_warning: string | null
   max_upload_files: number
+  auto_publish?: boolean
+  auto_publish_at?: ApiDateTime | null
+  /** Why an auto-publishing draft was not released when it came due. */
+  auto_publish_error?: string | null
+  live_invigilation?: boolean
   results_published: boolean
   results_published_at: ApiDateTime | null
   created_at: ApiDateTime
@@ -1666,6 +1705,8 @@ export interface StudentExamOut {
   late_submission_allowed: boolean
   question_paper_url: string | null
   max_upload_files: number
+  /** Sat in a live call: the exam page lives inside /call/exam/<id>. */
+  live_invigilation?: boolean
   /** Empty in a listing and before the window opens. */
   questions: StudentQuestionOut[]
   question_count: number
@@ -1716,6 +1757,20 @@ export interface QuestionScoreOut {
 }
 
 /** One script, as staff read it during valuation. */
+/** One answer on an answer sheet, between two of the teacher's lines. */
+export interface MarkingPart {
+  label: string
+  marks: number | null
+  max_marks: number | null
+  comment: string | null
+}
+
+/** A file split into answers: lines as fractions of the way down (0 top, 1 bottom). */
+export interface MarkedFile {
+  dividers: number[]
+  segments: MarkingPart[]
+}
+
 export interface SubmissionOut {
   id: string
   exam_id: number
@@ -1730,6 +1785,12 @@ export interface SubmissionOut {
   expires_at: ApiDateTime | null
   is_late: boolean
   late_by_minutes: number
+  /** Set while the student has stepped out of the exam. */
+  away_since?: ApiDateTime | null
+  away_log?: { left_at: ApiDateTime; returned_at: ApiDateTime | null }[]
+  /** The teacher's marking on the answer sheets, keyed by the file's position ("0", "1"...). */
+  marking_sheet?: Record<string, MarkedFile>
+  marking_total?: number | null
   answers: AnswerOut[]
   attachments: AttachmentOut[]
   question_scores: QuestionScoreOut[]

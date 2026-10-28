@@ -55,6 +55,8 @@ export interface NavItem {
   /** Marks the section landing page so highlighting uses exact matching. */
   end?: boolean
   description?: string
+  /** Other paths this entry covers, so one entry can stand for two pages (lessons and materials). */
+  alsoActiveFor?: string[]
 }
 
 export interface NavSection {
@@ -227,9 +229,9 @@ const ADMIN_NAV: NavSection[] = [
       },
       {
         to: '/admin/leave',
-        label: 'Staff Leave',
+        label: 'Leave & Substitutes',
         icon: PlaneTakeoff,
-        description: 'Applications to decide, balances, and who is away today',
+        description: 'Leave to decide, who is away, and who takes each period',
       },
       {
         to: '/admin/oversight',
@@ -247,6 +249,12 @@ const ADMIN_NAV: NavSection[] = [
         label: 'School Settings',
         icon: Settings2,
         description: 'Admission and staff number formats, the live-class clock, and library access',
+      },
+      {
+        to: '/admin/guide-videos',
+        label: 'Guide Videos',
+        icon: BookOpen,
+        description: 'Add video walkthroughs to the User Guide',
       },
       {
         to: '/admin/integrations',
@@ -284,9 +292,14 @@ const TEACHER_NAV: NavSection[] = [
     heading: 'Classroom',
     items: [
       { to: '/teacher/attendance', label: 'Attendance', icon: CalendarCheck, description: 'Take the register' },
-      { to: '/teacher/topics', label: 'Syllabus', icon: ClipboardList, description: 'Note down what you taught' },
+      {
+        to: '/teacher/topics',
+        label: 'Lessons & Materials',
+        icon: ClipboardList,
+        description: 'What you taught, and the files for each class',
+        alsoActiveFor: ['/teacher/materials'],
+      },
       { to: '/teacher/meetings', label: 'Live Classes', icon: Video, description: 'Set up a session or share a recording' },
-      { to: '/teacher/materials', label: 'Materials', icon: Library, description: 'Share notes and worksheets' },
       { to: '/teacher/recordings', label: 'Recordings', icon: Clapperboard, description: 'Review class videos and publish them' },
       { to: '/teacher/gradebook', label: 'Gradebook', icon: FileText, description: 'Record and review test marks' },
       {
@@ -297,6 +310,39 @@ const TEACHER_NAV: NavSection[] = [
       },
     ],
   },
+  {
+    heading: 'Your time',
+    items: [
+      {
+        to: '/teacher/extra-classes',
+        label: 'Extra Classes',
+        icon: CalendarPlus,
+        description: 'Ask for a class outside the timetable',
+      },
+      {
+        to: '/teacher/leave',
+        label: 'Leave & Substitutes',
+        icon: PlaneTakeoff,
+        description: 'Apply for leave, or arrange a substitute for a period',
+      },
+    ],
+  },
+  {
+    heading: 'Assessment',
+    items: [
+      { to: '/teacher/exams', label: 'Exams', icon: ClipboardCheck, description: 'Set an exam, mark scripts, release results' },
+      {
+        to: '/teacher/report-cards',
+        label: 'Report Cards',
+        icon: FileBadge,
+        description: 'Issue term cards for the classes you lead',
+      },
+    ],
+  },
+]
+
+/** Last in a teacher's menu, below everything else: the games are not the day's work. */
+const TEACHER_ARENA_NAV: NavSection[] = [
   {
     heading: 'Arena',
     items: [
@@ -320,35 +366,6 @@ const TEACHER_NAV: NavSection[] = [
       },
     ],
   },
-  {
-    heading: 'Your time',
-    items: [
-      {
-        to: '/teacher/extra-classes',
-        label: 'Extra Classes',
-        icon: CalendarPlus,
-        description: 'Ask for a class outside the timetable',
-      },
-      {
-        to: '/teacher/leave',
-        label: 'My Leave',
-        icon: PlaneTakeoff,
-        description: 'Apply for leave and see what you have taken',
-      },
-    ],
-  },
-  {
-    heading: 'Assessment',
-    items: [
-      { to: '/teacher/exams', label: 'Exams', icon: ClipboardCheck, description: 'Set an exam, mark scripts, release results' },
-      {
-        to: '/teacher/report-cards',
-        label: 'Report Cards',
-        icon: FileBadge,
-        description: 'Issue term cards for the classes you lead',
-      },
-    ],
-  },
 ]
 
 const STUDENT_NAV: NavSection[] = [
@@ -364,9 +381,14 @@ const STUDENT_NAV: NavSection[] = [
     heading: 'Your work',
     items: [
       { to: '/student/attendance', label: 'My Days', icon: CalendarCheck, description: 'How often you were in class' },
-      { to: '/student/syllabus', label: 'What We Learned', icon: ClipboardList, description: 'Topics your class has covered' },
+      {
+        to: '/student/syllabus',
+        label: 'Lessons & Materials',
+        icon: ClipboardList,
+        description: 'What your class has covered, and its notes and videos',
+        alsoActiveFor: ['/student/materials'],
+      },
       { to: '/student/meetings', label: 'Live Classes', icon: Video, description: 'Join a class or watch it back' },
-      { to: '/student/materials', label: 'Library', icon: Library, description: 'Class videos, notes and books' },
       { to: '/student/exams', label: 'Exams', icon: ClipboardCheck, description: 'Sit an exam or see how you did' },
       { to: '/student/grades', label: 'My Marks', icon: FileText, description: 'How you did in each test' },
       { to: '/student/report-cards', label: 'Report Cards', icon: FileBadge, description: 'How your term went' },
@@ -814,6 +836,8 @@ export function navigationFor(
   // Appended rather than prepended: the shared screens are real, but they are
   // not what anybody signs in to do.
   sections.push(tuition ? SHARED_TUITION_NAV : SHARED_NAV)
+  // A school teacher's Arena sits at the very bottom, under the shared screens.
+  if (!tuition && (role === 'TEACHER' || role === 'CLASS_TEACHER')) sections.push(...TEACHER_ARENA_NAV)
   return sections
 }
 

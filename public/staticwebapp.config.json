@@ -4,13 +4,14 @@
     "rewrite": "/index.html",
     "exclude": [
       "/assets/*",
-      "/*.{css,js,map,svg,png,jpg,jpeg,ico,webp,woff,woff2}",
+      "/*.{css,js,mjs,map,svg,png,jpg,jpeg,ico,webp,woff,woff2}",
       "/legal/*",
       "/arena/*"
     ]
   },
   "mimeTypes": {
     ".json": "application/json",
-    ".webmanifest": "application/manifest+json"
+    ".webmanifest": "application/manifest+json",
+    ".mjs": "text/javascript"
   }
 }

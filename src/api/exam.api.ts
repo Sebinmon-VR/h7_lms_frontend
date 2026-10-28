@@ -1,5 +1,6 @@
-import { cleanParams, del, get, patch, post, put } from './client'
+import { cleanParams, del, delWithBody, get, patch, post, put } from './client'
 import type {
+  MarkedFile,
   AnswerKeyUpdate,
   AnswerSaveIn,
   EvaluationIn,
@@ -164,6 +165,24 @@ export const examApi = {
 
   /** The paper, served only once the window has opened. 404 for a draft. */
   myExam: (examId: number) => get<StudentExamOut>(`/students/exams/${examId}`),
+
+  // Files as bytes, for the in-page viewer. Served by the API so they open inside the page.
+  /** The lines and per-part scores drawn on a student's answer sheets. */
+  saveMarking: (examId: number, studentId: number, body: { files: Record<string, MarkedFile> }) =>
+    put<SubmissionOut>(`/exams/${examId}/submissions/${studentId}/marking`, body),
+  paperFile: (examId: number) => get<Blob>(`/exams/${examId}/paper/file`, { responseType: 'blob' }),
+  submissionFile: (examId: number, studentId: number, index: number) =>
+    get<Blob>(`/exams/${examId}/submissions/${studentId}/attachments/${index}/file`, { responseType: 'blob' }),
+  myPaperFile: (examId: number) =>
+    get<Blob>(`/students/exams/${examId}/paper/file`, { responseType: 'blob' }),
+  /** Tells the invigilator the student stepped out, or came back. The clock never stops. */
+  markAway: (examId: number) => post<{ ok: boolean }>(`/students/exams/${examId}/away`),
+  markBack: (examId: number) => post<{ ok: boolean }>(`/students/exams/${examId}/back`),
+  /** Takes back one uploaded file before handing in. */
+  removeMyAnswerFile: (examId: number, index: number) =>
+    delWithBody<StudentSubmissionOut>(`/students/exams/${examId}/attachments/${index}`),
+  myAnswerFile: (examId: number, index: number) =>
+    get<Blob>(`/students/exams/${examId}/attachments/${index}/file`, { responseType: 'blob' }),
 
   /** Stamps the clock. Idempotent — a second call returns the script in progress. */
   startExam: (examId: number) => post<StudentSubmissionOut>(`/students/exams/${examId}/start`),

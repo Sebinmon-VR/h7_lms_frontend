@@ -41,12 +41,13 @@ const RING_TONE: Record<ReturnType<typeof performanceTone>, string> = {
   muted: 'hsl(var(--muted-foreground) / 0.4)',
 }
 
-function ScoreRing({ percentage, grade }: { percentage: number; grade: string | null }) {
+/** `counted` false means no exam on the card had marks to add up: shown as a dash, not 0%. */
+function ScoreRing({ percentage, grade, counted = true }: { percentage: number; grade: string | null; counted?: boolean }) {
   const size = 132
   const stroke = 11
   const radius = (size - stroke) / 2
   const circumference = 2 * Math.PI * radius
-  const clamped = Math.max(0, Math.min(100, percentage))
+  const clamped = counted ? Math.max(0, Math.min(100, percentage)) : 0
   const tone = performanceTone(clamped)
 
   return (
@@ -67,13 +68,13 @@ function ScoreRing({ percentage, grade }: { percentage: number; grade: string | 
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-3xl font-bold tabular-nums tracking-tight">{formatPercent(clamped, 1)}</span>
+        <span className="text-3xl font-bold tabular-nums tracking-tight">{counted ? formatPercent(clamped, 1) : '—'}</span>
         {grade ? (
           <span className="mt-0.5 rounded-full bg-foreground px-2 py-0.5 text-2xs font-semibold uppercase tracking-wider text-background">
             Grade {grade}
           </span>
         ) : (
-          <span className="mt-0.5 text-2xs text-muted-foreground">overall</span>
+          <span className="mt-0.5 text-2xs text-muted-foreground">{counted ? 'overall' : 'no marks yet'}</span>
         )}
       </div>
     </div>
@@ -239,8 +240,56 @@ export function printReportCard() {
   window.setTimeout(cleanup, 2000)
 }
 
+/**
+ * A card's totals, taken from its own exam rows when the card itself counted nothing.
+ *
+ * Cards issued before graded exams could carry marks counted none of them, so they read
+ * "0 exams counted" over a row that plainly says 100/100. Adding up the rows that do have
+ * marks shows what the card already holds, without waiting for it to be reissued. A card
+ * that counted something is shown exactly as issued.
+ */
+export function withRowTotals(card: ReportCardOut): ReportCardOut {
+  if (card.exams_counted > 0) return card
+  const marked = (line: ReportCardSubjectLine['exams'][number]) =>
+    !line.missed && line.marks_obtained != null && (line.max_marks ?? 0) > 0
+
+  let totalMarks = 0
+  let totalMax = 0
+  let counted = 0
+  const onlyGrades: (string | null)[] = []
+  const subjects = card.subjects.map((subject) => {
+    const lines = subject.exams.filter(marked)
+    if (lines.length === 0) return subject
+    const marks = lines.reduce((n, l) => n + Number(l.marks_obtained), 0)
+    const max = lines.reduce((n, l) => n + Number(l.max_marks), 0)
+    totalMarks += marks
+    totalMax += max
+    counted += lines.length
+    onlyGrades.push(...lines.map((l) => l.grade))
+    return {
+      ...subject,
+      total_marks: Math.round(marks * 100) / 100,
+      total_max_marks: Math.round(max * 100) / 100,
+      percentage: Math.round((marks / max) * 10000) / 100,
+      grade: lines.length === 1 ? lines[0].grade : subject.grade,
+      exams_counted: lines.length,
+    }
+  })
+  if (counted === 0) return card
+  return {
+    ...card,
+    subjects,
+    total_marks: Math.round(totalMarks * 100) / 100,
+    total_max_marks: Math.round(totalMax * 100) / 100,
+    overall_percentage: Math.round((totalMarks / totalMax) * 10000) / 100,
+    // With one exam its grade is the card's; with several there is no scale here to apply.
+    overall_grade: onlyGrades.length === 1 ? onlyGrades[0] : card.overall_grade,
+    exams_counted: counted,
+  }
+}
+
 export function ReportCardView({
-  card,
+  card: issued,
   actions,
   className,
   hideRank,
@@ -258,6 +307,7 @@ export function ReportCardView({
    */
   hideRank?: boolean
 }) {
+  const card = withRowTotals(issued)
   const studentName = card.student?.full_name ?? `Student #${String(card.student_id).slice(-6)}`
   const className_ = card.class_room ? `${card.class_room.name}${card.class_room.code ? ` · ${card.class_room.code}` : ''}` : ''
   const period =
@@ -322,7 +372,7 @@ export function ReportCardView({
         </div>
 
         <div className="flex flex-col items-start gap-4 md:flex-row md:items-center md:justify-end">
-          <ScoreRing percentage={card.overall_percentage} grade={card.overall_grade} />
+          <ScoreRing percentage={card.overall_percentage} grade={card.overall_grade} counted={card.exams_counted > 0} />
           <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-2 md:w-auto md:min-w-[22rem]">
             <Summary
               icon={Award}
@@ -437,7 +487,7 @@ export function PrintReportCardButton({ className }: { className?: string }) {
  * opening it. Used by both the class teacher's list and a student's own.
  */
 export function ReportCardTile({
-  card,
+  card: issued,
   onClick,
   showStudent = true,
   className,
@@ -447,6 +497,7 @@ export function ReportCardTile({
   showStudent?: boolean
   className?: string
 }) {
+  const card = withRowTotals(issued)
   const studentName = card.student?.full_name ?? `Student #${String(card.student_id).slice(-6)}`
   const tone = performanceTone(card.overall_percentage)
 

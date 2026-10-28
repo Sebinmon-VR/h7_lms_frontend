@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Lock, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { BookOpen, Lock, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { NavLink, useLocation } from 'react-router-dom'
 
 import { useAuth } from '@/providers/auth-provider'
@@ -51,6 +51,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 // A demo account sees every module, padlocked until the school
                 // unlocks it; opening one shows what it is and how to get it.
                 const locked = !!lockedModuleFor(user, item.to)
+                const pairedActive = item.alsoActiveFor?.some((path) => pathname.startsWith(path)) ?? false
                 const link = (
                   <NavLink
                     to={item.to}
@@ -60,7 +61,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                       cn(
                         'group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
                         collapsed && 'justify-center px-0',
-                        isActive
+                        isActive || pairedActive
                           ? 'text-primary'
                           : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
                         locked && !isActive && 'opacity-60',
@@ -69,7 +70,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   >
                     {({ isActive }) => (
                       <>
-                        {isActive && (
+                        {(isActive || pairedActive) && (
                           <motion.span
                             layoutId="sidebar-active"
                             transition={{ type: 'spring', stiffness: 420, damping: 36 }}
@@ -112,6 +113,23 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           <p className="mb-2 px-2 text-2xs uppercase tracking-wider text-muted-foreground">
             {PORTAL_LABEL[role]} portal
           </p>
+        )}
+        {role && ['ADMIN', 'TEACHER', 'CLASS_TEACHER', 'STUDENT'].includes(role) && (
+          <NavLink
+            to="/guide"
+            onClick={onNavigate}
+            title={collapsed ? 'Guide' : undefined}
+            className={({ isActive }) =>
+              cn(
+                'mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+                collapsed && 'justify-center px-0',
+                isActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+              )
+            }
+          >
+            <BookOpen className="size-4" />
+            {!collapsed && <span>Guide</span>}
+          </NavLink>
         )}
         <button
           type="button"

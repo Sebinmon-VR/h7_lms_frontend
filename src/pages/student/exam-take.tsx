@@ -5,18 +5,20 @@ import {
   CheckCircle2,
   CloudOff,
   CloudUpload,
-  ExternalLink,
   FileText,
   Hourglass,
   Lightbulb,
   Paperclip,
   Play,
   Send,
+  LogOut,
   Timer,
   XCircle,
+  Video,
 } from 'lucide-react'
 import * as React from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { createPortal } from 'react-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import type { AnswerIn, AnswerValue, StudentExamOut, StudentQuestionOut, StudentSubmissionOut } from '@/api/types'
 import {
@@ -25,10 +27,13 @@ import {
   useSaveAnswers,
   useStartExam,
   useSubmitExam,
+  useRemoveAnswerFile,
   useUploadAnswerSheet,
 } from '@/queries/exam.queries'
 import { cn } from '@/lib/cn'
 import { formatCountdown, formatDateTime } from '@/lib/datetime'
+import { clearExamLeft, markExamLeft } from '@/lib/exam-leave'
+import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import {
   QUESTION_TYPE_META,
   choiceSet,
@@ -40,7 +45,9 @@ import {
   msUntil,
   studentExamPhase,
 } from '@/lib/exams'
-import { MAX_UPLOAD_BYTES, fileNameFromUrl, formatFileSize, resolveFileUrl } from '@/lib/files'
+import { MAX_UPLOAD_BYTES, fileNameFromUrl, formatFileSize } from '@/lib/files'
+import { examApi } from '@/api/exam.api'
+import { DocumentViewer, InlineFileRow } from '@/components/domain/document-viewer'
 import { useNow } from '@/lib/hooks'
 import { subjectName } from '@/lib/select'
 import { subjectLook, toneStyle } from '@/lib/subjects'
@@ -161,30 +168,30 @@ function QuestionFiles({
 }: {
   examId: number
   question: StudentQuestionOut
-  attachments: { file_url: string; filename: string | null }[]
+  attachments: { file_url: string; filename: string | null; index: number }[]
   disabled?: boolean
   max: number
   total: number
 }) {
   const [progress, setProgress] = React.useState(0)
   const upload = useUploadAnswerSheet(setProgress)
+  const remove = useRemoveAnswerFile()
   const full = total >= max
 
   return (
     <div className="space-y-2">
       {attachments.map((a) => {
-        const url = resolveFileUrl(a.file_url)
         const name = a.filename ?? fileNameFromUrl(a.file_url)
         return (
-          <div key={a.file_url} className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2">
-            <FileTypeIcon url={name} size="sm" />
-            <span className="min-w-0 flex-1 truncate text-sm">{name}</span>
-            {url && (
-              <a href={url} target="_blank" rel="noreferrer" className="text-xs font-medium text-primary hover:underline">
-                Open
-              </a>
-            )}
-          </div>
+          <InlineFileRow
+            key={a.file_url}
+            name={name}
+            cacheKey={`my-answer-${examId}-${a.index}-${a.file_url}`}
+            load={() => examApi.myAnswerFile(examId, a.index)}
+            height="60vh"
+            onRemove={disabled ? undefined : () => remove.mutate({ examId, index: a.index })}
+            removing={remove.isPending && remove.variables?.index === a.index}
+          />
         )
       })}
       {upload.isPending ? (
@@ -227,16 +234,22 @@ function AnswerSheetUploads({
   exam,
   submission,
   disabled,
+  compact = false,
 }: {
   exam: StudentExamOut
   submission: StudentSubmissionOut
   disabled?: boolean
+  /** Inside the exam room's narrow column: no card of its own, shorter wording. */
+  compact?: boolean
 }) {
   const [progress, setProgress] = React.useState(0)
   const [dragging, setDragging] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const upload = useUploadAnswerSheet(setProgress)
-  const sheets = submission.attachments.filter((a) => a.question_id == null)
+  const remove = useRemoveAnswerFile()
+  const sheets = submission.attachments
+    .map((a, index) => ({ ...a, index }))
+    .filter((a) => a.question_id == null)
   const full = submission.attachments.length >= exam.max_upload_files
 
   const choose = (file: File | null) => {
@@ -251,32 +264,37 @@ function AnswerSheetUploads({
   }
 
   return (
-    <div style={toneStyle(subjectLook(subjectName(exam)).tone)} className="sticker p-4 sm:p-5">
+    <div
+      style={toneStyle(subjectLook(subjectName(exam)).tone)}
+      className={compact ? '' : 'sticker p-4 sm:p-5'}
+    >
       <div className="flex items-center gap-2">
-        <CloudUpload className="size-5" style={{ color: 'hsl(var(--tile))' }} />
-        <h2 className="text-base font-bold">Your answer sheets</h2>
+        <CloudUpload className={compact ? 'size-4' : 'size-5'} style={{ color: 'hsl(var(--tile))' }} />
+        <h2 className={cn('font-bold', compact ? 'text-sm' : 'text-base')}>Your answer sheets</h2>
         <span className="ml-auto text-xs text-muted-foreground">
           {submission.attachments.length} of {exam.max_upload_files} files
         </span>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
-        Write on paper, then take a clear photo or scan of every page and upload them here. Then press Hand in.
+        {compact
+          ? 'Upload a PDF, Word document or photos of every page, then press Hand in.'
+          : 'Write your answers on paper or in a document, then upload them here as a PDF, Word document or photos of every page. Then press Hand in.'}
       </p>
 
       {sheets.length > 0 && (
         <ul className="mt-3 space-y-1.5">
           {sheets.map((a) => {
-            const url = resolveFileUrl(a.file_url)
             const name = a.filename ?? fileNameFromUrl(a.file_url)
             return (
-              <li key={a.file_url} className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2">
-                <FileTypeIcon url={name} size="sm" />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
-                {url && (
-                  <a href={url} target="_blank" rel="noreferrer" className="text-xs font-medium text-primary hover:underline">
-                    Open
-                  </a>
-                )}
+              <li key={a.file_url}>
+                <InlineFileRow
+                  name={name}
+                  cacheKey={`my-answer-${exam.id}-${a.index}-${a.file_url}`}
+                  load={() => examApi.myAnswerFile(exam.id, a.index)}
+                  openInDialog
+                  onRemove={disabled ? undefined : () => remove.mutate({ examId: exam.id, index: a.index })}
+                  removing={remove.isPending && remove.variables?.index === a.index}
+                />
               </li>
             )
           })}
@@ -311,13 +329,13 @@ function AnswerSheetUploads({
           ) : (
             <>
               <p>
-                Drop a photo or PDF here, or{' '}
+                Drop a PDF, Word document or photo here, or{' '}
                 <label className="cursor-pointer font-bold text-primary hover:underline">
                   choose a file
                   <input
                     type="file"
                     className="sr-only"
-                    accept="image/*,.pdf,.doc,.docx"
+                    accept="image/*,.pdf,.doc,.docx,.odt,.rtf"
                     onChange={(e) => {
                       choose(e.target.files?.[0] ?? null)
                       e.target.value = ''
@@ -440,7 +458,16 @@ function Lobby({ exam, onStart, starting }: { exam: StudentExamOut; onStart: () 
 
 // ----------------------------------------------------------------- paper
 
-function Paper({ exam, submission }: { exam: StudentExamOut; submission: StudentSubmissionOut }) {
+function Paper({
+  exam,
+  submission,
+  sideSlot,
+}: {
+  exam: StudentExamOut
+  submission: StudentSubmissionOut
+  /** Where the instructions and uploads go when the page sits inside an exam room's call. */
+  sideSlot?: HTMLElement | null
+}) {
   const now = useNow(1000)
   const save = useSaveAnswers()
   const submit = useSubmitExam()
@@ -460,6 +487,20 @@ function Paper({ exam, submission }: { exam: StudentExamOut; submission: Student
   const timer = React.useRef<number>()
   const [saveState, setSaveState] = React.useState<SaveState>('idle')
   const [confirming, setConfirming] = React.useState(false)
+  const [leaving, setLeaving] = React.useState(false)
+  const navigate = useNavigate()
+
+  // Back on the paper: the app locks to the exam again and the invigilator sees the return.
+  React.useEffect(() => {
+    clearExamLeft(exam.id)
+    void examApi.markBack(exam.id).catch(() => undefined)
+  }, [exam.id])
+
+  const leaveExam = () => {
+    markExamLeft(exam.id)
+    void examApi.markAway(exam.id).catch(() => undefined)
+    navigate('/student', { replace: true })
+  }
   const [timeUp, setTimeUp] = React.useState(false)
   const autoSubmitted = React.useRef(false)
 
@@ -548,7 +589,6 @@ function Paper({ exam, submission }: { exam: StudentExamOut; submission: Student
   )
   const offlineWithoutWork =
     exam.mode === 'OFFLINE' && questions.length === 0 && submission.attachments.length === 0
-  const paperUrl = resolveFileUrl(exam.question_paper_url)
   const subject = subjectName(exam)
   const look = subjectLook(subject)
 
@@ -593,9 +633,28 @@ function Paper({ exam, submission }: { exam: StudentExamOut; submission: Student
               {formatClock(remaining)}
             </div>
           )}
+          <Button variant="outline" icon={<LogOut />} onClick={() => setLeaving(true)}>
+            Leave
+          </Button>
           <Button variant="primary" icon={<Send />} disabled={timeUp || submit.isPending} onClick={() => setConfirming(true)}>
             Hand in
           </Button>
+          <ConfirmDialog
+            open={leaving}
+            onOpenChange={setLeaving}
+            title="Leave the exam?"
+            description={
+              <>
+                <strong>Your exam time keeps running while you are away — it does not stop.</strong> If you
+                are not back before it closes at {formatDateTime(exam.closes_at)}, it closes with only what
+                you have saved. Your teacher will see that you left.
+              </>
+            }
+            confirmLabel="Leave the exam"
+            cancelLabel="Stay in the exam"
+            destructive
+            onConfirm={leaveExam}
+          />
         </div>
         {questions.length > 0 && (
           <ProgressBar value={(answered / questions.length) * 100} size="sm" className="mt-2.5" tone="success" />
@@ -618,30 +677,63 @@ function Paper({ exam, submission }: { exam: StudentExamOut; submission: Student
         </div>
       )}
 
-      {exam.instructions && (
-        <details className="rounded-xl border border-border bg-card px-4 py-3 text-sm">
-          <summary className="cursor-pointer font-bold">Instructions</summary>
-          <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{exam.instructions}</p>
-        </details>
-      )}
-
-      {exam.mode === 'OFFLINE' && (
+      {exam.mode === 'OFFLINE' && exam.question_paper_url && sideSlot ? (
+        // In the exam room the uploads sit under the cameras, so the paper has the whole width.
         <>
-          {paperUrl && (
-            <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-4">
-              <FileTypeIcon url={exam.question_paper_url} />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-bold">Question paper</p>
-                <p className="truncate text-xs text-muted-foreground">{fileNameFromUrl(exam.question_paper_url)}</p>
+          <DocumentViewer
+            cacheKey={`my-paper-${exam.id}-${exam.question_paper_url}`}
+            load={() => examApi.myPaperFile(exam.id)}
+            fileName={fileNameFromUrl(exam.question_paper_url) ?? 'Question paper'}
+            height="max(32rem, calc(100dvh - 12rem))"
+          />
+          {createPortal(
+            <div className="divide-y divide-border">
+              {exam.instructions && (
+                <details className="px-4 py-3 text-sm">
+                  <summary className="cursor-pointer font-bold">Instructions</summary>
+                  <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{exam.instructions}</p>
+                </details>
+              )}
+              <div className="px-4 py-3">
+                <AnswerSheetUploads exam={exam} submission={submission} disabled={timeUp} compact />
               </div>
-              <Button asChild variant="primary" size="sm" icon={<ExternalLink />}>
-                <a href={paperUrl} target="_blank" rel="noreferrer">
-                  Open paper
-                </a>
-              </Button>
-            </div>
+            </div>,
+            sideSlot,
           )}
-          <AnswerSheetUploads exam={exam} submission={submission} disabled={timeUp} />
+        </>
+      ) : exam.mode === 'OFFLINE' && exam.question_paper_url ? (
+        // One workspace: the paper fills the screen under the exam bar (title, timer, Hand in),
+        // and the uploads sit beside it so answering never means scrolling away from the paper.
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+          <div className="min-w-0 flex-1">
+            <DocumentViewer
+              cacheKey={`my-paper-${exam.id}-${exam.question_paper_url}`}
+              load={() => examApi.myPaperFile(exam.id)}
+              fileName={fileNameFromUrl(exam.question_paper_url) ?? 'Question paper'}
+              height="max(32rem, calc(100dvh - 12rem))"
+            />
+          </div>
+          <aside className="w-full shrink-0 space-y-4 lg:sticky lg:top-24 lg:max-h-[calc(100dvh-8rem)] lg:w-96 lg:overflow-y-auto">
+            {exam.instructions && (
+              <details className="rounded-xl border border-border bg-card px-4 py-3 text-sm">
+                <summary className="cursor-pointer font-bold">Instructions</summary>
+                <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{exam.instructions}</p>
+              </details>
+            )}
+            <AnswerSheetUploads exam={exam} submission={submission} disabled={timeUp} />
+          </aside>
+        </div>
+      ) : (
+        <>
+          {exam.instructions && (
+            <details className="rounded-xl border border-border bg-card px-4 py-3 text-sm">
+              <summary className="cursor-pointer font-bold">Instructions</summary>
+              <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{exam.instructions}</p>
+            </details>
+          )}
+          {exam.mode === 'OFFLINE' && (
+            <AnswerSheetUploads exam={exam} submission={submission} disabled={timeUp} />
+          )}
         </>
       )}
 
@@ -706,7 +798,7 @@ function Paper({ exam, submission }: { exam: StudentExamOut; submission: Student
                 <QuestionFiles
                   examId={exam.id}
                   question={q}
-                  attachments={questionFiles}
+                  attachments={questionFiles.map((a) => ({ ...a, index: submission.attachments.indexOf(a) }))}
                   disabled={timeUp}
                   max={exam.max_upload_files}
                   total={submission.attachments.length}
@@ -940,18 +1032,16 @@ function Result({ exam, submission }: { exam: StudentExamOut; submission: Studen
         <div className="rounded-xl border border-border bg-card p-4">
           <p className="text-sm font-bold">Files you uploaded</p>
           <ul className="mt-2 space-y-1.5">
-            {submission.attachments.map((a) => {
-              const url = resolveFileUrl(a.file_url)
+            {submission.attachments.map((a, index) => {
               const name = a.filename ?? fileNameFromUrl(a.file_url)
               return (
-                <li key={a.file_url} className="flex items-center gap-3 rounded-lg border border-border px-3 py-2">
-                  <FileTypeIcon url={name} size="sm" />
-                  <span className="min-w-0 flex-1 truncate text-sm">{name}</span>
-                  {url && (
-                    <a href={url} target="_blank" rel="noreferrer" className="text-xs font-medium text-primary hover:underline">
-                      Open
-                    </a>
-                  )}
+                <li key={a.file_url}>
+                  <InlineFileRow
+                    name={name}
+                    cacheKey={`my-answer-${exam.id}-${index}-${a.file_url}`}
+                    load={() => examApi.myAnswerFile(exam.id, index)}
+                    height="60vh"
+                  />
                 </li>
               )
             })}
@@ -965,9 +1055,42 @@ function Result({ exam, submission }: { exam: StudentExamOut; submission: Studen
 // ----------------------------------------------------------------- page
 
 export default function StudentExamTakePage() {
-  const enrollment = useEnrollmentStatus()
   const params = useParams<{ examId: string }>()
-  const examId = Number(params.examId)
+  return <StudentExamTakeView examId={Number(params.examId)} />
+}
+
+/** For a live-invigilated exam opened outside its room: the way in. */
+function RoomNotice({ exam }: { exam: StudentExamOut }) {
+  return (
+    <div className="mx-auto max-w-2xl space-y-3 rounded-2xl border-2 border-primary/30 bg-primary/5 p-6 text-center">
+      <Video className="mx-auto size-8 text-primary" />
+      <h1 className="text-lg font-extrabold">{exam.title}</h1>
+      <p className="text-sm text-muted-foreground">
+        This exam is supervised live. Join the exam room with your camera on — the question paper, the
+        upload and Hand in are all there. The room opens 15 minutes before the exam.
+      </p>
+      <Button asChild variant="primary" size="lg" icon={<Video />}>
+        <Link to={`/call/exam/${exam.id}`}>Go to the exam room</Link>
+      </Button>
+    </div>
+  )
+}
+
+/**
+ * Sitting one exam. `inRoom` when it is shown inside a live-invigilated exam's call, where the
+ * way back to the exam list is hidden and the paper is answered beside the cameras.
+ */
+export function StudentExamTakeView({
+  examId,
+  inRoom = false,
+  sideSlot,
+}: {
+  examId: number
+  inRoom?: boolean
+  /** Inside an exam room: the call column's slot for the uploads. */
+  sideSlot?: HTMLElement | null
+}) {
+  const enrollment = useEnrollmentStatus()
   const examQuery = useMyExam(Number.isFinite(examId) ? examId : null, !enrollment.isAdmin)
   const submissionQuery = useMySubmission(Number.isFinite(examId) ? examId : null, !enrollment.isAdmin)
   const start = useStartExam()
@@ -981,7 +1104,7 @@ export default function StudentExamTakePage() {
     )
   }
 
-  const back = (
+  const back = inRoom ? null : (
     <Link to="/student/exams" className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground">
       <ArrowLeft className="size-4" />
       My exams
@@ -1026,9 +1149,10 @@ export default function StudentExamTakePage() {
   }
 
   if (sitting && submission) {
+    if (exam.live_invigilation && !inRoom) return <RoomNotice exam={exam} />
     return (
       <>
-        <Paper exam={exam} submission={submission} />
+        <Paper exam={exam} submission={submission} sideSlot={sideSlot} />
       </>
     )
   }
@@ -1041,6 +1165,15 @@ export default function StudentExamTakePage() {
         <div className="mx-auto max-w-2xl rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
           What you saved is kept, but it was not handed in. If this was a mistake, ask your teacher — they can reopen the exam for you.
         </div>
+      </>
+    )
+  }
+
+  if (exam.live_invigilation && !inRoom) {
+    return (
+      <>
+        {back}
+        <RoomNotice exam={exam} />
       </>
     )
   }

@@ -23,9 +23,11 @@ export const studentApi = {
   /** Returns teacher mappings for the student's class, not enrollments. */
   myClasses: () => get<TeacherMappingOut[]>('/students/my-classes'),
   attendance: () => get<AttendanceOut[]>('/students/attendance'),
-  topics: () => get<TopicOut[]>('/students/topics'),
+  topics: (classId?: number) =>
+    get<TopicOut[]>('/students/topics', { params: cleanParams({ class_id: classId }) }),
   meetings: () => get<LiveMeetingOut[]>('/students/meetings'),
-  materials: () => get<StudyMaterialOut[]>('/students/materials'),
+  materials: (classId?: number) =>
+    get<StudyMaterialOut[]>('/students/materials', { params: cleanParams({ class_id: classId }) }),
   grades: () => get<ExamGradeOut[]>('/students/grades'),
 
   /**
