@@ -496,6 +496,8 @@ export const qk = {
     invoicesRoot: () => ['finance', 'invoices'] as const,
     invoice: (invoiceId: string) => ['finance', 'invoice', invoiceId] as const,
     intents: (invoiceId: string) => ['finance', 'invoice', invoiceId, 'intents'] as const,
+    receipt: (invoiceId: string, index: number) =>
+      ['finance', 'invoice', invoiceId, 'receipt', index] as const,
 
     /** The signed-in student's own fees. */
     myFees: (program: Program, currency?: string) =>

@@ -30,7 +30,9 @@ export function AppShell() {
    * admin route anyway. Teachers keep the plain background — the decision on
    * that portal was warmer language, not a redecoration.
    */
-  const decorated = location.pathname.startsWith('/student') || role === 'STUDENT'
+  // Fee pages are documents: a plain white page in either theme, with no scenery behind them.
+  const paper = location.pathname.startsWith('/student/fees')
+  const decorated = !paper && (location.pathname.startsWith('/student') || role === 'STUDENT')
 
   // A demo account opening a module it has not been given sees what it is and
   // how to get it, rather than a page whose every request is refused.
@@ -111,7 +113,7 @@ export function AppShell() {
           />
         </div>
 
-        <main className="relative flex-1 overflow-y-auto">
+        <main className={paper ? 'paper-light relative flex-1 overflow-y-auto bg-background text-foreground' : 'relative flex-1 overflow-y-auto'}>
           {/* Inside <main> so it scrolls under the content but not over the
               sidebar or topbar, which keep their own solid backgrounds. */}
           {decorated && <Scenery />}

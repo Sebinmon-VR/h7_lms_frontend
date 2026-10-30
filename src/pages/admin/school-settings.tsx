@@ -56,6 +56,7 @@ type ProfileKey =
   | 'web_app_url'
   | 'mobile_app_url'
   | 'admission_portal_url'
+  | 'fee_alert_emails'
 
 /**
  * The school profile, as a table. Every one of these lands in the emails a
@@ -67,7 +68,7 @@ const PROFILE_FIELDS: {
   label: string
   hint: string
   placeholder: string
-  type?: 'email' | 'tel' | 'url'
+  type?: 'email' | 'tel' | 'url' | 'text'
 }[] = [
   {
     key: 'school_name',
@@ -123,6 +124,13 @@ const PROFILE_FIELDS: {
     hint: 'The page on the school website that hosts the family’s application portal.',
     placeholder: 'https://www.school.edu.in/admission-status',
     type: 'url',
+  },
+  {
+    key: 'fee_alert_emails',
+    label: 'Payment alert emails',
+    hint: 'Who in the office is emailed each time a fee payment is received. Separate addresses with commas.',
+    placeholder: 'accounts@school.edu.in, principal@school.edu.in',
+    type: 'text',
   },
 ]
 

@@ -1,4 +1,4 @@
-import { cleanParams, del, get, post, put } from './client'
+import { cleanParams, del, delWithBody, get, post, put } from './client'
 import { downloadCsv } from './tuition.api'
 import type {
   ApiDate,
@@ -14,6 +14,7 @@ import type {
   FeeCollectRequest,
   FeeCollectionsReport,
   FeeInvoiceOut,
+  FeePaymentReceipt,
   FeeReceiptCreate,
   FeeReceiptOut,
   FeeReportView,
@@ -34,6 +35,11 @@ import type {
   PaymentIntentOut,
   Program,
   WaiveInstalmentRequest,
+  ExtraItem,
+  InvoiceIssueRequest,
+  IssueLeftOffRequest,
+  RazorpayConfirm,
+  PaymentQuote,
 } from './types'
 
 /**
@@ -275,11 +281,37 @@ export const financeApi = {
   getInvoice: (invoiceId: string, program: Program = 'LMS') =>
     get<FeeInvoiceOut>(`/admin/finance/invoices/${invoiceId}`, { params: { program } }),
 
-  /** Assigns the number and freezes the figures. Not reversible by re-issuing. */
-  issueInvoice: (invoiceId: string, program: Program = 'LMS') =>
-    post<FeeInvoiceOut>(`/admin/finance/invoices/${invoiceId}/issue`, undefined, {
+  /**
+   * Assigns the number and freezes the figures. Not reversible by re-issuing.
+   * Optional concessions per fee line and extra items are applied as it is issued.
+   */
+  issueInvoice: (invoiceId: string, program: Program = 'LMS', body?: InvoiceIssueRequest) =>
+    post<FeeInvoiceOut>(`/admin/finance/invoices/${encodeURIComponent(invoiceId)}/issue`, body, {
       params: { program },
     }),
+
+  /** Bills fees that were left off when the bill was issued. */
+  issueMore: (invoiceId: string, body: IssueLeftOffRequest, program: Program = 'LMS') =>
+    post<FeeInvoiceOut>(
+      `/admin/finance/invoices/${encodeURIComponent(invoiceId)}/issue-more`,
+      body,
+      { params: { program } },
+    ),
+
+  /** Extra items (books, uniform) on an issued bill, each its own line. */
+  addExtraItems: (invoiceId: string, items: ExtraItem[], program: Program = 'LMS') =>
+    post<FeeInvoiceOut>(
+      `/admin/finance/invoices/${encodeURIComponent(invoiceId)}/items`,
+      { items },
+      { params: { program } },
+    ),
+
+  /** Refused once anything has been paid towards the item. */
+  removeExtraItem: (invoiceId: string, label: string, program: Program = 'LMS') =>
+    delWithBody<FeeInvoiceOut>(
+      `/admin/finance/invoices/${encodeURIComponent(invoiceId)}/items/${encodeURIComponent(label)}`,
+      { params: { program } },
+    ),
 
   /** Refused once money has been taken against it. */
   cancelInvoice: (invoiceId: string, reason?: string, program: Program = 'LMS') =>
@@ -305,6 +337,12 @@ export const financeApi = {
     post<FeeInvoiceOut>(`/admin/finance/students/${studentId}/collect`, body, {
       params: { program },
     }),
+
+  /** The printable receipt for one payment, by its position in `invoice.payments`. */
+  paymentReceipt: (invoiceId: string, index: number) =>
+    get<FeePaymentReceipt>(
+      `/admin/finance/invoices/${encodeURIComponent(invoiceId)}/payments/${index}/receipt`,
+    ),
 
   /** Writes off one instalment. The reason is mandatory and is kept for audit. */
   waiveInstalment: (
@@ -337,9 +375,17 @@ export const financeApi = {
    * payment offline through `recordPayment`.
    */
   createIntent: (invoiceId: string, body: PaymentIntentCreate, program: Program = 'LMS') =>
-    post<PaymentIntentOut>(`/admin/finance/invoices/${invoiceId}/intents`, body, {
+    post<PaymentIntentOut>(`/admin/finance/invoices/${encodeURIComponent(invoiceId)}/intents`, body, {
       params: { program },
     }),
+
+  /** What to collect, in `currency`, for `amount` of a rupee bill: today's rate plus its tax. */
+  quote: (amount: number, currency: string, online = false) =>
+    get<PaymentQuote>('/admin/finance/quote', { params: { amount, currency, online } }),
+
+  /** Credits a Razorpay payment taken at the counter once its signature checks out. */
+  confirmRazorpay: (intentId: number, body: RazorpayConfirm) =>
+    post<PaymentIntentOut>(`/admin/finance/intents/${intentId}/razorpay`, body),
 
   listIntents: (invoiceId: string) =>
     get<PaymentIntentOut[]>(`/admin/finance/invoices/${invoiceId}/intents`),
@@ -377,6 +423,20 @@ export const myFeesApi = {
   /** My attempts on this invoice, newest first, failures included. */
   intents: (invoiceId: string) =>
     get<PaymentIntentOut[]>(`/fees/me/invoices/${invoiceId}/intents`),
+
+  /** The receipt for one of my payments, by its position in the bill's payments. */
+  receipt: (invoiceId: string, index: number) =>
+    get<FeePaymentReceipt>(
+      `/fees/me/invoices/${encodeURIComponent(invoiceId)}/payments/${index}/receipt`,
+    ),
+
+  /** What I would pay, in `currency`, for `amount` of my bill. */
+  quote: (amount: number, currency: string, online = false) =>
+    get<PaymentQuote>('/fees/me/quote', { params: { amount, currency, online } }),
+
+  /** Finishes a Razorpay payment: what Checkout handed back, checked and credited. */
+  confirmRazorpay: (intentId: number, body: RazorpayConfirm) =>
+    post<PaymentIntentOut>(`/fees/me/intents/${intentId}/razorpay`, body),
 }
 
 /**
@@ -419,6 +479,9 @@ export const parentFeesApi = {
 
   intents: (studentId: number, invoiceId: string) =>
     get<PaymentIntentOut[]>(`/parent/fees/children/${studentId}/invoices/${invoiceId}/intents`),
+
+  confirmRazorpay: (studentId: number, intentId: number, body: RazorpayConfirm) =>
+    post<PaymentIntentOut>(`/parent/fees/children/${studentId}/intents/${intentId}/razorpay`, body),
 }
 
 /**

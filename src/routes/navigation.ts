@@ -18,6 +18,7 @@ import {
   FileText,
   FlaskConical,
   Globe,
+  HandCoins,
   GraduationCap,
   Home,
   Inbox,
@@ -193,6 +194,12 @@ const ADMIN_NAV: NavSection[] = [
   {
     heading: 'Money',
     items: [
+      {
+        to: '/admin/fee-collection',
+        label: 'Fee Collection',
+        icon: HandCoins,
+        description: 'The counter: take a fee, print the receipt, reprint old ones',
+      },
       {
         to: '/admin/finance',
         label: 'Fees & Invoices',

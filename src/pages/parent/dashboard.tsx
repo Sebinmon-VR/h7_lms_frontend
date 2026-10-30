@@ -150,12 +150,14 @@ function ChildFeesPanel({ studentId }: { studentId: number }) {
   // Null until the parent picks one — the first load takes the base currency
   // rather than guessing at one that may not be offered.
   const [currency, setCurrency] = useState<string | null>(null)
-  const fees = useChildFees(studentId, { currency: currency ?? undefined })
   const invoices = useChildInvoices(studentId)
+  // Nothing is shown before the school issues a bill: no estimate, no total.
+  const billed = (invoices.data ?? []).some((i) => i.status !== 'DRAFT' && i.status !== 'CANCELLED')
+  const fees = useChildFees(studentId, { currency: currency ?? undefined }, billed)
 
   return (
     <div className="space-y-5">
-      <QueryBoundary
+      {billed && <QueryBoundary
         query={fees}
         loading={<Skeleton className="h-72 w-full rounded-xl" />}
       >
@@ -173,7 +175,7 @@ function ChildFeesPanel({ studentId }: { studentId: number }) {
             <FeeBreakdownView breakdown={data} />
           </>
         )}
-      </QueryBoundary>
+      </QueryBoundary>}
 
       <QueryBoundary
         query={invoices}
@@ -182,7 +184,7 @@ function ChildFeesPanel({ studentId }: { studentId: number }) {
         empty={
           <Card className="p-5">
             <p className="text-sm text-muted-foreground">
-              No invoice has been issued yet. The breakdown above is what the fees come to.
+              No fee bill has been issued yet. It appears here once the school issues it.
             </p>
           </Card>
         }

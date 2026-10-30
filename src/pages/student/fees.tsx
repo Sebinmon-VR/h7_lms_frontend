@@ -1,58 +1,275 @@
-import { CreditCard, Receipt } from 'lucide-react'
+import { CreditCard, Download, FileText, Printer, Receipt } from 'lucide-react'
 import * as React from 'react'
 import { Link } from 'react-router-dom'
 
-import { useMyFees, useMyInvoices } from '@/queries/finance.queries'
+import type { FeeInvoiceOut, InstalmentOut, PaymentMethod } from '@/api/types'
+import { useMyInvoices, useMyPaymentReceipt } from '@/queries/finance.queries'
 import { formatDate } from '@/lib/datetime'
+import { INSTALMENT_STATUS_LABEL, INSTALMENT_STATUS_TONE, PAYMENT_METHOD_LABEL } from '@/lib/school'
 import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, formatMoney } from '@/lib/tuition'
+import { cn } from '@/lib/cn'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { EmptyState } from '@/components/feedback/states'
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { PageHeader } from '@/components/layout/page-header'
-import { FeeBreakdownView } from '@/pages/admin/finance-breakdown'
-import { CurrencySwitcher } from '@/pages/admin/finance-currencies'
+import { FeeReceipt, FeeReceiptForPrint, printFeeReceipt } from '@/components/domain/fee-receipt'
 
 /**
- * A student's own fees.
+ * A student's fees, as a plain full-width statement: the bill's figures in one
+ * strip, every fee as a row of a table, and every payment with its receipt.
  *
- * The same `FeeBreakdownOut` the admin previews and the parent sees, rendered
- * by the same component — so what a student reads here and what the office
- * quotes on the phone cannot diverge.
- *
- * `discounts_not_applied` is deliberately NOT shown: a student does not need a
- * list of concessions that were never theirs, and it reads as a list of things
- * they have been denied. It stays on the admin screen, where it answers a
- * support question instead.
+ * Only bills the school has issued appear; before that there is nothing to
+ * show. The currency is chosen on the Pay page, where its tax is shown — the
+ * figures here are the bill's own.
  */
-export default function StudentFeesPage() {
-  /**
-   * The currency the figures are shown in.
-   *
-   * Null means "whatever the server defaults to" — the base currency. It only
-   * becomes a real value once the payer picks one, so the first load never
-   * asks for a currency that may not be offered.
-   */
-  const [currency, setCurrency] = React.useState<string | null>(null)
-  const fees = useMyFees({ currency: currency ?? undefined })
-  const invoices = useMyInvoices()
+
+function owing(i: InstalmentOut): number {
+  return Math.max(0, i.outstanding ?? i.amount - i.amount_paid)
+}
+
+function SectionTitle({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
+  return (
+    <div className="mb-3 mt-8 flex flex-wrap items-end justify-between gap-2 border-b border-border pb-2">
+      <h2 className="text-base font-semibold">{children}</h2>
+      {right}
+    </div>
+  )
+}
+
+function Stat({ label, value, tone }: { label: string; value: React.ReactNode; tone?: 'warning' | 'success' }) {
+  return (
+    <div className="border-b border-r border-border px-5 py-4">
+      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+      <div
+        className={cn(
+          'mt-1 text-lg font-semibold tabular-nums',
+          tone === 'warning' && 'text-warning',
+          tone === 'success' && 'text-success',
+        )}
+      >
+        {value}
+      </div>
+    </div>
+  )
+}
+
+/** One receipt, full size, with Print and Save as PDF (the browser's print-to-PDF). */
+export function StudentReceiptViewer({
+  view,
+  onClose,
+}: {
+  view: { invoiceId: string; index: number } | null
+  onClose: () => void
+}) {
+  const receipt = useMyPaymentReceipt(view?.invoiceId ?? null, view?.index ?? null)
+  return (
+    <Dialog open={!!view} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent size="xl">
+        <DialogHeader>
+          <DialogTitle>
+            {receipt.data?.receipt_number ? `Receipt ${receipt.data.receipt_number}` : 'Receipt'}
+          </DialogTitle>
+        </DialogHeader>
+        <DialogBody className="max-h-[70vh] overflow-y-auto bg-neutral-100 p-4">
+          <QueryBoundary query={receipt} loading={<Skeleton className="h-[600px] w-full" />}>
+            {(data) => (
+              <>
+                <FeeReceipt receipt={data} copies="single" />
+                <FeeReceiptForPrint receipt={data} copies="single" />
+              </>
+            )}
+          </QueryBoundary>
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Close
+          </Button>
+          <Button variant="outline" onClick={printFeeReceipt} disabled={!receipt.data}>
+            <Download />
+            Save as PDF
+          </Button>
+          <Button onClick={printFeeReceipt} disabled={!receipt.data}>
+            <Printer />
+            Print
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function BillStatement({ bill, onReceipt }: { bill: FeeInvoiceOut; onReceipt: (index: number) => void }) {
+  const lines = bill.instalments.filter((i) => i.status !== 'WAIVED')
+  const payments = (bill.payments ?? []).map((p, index) => ({ ...p, index })).reverse()
+  const money = (n: number) => formatMoney(n, bill.currency)
+  const concessions = lines.reduce((s, i) => s + (i.concession_amount ?? 0), 0)
 
   return (
-    <div>
+    <>
+      {/* ------------------------------------------------ the bill at a glance */}
+      <div className="grid grid-cols-2 border-l border-t border-border md:grid-cols-3 xl:grid-cols-6">
+        <Stat label="Bill number" value={bill.invoice_number ?? '—'} />
+        <Stat label="Session" value={bill.academic_year_name ?? '—'} />
+        <Stat label="Total fee" value={money(bill.total_amount)} />
+        <Stat label="Paid" value={money(bill.amount_paid)} tone="success" />
+        <Stat
+          label="Balance due"
+          value={bill.amount_outstanding > 0 ? money(bill.amount_outstanding) : 'Nil'}
+          tone={bill.amount_outstanding > 0 ? 'warning' : 'success'}
+        />
+        <Stat
+          label="Status"
+          value={
+            <Badge tone={bill.is_overdue && bill.amount_outstanding > 0 ? 'danger' : INVOICE_STATUS_TONE[bill.status]}>
+              {bill.is_overdue && bill.amount_outstanding > 0 ? 'Overdue' : INVOICE_STATUS_LABEL[bill.status]}
+            </Badge>
+          }
+        />
+      </div>
+
+      {/* ------------------------------------------------ fee lines */}
+      <SectionTitle>Fee details</SectionTitle>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] text-sm">
+          <thead>
+            <tr className="border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <th className="w-12 px-4 py-2.5 font-medium">#</th>
+              <th className="px-4 py-2.5 font-medium">Fee</th>
+              <th className="px-4 py-2.5 font-medium">Due date</th>
+              <th className="px-4 py-2.5 text-right font-medium">Amount</th>
+              <th className="px-4 py-2.5 text-right font-medium">Concession</th>
+              <th className="px-4 py-2.5 text-right font-medium">Paid</th>
+              <th className="px-4 py-2.5 text-right font-medium">Balance</th>
+              <th className="px-4 py-2.5 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((i, n) => {
+              const concession = i.concession_amount ?? 0
+              const left = owing(i)
+              return (
+                <tr key={i.label} className="border-b border-border">
+                  <td className="px-4 py-3 text-muted-foreground">{n + 1}</td>
+                  <td className="px-4 py-3">
+                    <span className="font-medium">{i.label}</span>
+                    {i.components && i.components.length > 0 && !i.is_extra && (
+                      <span className="block text-xs text-muted-foreground">
+                        {i.components.map((c) => c.name).join(' + ')}
+                      </span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">{i.due_date ? formatDate(i.due_date) : '—'}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">{money(i.amount + concession)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">{concession > 0 ? `−${money(concession)}` : '—'}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">{i.amount_paid > 0 ? money(i.amount_paid) : '—'}</td>
+                  <td className="px-4 py-3 text-right font-semibold tabular-nums">{left > 0 ? money(left) : 'Nil'}</td>
+                  <td className="px-4 py-3">
+                    {i.is_overdue && left > 0 ? (
+                      <Badge tone="danger" size="sm">
+                        Overdue
+                      </Badge>
+                    ) : (
+                      <Badge tone={INSTALMENT_STATUS_TONE[i.status] ?? 'neutral'} size="sm">
+                        {INSTALMENT_STATUS_LABEL[i.status] ?? i.status}
+                      </Badge>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="bg-muted/30 font-semibold">
+              <td colSpan={3} className="px-4 py-3 text-right text-xs uppercase tracking-wide text-muted-foreground">
+                Total
+              </td>
+              <td className="px-4 py-3 text-right tabular-nums">{money(bill.total_amount + concessions)}</td>
+              <td className="px-4 py-3 text-right tabular-nums">{concessions > 0 ? `−${money(concessions)}` : '—'}</td>
+              <td className="px-4 py-3 text-right tabular-nums">{money(bill.amount_paid)}</td>
+              <td className="px-4 py-3 text-right tabular-nums">{money(bill.amount_outstanding)}</td>
+              <td />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Tax is added when you pay: choose INR or AED on the Pay page to see it.
+      </p>
+
+      {/* ------------------------------------------------ payments */}
+      <SectionTitle>Payments and receipts</SectionTitle>
+      {payments.length === 0 ? (
+        <p className="py-4 text-sm text-muted-foreground">No payments yet. The receipt for each payment appears here.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2.5 font-medium">Receipt no.</th>
+                <th className="px-4 py-2.5 font-medium">Date</th>
+                <th className="px-4 py-2.5 font-medium">Paid by</th>
+                <th className="px-4 py-2.5 text-right font-medium">Amount paid</th>
+                <th className="w-44 px-4 py-2.5 text-right font-medium">Receipt</th>
+              </tr>
+            </thead>
+            <tbody>
+              {payments.map((p) => {
+                const paidIn = typeof p.paid_currency === 'string' ? p.paid_currency : null
+                const paidAmount = typeof p.paid_amount === 'number' ? p.paid_amount : null
+                return (
+                  <tr key={p.index} className="border-b border-border">
+                    <td className="px-4 py-3 font-medium">{p.receipt_number ?? '—'}</td>
+                    <td className="whitespace-nowrap px-4 py-3">{formatDate(p.paid_at)}</td>
+                    <td className="px-4 py-3">{PAYMENT_METHOD_LABEL[p.method as PaymentMethod] ?? p.method ?? 'Payment'}</td>
+                    <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                      {paidIn && paidAmount != null ? formatMoney(paidAmount, paidIn) : money(p.amount ?? 0)}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {p.receipt_number ? (
+                        <Button variant="outline" size="sm" onClick={() => onReceipt(p.index)}>
+                          <FileText />
+                          View receipt
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  )
+}
+
+export default function StudentFeesPage() {
+  const invoices = useMyInvoices()
+  const bills = (invoices.data ?? []).filter((i) => i.status !== 'DRAFT' && i.status !== 'CANCELLED')
+  const [billId, setBillId] = React.useState<string | null>(null)
+  const bill = bills.find((b) => b.id === billId) ?? bills[0] ?? null
+  const [receiptView, setReceiptView] = React.useState<{ invoiceId: string; index: number } | null>(null)
+
+  return (
+    <div className="w-full">
       <PageHeader
         title="My fees"
-        description="What is owed, what it is made up of, and when each part falls due."
+        description="Your fee bill, what each fee comes to, and the receipt for every payment."
         actions={
-          // Only offered when something is actually owed — a "Pay" button on a
-          // settled account sends people to a page that can only tell them
-          // there is nothing to do.
-          (invoices.data ?? []).some(
-            (i) => i.status !== 'DRAFT' && i.status !== 'CANCELLED' && i.amount_outstanding > 0,
-          ) ? (
+          bill && bill.amount_outstanding > 0 ? (
             <Button asChild>
-              <Link to="/student/fees/pay">
+              <Link to={`/student/fees/pay/${bill.id}`}>
                 <CreditCard />
                 Pay fees
               </Link>
@@ -61,104 +278,40 @@ export default function StudentFeesPage() {
         }
       />
 
-      <div className="space-y-5">
-        <QueryBoundary
-          query={fees}
-          loading={<Skeleton className="h-80 w-full rounded-xl" />}
-        >
-          {(data) => (
+      <QueryBoundary query={invoices} loading={<Skeleton className="h-96 w-full" />}>
+        {() =>
+          !bill ? (
+            <div className="flex flex-col items-center gap-2 border-y border-border py-16 text-center">
+              <Receipt className="size-7 text-muted-foreground" />
+              <p className="text-sm font-medium">No fee bill yet</p>
+              <p className="text-sm text-muted-foreground">
+                When the school issues your fee bill it appears here, with a Pay button.
+              </p>
+            </div>
+          ) : (
             <>
-              <CurrencySwitcher
-                value={data.currency}
-                available={data.available_currencies}
-                baseCurrency={data.base_currency}
-                exchangeRate={data.exchange_rate}
-                options={data.currency_options}
-                recommended={data.recommended_currency}
-                onChange={setCurrency}
-              />
-              <FeeBreakdownView breakdown={data} />
-            </>
-          )}
-        </QueryBoundary>
-
-        <QueryBoundary
-          query={invoices}
-          loading={<Skeleton className="h-32 w-full rounded-xl" />}
-          isEmpty={(rows) => rows.length === 0}
-          empty={
-            <EmptyState
-              icon={<Receipt />}
-              title="No invoice issued yet"
-              description="The breakdown above is what your fees come to. An invoice is raised when the school bills it."
-            />
-          }
-        >
-          {(rows) => (
-            <Card className="p-5">
-              <h3 className="text-sm font-semibold">Invoices</h3>
-              {/* A draft is the office's working copy — re-priced whenever it is
-                  rebuilt, and not owed. Saying so is the difference between
-                  "why is there no Pay button" and "ah, it is not a bill yet". */}
-              {rows.every((i) => i.status === 'DRAFT') && (
-                <p className="mt-2 rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
-                  Nothing here is payable yet. A draft is the school's working copy of your
-                  bill — it becomes payable once the office issues it, and a Pay option
-                  appears then.
-                </p>
+              {bills.length > 1 && (
+                <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+                  <span className="text-muted-foreground">Session</span>
+                  {bills.map((b) => (
+                    <Button
+                      key={b.id}
+                      size="sm"
+                      variant={b.id === bill.id ? 'solid' : 'outline'}
+                      onClick={() => setBillId(b.id)}
+                    >
+                      {b.academic_year_name ?? b.invoice_number}
+                    </Button>
+                  ))}
+                </div>
               )}
-              <ul className="mt-2 divide-y divide-border">
-                {rows.map((invoice) => (
-                  <li
-                    key={invoice.id}
-                    className="flex flex-wrap items-center justify-between gap-2 py-3"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium">
-                          {invoice.invoice_number ?? 'Draft'}
-                        </span>
-                        <Badge tone={INVOICE_STATUS_TONE[invoice.status]} size="sm">
-                          {INVOICE_STATUS_LABEL[invoice.status]}
-                        </Badge>
-                        {invoice.is_overdue && (
-                          <Badge tone="danger" size="sm">
-                            Overdue
-                          </Badge>
-                        )}
-                      </div>
-                      {invoice.due_date && (
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          Due {formatDate(invoice.due_date)}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <div className="text-right">
-                        <p className="text-sm font-medium tabular-nums">
-                          {formatMoney(invoice.total_amount, invoice.currency)}
-                        </p>
-                        {invoice.amount_outstanding > 0 && (
-                          <p className="text-xs tabular-nums text-warning">
-                            {formatMoney(invoice.amount_outstanding, invoice.currency)} outstanding
-                          </p>
-                        )}
-                      </div>
-                      {invoice.status !== 'DRAFT' &&
-                        invoice.status !== 'CANCELLED' &&
-                        invoice.amount_outstanding > 0 && (
-                          <Button size="sm" variant="outline" asChild>
-                            <Link to={`/student/fees/pay/${invoice.id}`}>Pay</Link>
-                          </Button>
-                        )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          )}
-        </QueryBoundary>
-      </div>
+              <BillStatement bill={bill} onReceipt={(index) => setReceiptView({ invoiceId: bill.id, index })} />
+            </>
+          )
+        }
+      </QueryBoundary>
+
+      <StudentReceiptViewer view={receiptView} onClose={() => setReceiptView(null)} />
     </div>
   )
 }

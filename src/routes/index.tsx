@@ -50,6 +50,7 @@ const AdminAdmissionRequests = lazy(() => import('@/pages/admin/admission-reques
 const AdminLiveClasses = lazy(() => import('@/pages/admin/live-classes'))
 const AdminFamilies = lazy(() => import('@/pages/admin/families'))
 const AdminFinance = lazy(() => import('@/pages/admin/finance'))
+const AdminFeeCollection = lazy(() => import('@/pages/admin/fee-collection'))
 const AdminNotices = lazy(() => import('@/pages/admin/notices'))
 const AdminOversight = lazy(() => import('@/pages/admin/oversight'))
 const AdminSchoolSettings = lazy(() => import('@/pages/admin/school-settings'))
@@ -274,6 +275,8 @@ export function AppRoutes() {
               <Route path="/admin/admission-requests" element={<AdminAdmissionRequests />} />
               <Route path="/admin/families" element={<AdminFamilies />} />
               <Route path="/admin/finance" element={<AdminFinance />} />
+              {/* Not under /admin/finance, so the two sidebar entries light up separately. */}
+              <Route path="/admin/fee-collection" element={<AdminFeeCollection />} />
               <Route path="/admin/notices" element={<AdminNotices />} />
               <Route path="/admin/oversight" element={<AdminOversight />} />
               <Route path="/admin/settings" element={<AdminSchoolSettings />} />

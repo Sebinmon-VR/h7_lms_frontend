@@ -29,6 +29,11 @@ import type {
   PaymentIntentCreate,
   Program,
   WaiveInstalmentRequest,
+  ExtraItem,
+  InvoiceIssueRequest,
+  IssueLeftOffRequest,
+  PaymentIntentOut,
+  RazorpayConfirm,
 } from '@/api/types'
 import { formatMoney } from '@/lib/tuition'
 import { STALE, qk } from './keys'
@@ -234,6 +239,16 @@ export function useFeeInvoice(
   })
 }
 
+/** A payment's receipt. Under the invoice's key, so a new payment refreshes it. */
+export function usePaymentReceipt(invoiceId: string | null, index: number | null) {
+  return useQuery({
+    queryKey: qk.finance.receipt(invoiceId ?? '', index ?? -1),
+    queryFn: () => financeApi.paymentReceipt(invoiceId as string, index as number),
+    staleTime: STALE.transactional,
+    enabled: !!invoiceId && index != null && index >= 0,
+  })
+}
+
 export function usePaymentIntents(invoiceId: string | null, enabled = true) {
   return useQuery({
     queryKey: qk.finance.intents(invoiceId ?? ''),
@@ -293,6 +308,45 @@ export function useStartMyPayment(program: Program = 'LMS') {
     onSuccess: (intent) => {
       void qc.invalidateQueries({ queryKey: qk.finance.myIntents(intent.invoice_id) })
       void qc.invalidateQueries({ queryKey: qk.finance.myInvoices(program) })
+    },
+  })
+}
+
+/**
+ * What is collected for an amount of the bill in the chosen currency: the
+ * school's rate (1 for rupees) plus that currency's tax, added on top.
+ */
+export function usePaymentQuote(scope: 'admin' | 'me', amount: number, currency: string, online = false) {
+  const rounded = Math.round(amount * 100) / 100
+  return useQuery({
+    queryKey: ['finance', 'quote', scope, rounded, currency, online],
+    queryFn: () => (scope === 'admin' ? financeApi : myFeesApi).quote(rounded, currency, online),
+    enabled: rounded > 0,
+    staleTime: 60_000,
+  })
+}
+
+/** The receipt for one of my own payments. */
+export function useMyPaymentReceipt(invoiceId: string | null, index: number | null) {
+  return useQuery({
+    queryKey: ['finance', 'me', 'receipt', invoiceId, index],
+    queryFn: () => myFeesApi.receipt(invoiceId as string, index as number),
+    enabled: !!invoiceId && index != null && index >= 0,
+    staleTime: STALE.transactional,
+  })
+}
+
+/** Credits my Razorpay payment once Checkout hands it back; the bill updates straight away. */
+export function useConfirmMyRazorpay(program: Program = 'LMS') {
+  const qc = useQueryClient()
+  return useMutation({
+    meta: { silent: true },
+    mutationFn: ({ intentId, body }: { intentId: number; body: RazorpayConfirm }) =>
+      myFeesApi.confirmRazorpay(intentId, body),
+    onSuccess: (intent) => {
+      void qc.invalidateQueries({ queryKey: qk.finance.myIntents(intent.invoice_id) })
+      void qc.invalidateQueries({ queryKey: qk.finance.myInvoices(program) })
+      void qc.invalidateQueries({ queryKey: qk.finance.meRoot() })
     },
   })
 }
@@ -617,6 +671,110 @@ export function useIssueInvoice() {
         description: 'The figures are now frozen.',
       })
     },
+  })
+}
+
+/**
+ * The counter's "Issue the bill": builds the year's bill from the current
+ * rules and issues it in one go, so the student and parent see it on their
+ * Fees page. A draft already on file is re-priced first, like the Invoices tab.
+ */
+export function useIssueStudentBill() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      studentId,
+      academicYearId,
+      program,
+      body,
+    }: {
+      studentId: number
+      academicYearId?: number
+      program?: Program
+      /** Concessions per fee line and extra items, applied as it is issued. */
+      body?: InvoiceIssueRequest
+    }) => {
+      const draft = await financeApi.generateInvoice(studentId, { academicYearId, program })
+      return financeApi.issueInvoice(draft.id, program, body)
+    },
+    onSuccess: (invoice) => {
+      invalidateInvoices(qc, invoice.id)
+      toast.success(invoice.invoice_number ? `Bill ${invoice.invoice_number} issued` : 'Bill issued', {
+        description: `${formatMoney(invoice.total_amount, invoice.currency)} for ${
+          invoice.student_name ?? 'the student'
+        }. It now shows on their Fees page.`,
+      })
+    },
+  })
+}
+
+/** Bills fees left off when the bill was issued (Term 1, Term 2...). */
+export function useIssueLeftOff() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ invoiceId, body }: { invoiceId: string; body: IssueLeftOffRequest }) =>
+      financeApi.issueMore(invoiceId, body),
+    onSuccess: (invoice) => {
+      invalidateInvoices(qc, invoice.id)
+      toast.success('Fees added to the bill', {
+        description: `${invoice.invoice_number ?? 'The bill'} now comes to ${formatMoney(
+          invoice.total_amount,
+          invoice.currency,
+        )}. It shows on the student's Fees page.`,
+      })
+    },
+  })
+}
+
+/** Extra items (books, uniform) on an issued bill. */
+export function useAddExtraItems() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ invoiceId, items }: { invoiceId: string; items: ExtraItem[] }) =>
+      financeApi.addExtraItems(invoiceId, items),
+    onSuccess: (invoice) => invalidateInvoices(qc, invoice.id),
+  })
+}
+
+export function useRemoveExtraItem() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ invoiceId, label }: { invoiceId: string; label: string }) =>
+      financeApi.removeExtraItem(invoiceId, label),
+    onSuccess: (invoice) => invalidateInvoices(qc, invoice.id),
+  })
+}
+
+/**
+ * Razorpay at the counter: opens an order for the ticked fees, then credits it
+ * once Checkout's signature checks out. Resolves with the refreshed bill.
+ */
+export function useCounterRazorpay() {
+  const qc = useQueryClient()
+  return useMutation({
+    meta: { silent: true },
+    mutationFn: async ({
+      invoiceId,
+      body,
+      pay,
+    }: {
+      invoiceId: string
+      body: PaymentIntentCreate
+      /** Opens Checkout and resolves with what Razorpay handed back. */
+      pay: (intent: PaymentIntentOut) => Promise<RazorpayConfirm>
+    }) => {
+      const intent = await financeApi.createIntent(invoiceId, body)
+      if (!intent.checkout) {
+        throw new Error(intent.detail ?? 'Razorpay is not connected yet.')
+      }
+      const result = await pay(intent)
+      const settled = await financeApi.confirmRazorpay(intent.id, result)
+      if (settled.status !== 'SUCCEEDED') {
+        throw new Error(settled.failure_reason ?? 'The payment did not go through.')
+      }
+      return financeApi.getInvoice(invoiceId)
+    },
+    onSuccess: (invoice) => invalidateInvoices(qc, invoice.id),
   })
 }
 
