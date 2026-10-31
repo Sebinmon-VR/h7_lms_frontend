@@ -1,17 +1,32 @@
-import { useQuery } from '@tanstack/react-query'
-import { Loader2, MousePointer2, Save, Scissors, TriangleAlert, X } from 'lucide-react'
+import {
+  Check,
+  Circle,
+  Eraser,
+  Loader2,
+  MousePointer2,
+  Pencil,
+  Save,
+  Scissors,
+  TriangleAlert,
+  Type,
+  Underline,
+  Undo2,
+  X,
+} from 'lucide-react'
 import * as React from 'react'
 import { toast } from 'sonner'
 
 import { examApi } from '@/api/exam.api'
 import { ApiError } from '@/api/errors'
-import type { ExamOut, MarkedFile, MarkingPart, SubmissionOut } from '@/api/types'
+import type { ExamOut, MarkedFile, MarkingPart, SheetMark, SubmissionOut } from '@/api/types'
 import { cn } from '@/lib/cn'
 import { formatMark, gradeForPercentage } from '@/lib/exams'
 import { fileNameFromUrl } from '@/lib/files'
+import { MARK_COLORS, SheetMarks, useDrawnSheet } from '@/components/domain/answer-sheet'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 /**
  * Marking on the answer sheet itself.
@@ -19,15 +34,35 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
  * The teacher draws lines across the student's uploaded pages to split them into answers,
  * gives each part a score (and, if they like, what it was worth), and the editor adds the
  * parts up into the script's total, its percentage and - on a graded exam - its grade.
+ * With the pencil, circle, underline, tick, cross and note tools they show the student where
+ * the mistakes are; the student sees the marked sheet once results are published.
  *
- * Lines are kept as a fraction of the way down each file, so they stay on the same answer
- * however wide the screen is. PDFs are drawn page by page so the lines can sit on top of
- * them; images are shown as they are, and Word (.docx) files are rendered into the page.
+ * Lines and marks are kept as fractions of each file's width and height, so they stay on the
+ * same answer however wide the screen is. PDFs are drawn page by page so they can sit on top;
+ * images are shown as they are, and Word (.docx) files are rendered into the page.
  */
 
 type Sheet = Record<string, MarkedFile>
+type MarkTool = 'pen' | 'circle' | 'line' | 'tick' | 'cross' | 'note' | 'erase'
+type Tool = 'lines' | 'select' | MarkTool
+type Point = [number, number]
+/** One undoable change: a mark added, or one rubbed out from where it was. */
+type Step = { key: string; added: SheetMark } | { key: string; erased: SheetMark; index: number }
 
 const MIN_GAP = 0.01
+
+const MARK_TOOLS: { tool: MarkTool; label: string; icon: React.ReactNode; hint: string }[] = [
+  { tool: 'pen', label: 'Pencil', icon: <Pencil />, hint: 'Draw on the sheet with the pencil.' },
+  { tool: 'circle', label: 'Circle', icon: <Circle />, hint: 'Drag across a mistake to circle it.' },
+  { tool: 'line', label: 'Underline', icon: <Underline />, hint: 'Drag along the words to underline them.' },
+  { tool: 'tick', label: 'Tick', icon: <Check />, hint: 'Click where the tick goes.' },
+  { tool: 'cross', label: 'Cross', icon: <X />, hint: 'Click where the cross goes.' },
+  { tool: 'note', label: 'Note', icon: <Type />, hint: 'Click where the note goes, type it and press Enter.' },
+  { tool: 'erase', label: 'Eraser', icon: <Eraser />, hint: 'Click a mark to remove it.' },
+]
+
+const round = (v: number) => Math.round(v * 10000) / 10000
+const clamp01 = (v: number) => Math.min(Math.max(v, 0), 1)
 
 function emptyPart(label: string): MarkingPart {
   return { label, marks: null, max_marks: null, comment: null }
@@ -39,12 +74,17 @@ function initialSheet(submission: SubmissionOut): Sheet {
   let count = 0
   submission.attachments.forEach((_, index) => {
     const existing = saved[String(index)]
+    const annotations = [...(existing?.annotations ?? [])]
     if (existing && existing.segments?.length === (existing.dividers?.length ?? 0) + 1) {
-      sheet[String(index)] = { dividers: [...existing.dividers], segments: existing.segments.map((s) => ({ ...s })) }
+      sheet[String(index)] = {
+        dividers: [...existing.dividers],
+        segments: existing.segments.map((s) => ({ ...s })),
+        annotations,
+      }
       count += existing.segments.length
     } else {
       count += 1
-      sheet[String(index)] = { dividers: [], segments: [emptyPart(`Q${count}`)] }
+      sheet[String(index)] = { dividers: [], segments: [emptyPart(`Q${count}`)], annotations }
     }
   })
   return sheet
@@ -56,110 +96,45 @@ function partCount(sheet: Sheet): number {
 
 // ---------------------------------------------------------------- one file, drawn
 
-type Kind = 'pdf' | 'image' | 'docx' | 'other'
-
-function kindOf(type: string, name: string): Kind {
-  const lower = name.toLowerCase()
-  if (type === 'application/pdf' || lower.endsWith('.pdf')) return 'pdf'
-  if (type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp)$/.test(lower)) return 'image'
-  if (type.includes('wordprocessingml') || lower.endsWith('.docx')) return 'docx'
-  return 'other'
-}
-
-/** Draws a file into `host` and resolves once it is all on the page. */
-async function drawInto(host: HTMLDivElement, blob: Blob, kind: Kind, isCancelled: () => boolean) {
-  host.innerHTML = ''
-  if (kind === 'pdf') {
-    const pdfjs = await import('pdfjs-dist')
-    const { default: workerUrl } = await import('pdfjs-dist/build/pdf.worker.min.mjs?url')
-    pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
-    const doc = await pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise
-    for (let n = 1; n <= doc.numPages; n += 1) {
-      if (isCancelled()) return
-      const page = await doc.getPage(n)
-      const base = page.getViewport({ scale: 1 })
-      // A fixed drawing width, scaled to fit by CSS: sharp enough to read handwriting.
-      const scale = (1200 / base.width) * Math.min(window.devicePixelRatio || 1, 2)
-      const viewport = page.getViewport({ scale })
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.floor(viewport.width)
-      canvas.height = Math.floor(viewport.height)
-      canvas.className = 'block h-auto w-full bg-white'
-      canvas.style.marginBottom = n < doc.numPages ? '8px' : '0'
-      const context = canvas.getContext('2d')
-      if (!context) continue
-      await page.render({ canvas, canvasContext: context, viewport }).promise
-      host.appendChild(canvas)
-    }
-    return
-  }
-  if (kind === 'image') {
-    const url = URL.createObjectURL(blob)
-    await new Promise<void>((resolve) => {
-      const img = document.createElement('img')
-      img.className = 'block h-auto w-full bg-white'
-      img.onload = () => resolve()
-      img.onerror = () => resolve()
-      img.src = url
-      host.appendChild(img)
-    })
-    return
-  }
-  if (kind === 'docx') {
-    const { renderAsync } = await import('docx-preview')
-    const wrap = document.createElement('div')
-    wrap.className = 'bg-white text-black'
-    host.appendChild(wrap)
-    await renderAsync(blob, wrap, undefined, { inWrapper: false, ignoreLastRenderedPageBreak: true })
-  }
-}
-
 function MarkingSurface({
   cacheKey,
   load,
   fileName,
   file,
-  drawing,
+  tool,
+  color,
   activePart,
   onChange,
   onFocusPart,
+  onAddMark,
+  onEraseMark,
 }: {
   cacheKey: string
   load: () => Promise<Blob>
   fileName: string
   file: MarkedFile
-  drawing: boolean
+  tool: Tool
+  color: string
   activePart: number | null
   onChange: (next: MarkedFile) => void
   onFocusPart: (index: number) => void
+  onAddMark: (mark: SheetMark) => void
+  onEraseMark: (index: number) => void
 }) {
-  const query = useQuery({ queryKey: ['document-view', cacheKey], queryFn: load, staleTime: 5 * 60_000, retry: 1 })
-  const hostRef = React.useRef<HTMLDivElement>(null)
-  const surfaceRef = React.useRef<HTMLDivElement>(null)
-  const [drawn, setDrawn] = React.useState<'idle' | 'drawing' | 'done' | 'failed'>('idle')
-  const blob = query.data
-  const kind = blob ? kindOf(blob.type || '', fileName) : null
+  const sheet = useDrawnSheet(cacheKey, load, fileName)
+  const [draft, setDraft] = React.useState<SheetMark | null>(null)
+  const [note, setNote] = React.useState<{ at: Point; text: string } | null>(null)
+  const noteRef = React.useRef(note)
+  noteRef.current = note
+  const drags = tool === 'pen' || tool === 'circle' || tool === 'line'
 
-  React.useEffect(() => {
-    if (!blob || !kind || kind === 'other' || !hostRef.current) return
-    let cancelled = false
-    setDrawn('drawing')
-    drawInto(hostRef.current, blob, kind, () => cancelled)
-      .then(() => !cancelled && setDrawn('done'))
-      .catch((error) => {
-        console.error('Could not draw the answer sheet', error)
-        if (!cancelled) setDrawn('failed')
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [blob, kind])
-
-  const fractionAt = (clientY: number) => {
-    const rect = surfaceRef.current?.getBoundingClientRect()
-    if (!rect || rect.height === 0) return null
-    return Math.min(Math.max((clientY - rect.top) / rect.height, 0), 1)
+  const pointAt = (clientX: number, clientY: number): Point | null => {
+    const rect = sheet.surfaceNode.current?.getBoundingClientRect()
+    if (!rect || rect.width === 0 || rect.height === 0) return null
+    return [clamp01((clientX - rect.left) / rect.width), clamp01((clientY - rect.top) / rect.height)]
   }
+
+  const fractionAt = (clientY: number) => pointAt(0, clientY)?.[1] ?? null
 
   const partAt = (y: number) => {
     let index = 0
@@ -174,7 +149,7 @@ function MarkingSurface({
     const dividers = [...file.dividers, y].sort((a, b) => a - b)
     const segments = [...file.segments]
     segments.splice(at + 1, 0, emptyPart(''))
-    onChange({ dividers, segments })
+    onChange({ ...file, dividers, segments })
     onFocusPart(at + 1)
   }
 
@@ -187,7 +162,7 @@ function MarkingSurface({
     const merged =
       upper.marks == null && lower.marks == null ? null : Number(upper.marks ?? 0) + Number(lower.marks ?? 0)
     segments.splice(index, 2, { ...upper, marks: merged })
-    onChange({ dividers, segments })
+    onChange({ ...file, dividers, segments })
   }
 
   const dragLine = (index: number, event: React.PointerEvent) => {
@@ -219,7 +194,52 @@ function MarkingSurface({
     onChange({ ...file, segments })
   }
 
-  if (query.isPending) {
+  // ------------------------------------------------ marks
+
+  const startMark = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!drags || e.button !== 0 || (e.target as HTMLElement).closest('[data-no-draw]')) return
+    const p = pointAt(e.clientX, e.clientY)
+    if (!p) return
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    setDraft({ kind: tool, points: tool === 'pen' ? [p] : [p, p], color })
+  }
+
+  const moveMark = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!draft) return
+    const p = pointAt(e.clientX, e.clientY)
+    if (!p) return
+    setDraft((d) => {
+      if (!d) return d
+      if (d.kind !== 'pen') return { ...d, points: [d.points[0], p] }
+      // A point every couple of pixels is smooth enough and keeps the script small.
+      const [lx, ly] = d.points[d.points.length - 1]
+      if (Math.abs((p[0] - lx) * sheet.size.width) < 2 && Math.abs((p[1] - ly) * sheet.size.height) < 2) return d
+      return { ...d, points: [...d.points, p] }
+    })
+  }
+
+  const endMark = () => {
+    if (!draft) return
+    setDraft(null)
+    const [a, b] = draft.points
+    const big =
+      draft.kind === 'pen'
+        ? draft.points.length > 1
+        : !!b && (Math.abs(b[0] - a[0]) * sheet.size.width > 6 || Math.abs(b[1] - a[1]) * sheet.size.height > 6)
+    if (big) onAddMark({ ...draft, points: draft.points.map(([x, y]) => [round(x), round(y)]) })
+  }
+
+  const commitNote = () => {
+    const current = noteRef.current
+    if (!current) return
+    noteRef.current = null
+    setNote(null)
+    const text = current.text.trim()
+    if (text) onAddMark({ kind: 'note', points: [[round(current.at[0]), round(current.at[1])]], color, text })
+  }
+
+  if (sheet.query.isPending) {
     return (
       <div className="grid h-64 place-items-center rounded-lg border border-border bg-muted/40 text-sm text-muted-foreground">
         <span className="inline-flex items-center gap-2">
@@ -228,10 +248,10 @@ function MarkingSurface({
       </div>
     )
   }
-  if (query.isError || !blob) {
+  if (sheet.query.isError || !sheet.query.data) {
     return <p className="rounded-lg border border-border p-4 text-sm text-danger">This file could not be opened.</p>
   }
-  if (kind === 'other') {
+  if (sheet.kind === 'other') {
     return (
       <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">
         This kind of file cannot be drawn on. Score it in the list on the right.
@@ -242,29 +262,41 @@ function MarkingSurface({
   const bounds = [0, ...file.dividers, 1]
 
   return (
-    <div ref={surfaceRef} className="relative overflow-hidden rounded-lg border border-border bg-white shadow-sm">
-      <div ref={hostRef} />
-      {drawn === 'drawing' && (
+    <div ref={sheet.surfaceRef} className="relative overflow-hidden rounded-lg border border-border bg-white shadow-sm">
+      <div ref={sheet.hostRef} />
+      {sheet.drawn === 'drawing' && (
         <div className="absolute inset-0 grid place-items-center bg-white/70 text-sm text-muted-foreground">
           <span className="inline-flex items-center gap-2">
             <Loader2 className="size-4 animate-spin" /> Drawing the pages…
           </span>
         </div>
       )}
-      {drawn === 'failed' && (
+      {sheet.drawn === 'failed' && (
         <div className="absolute inset-0 grid place-items-center bg-white/90 p-4 text-center text-sm text-danger">
           This file could not be drawn. Score it in the list on the right.
         </div>
       )}
 
-      {drawn === 'done' && (
+      {sheet.drawn === 'done' && (
         <div
-          className={cn('absolute inset-0', drawing ? 'cursor-crosshair' : 'cursor-default')}
+          className={cn(
+            'absolute inset-0',
+            tool === 'select' || tool === 'erase' ? 'cursor-default' : tool === 'note' ? 'cursor-text' : 'cursor-crosshair',
+            // The pen draws instead of scrolling on a touch screen.
+            drags && 'touch-none',
+          )}
+          onPointerDown={startMark}
+          onPointerMove={moveMark}
+          onPointerUp={endMark}
+          onPointerCancel={() => setDraft(null)}
           onClick={(e) => {
-            const y = fractionAt(e.clientY)
-            if (y == null) return
-            if (drawing) addLine(y)
-            else onFocusPart(partAt(y))
+            if ((e.target as HTMLElement).closest('[data-no-draw]')) return
+            const p = pointAt(e.clientX, e.clientY)
+            if (!p) return
+            if (tool === 'lines') addLine(p[1])
+            else if (tool === 'select') onFocusPart(partAt(p[1]))
+            else if (tool === 'tick' || tool === 'cross') onAddMark({ kind: tool, points: [[round(p[0]), round(p[1])]], color })
+            else if (tool === 'note') setNote({ at: p, text: '' })
           }}
         >
           {/* The parts: tinted when chosen, each with its score in the top-right corner. */}
@@ -279,8 +311,9 @@ function MarkingSurface({
                 style={{ top: `${top * 100}%`, height: `${(bottom - top) * 100}%` }}
               >
                 <div
+                  data-no-draw
                   className={cn(
-                    'absolute right-2 top-2 flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs shadow-sm',
+                    'absolute right-2 top-2 z-20 flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs shadow-sm',
                     active ? 'border-primary bg-card' : 'border-border bg-card/95',
                   )}
                   onClick={(e) => {
@@ -322,12 +355,21 @@ function MarkingSurface({
             )
           })}
 
+          {/* The teacher's marks, over the page and under the scores. */}
+          <SheetMarks
+            marks={file.annotations ?? []}
+            size={sheet.size}
+            draft={draft}
+            onErase={tool === 'erase' ? onEraseMark : undefined}
+          />
+
           {/* The lines: drag the grip to move one, × to remove it. */}
           {file.dividers.map((y, i) => (
-            <div key={`line-${i}`} className="absolute inset-x-0" style={{ top: `${y * 100}%` }}>
+            <div key={`line-${i}`} className="absolute inset-x-0 z-20" style={{ top: `${y * 100}%` }}>
               <div className="absolute inset-x-0 -translate-y-1/2 border-t-2 border-dashed border-danger" />
               <button
                 type="button"
+                data-no-draw
                 className="absolute left-2 -translate-y-1/2 cursor-ns-resize touch-none rounded-full bg-danger px-2 py-0.5 text-2xs font-bold text-white shadow"
                 onPointerDown={(e) => dragLine(i, e)}
                 onClick={(e) => e.stopPropagation()}
@@ -337,6 +379,7 @@ function MarkingSurface({
               </button>
               <button
                 type="button"
+                data-no-draw
                 className="absolute left-12 grid size-5 -translate-y-1/2 place-items-center rounded-full bg-card text-danger shadow ring-1 ring-danger/40"
                 onClick={(e) => {
                   e.stopPropagation()
@@ -348,6 +391,44 @@ function MarkingSurface({
               </button>
             </div>
           ))}
+
+          {/* A note being typed, where it will sit on the sheet. */}
+          {note && (
+            <div
+              data-no-draw
+              className="absolute z-30"
+              style={
+                note.at[0] > 0.7
+                  ? { right: `${(1 - note.at[0]) * 100}%`, top: `${note.at[1] * 100}%` }
+                  : { left: `${note.at[0] * 100}%`, top: `${note.at[1] * 100}%` }
+              }
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                autoFocus
+                value={note.text}
+                maxLength={300}
+                onChange={(e) => setNote({ ...note, text: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    commitNote()
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    noteRef.current = null
+                    setNote(null)
+                  }
+                }}
+                onBlur={commitNote}
+                placeholder="Type a note, then press Enter"
+                aria-label="Note on the answer sheet"
+                data-sheet-note
+                className="w-60 rounded border border-border bg-white px-2 py-1 text-sm font-semibold shadow outline-none focus:border-primary"
+                style={{ color }}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -371,7 +452,9 @@ export function MarkingEditor({
   onRecordTotal: (total: number) => Promise<void>
 }) {
   const [sheet, setSheet] = React.useState<Sheet>(() => initialSheet(submission))
-  const [drawing, setDrawing] = React.useState(true)
+  const [tool, setTool] = React.useState<Tool>('lines')
+  const [color, setColor] = React.useState<string>(MARK_COLORS[0].value)
+  const [history, setHistory] = React.useState<Step[]>([])
   const [active, setActive] = React.useState<{ file: string; part: number } | null>(null)
   const [busy, setBusy] = React.useState<'save' | 'record' | null>(null)
   const [error, setError] = React.useState<string | null>(null)
@@ -379,6 +462,7 @@ export function MarkingEditor({
   React.useEffect(() => {
     if (open) {
       setSheet(initialSheet(submission))
+      setHistory([])
       setError(null)
     }
     // Only when the editor opens: a background refresh must not wipe what is being marked.
@@ -409,7 +493,8 @@ export function MarkingEditor({
       let n = partCount(sheet)
       segments = next.segments.map((p) => (p.label ? p : { ...p, label: `Q${(n += 1)}` }))
     }
-    setSheet((prev) => ({ ...prev, [key]: { ...next, segments } }))
+    // Lines and scores only: the marks on the file are changed through addMark and eraseMark.
+    setSheet((prev) => ({ ...prev, [key]: { ...next, segments, annotations: prev[key]?.annotations ?? [] } }))
   }
 
   const setPart = (key: string, index: number, patch: Partial<MarkingPart>) =>
@@ -417,6 +502,52 @@ export function MarkingEditor({
       ...prev,
       [key]: { ...prev[key], segments: prev[key].segments.map((p, i) => (i === index ? { ...p, ...patch } : p)) },
     }))
+
+  const addMark = (key: string, mark: SheetMark) => {
+    setSheet((prev) => ({ ...prev, [key]: { ...prev[key], annotations: [...(prev[key].annotations ?? []), mark] } }))
+    setHistory((h) => [...h, { key, added: mark }])
+  }
+
+  const eraseMark = (key: string, index: number) => {
+    const mark = sheet[key]?.annotations?.[index]
+    if (!mark) return
+    setSheet((prev) => ({
+      ...prev,
+      [key]: { ...prev[key], annotations: (prev[key].annotations ?? []).filter((_, i) => i !== index) },
+    }))
+    setHistory((h) => [...h, { key, erased: mark, index }])
+  }
+
+  const undo = () => {
+    const step = history[history.length - 1]
+    if (!step) return
+    setHistory((h) => h.slice(0, -1))
+    setSheet((prev) => {
+      const marks = [...(prev[step.key]?.annotations ?? [])]
+      if ('added' in step) {
+        const at = marks.lastIndexOf(step.added)
+        if (at >= 0) marks.splice(at, 1)
+      } else {
+        marks.splice(Math.min(step.index, marks.length), 0, step.erased)
+      }
+      return { ...prev, [step.key]: { ...prev[step.key], annotations: marks } }
+    })
+  }
+
+  // Ctrl+Z (⌘Z) takes back the last mark, except while typing in a box.
+  const undoRef = React.useRef(undo)
+  undoRef.current = undo
+  React.useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.key.toLowerCase() !== 'z') return
+      if ((e.target as HTMLElement | null)?.closest('input, textarea, [contenteditable="true"]')) return
+      e.preventDefault()
+      undoRef.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
 
   const persist = async () => {
     await examApi.saveMarking(exam.id, submission.student_id, { files: sheet })
@@ -449,14 +580,29 @@ export function MarkingEditor({
     }
   }
 
+  const hint =
+    tool === 'lines'
+      ? 'Click across the page under each answer. Drag a red grip to move a line, × to remove it.'
+      : tool === 'select'
+        ? 'Click a part to choose it.'
+        : MARK_TOOLS.find((t) => t.tool === tool)?.hint
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="xl" className="h-[calc(100dvh-1rem)] max-w-[calc(100vw-1rem)]">
+      <DialogContent
+        size="xl"
+        className="h-[calc(100dvh-1rem)] max-w-[calc(100vw-1rem)]"
+        // Escape in a note being typed cancels the note, not the whole marking.
+        onEscapeKeyDown={(e) => {
+          if ((e.target as HTMLElement | null)?.closest?.('[data-sheet-note]')) e.preventDefault()
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Mark on the answer sheet · {submission.student?.full_name ?? 'Student'}</DialogTitle>
           <DialogDescription>
             Draw a line under each answer to split the sheet into parts, then give each part its score. The total,
-            percentage{exam.grading_scheme === 'GRADE' ? ' and grade are' : ' is'} worked out for you.
+            percentage{exam.grading_scheme === 'GRADE' ? ' and grade are' : ' is'} worked out for you. Circle, tick,
+            cross or write on the sheet to show mistakes: the student sees the marked sheet when results are published.
           </DialogDescription>
         </DialogHeader>
 
@@ -466,27 +612,66 @@ export function MarkingEditor({
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <Button
                 size="sm"
-                variant={drawing ? 'primary' : 'outline'}
+                variant={tool === 'lines' ? 'primary' : 'outline'}
                 icon={<Scissors />}
-                onClick={() => setDrawing(true)}
-                aria-pressed={drawing}
+                onClick={() => setTool('lines')}
+                aria-pressed={tool === 'lines'}
               >
                 Draw lines
               </Button>
               <Button
                 size="sm"
-                variant={!drawing ? 'primary' : 'outline'}
+                variant={tool === 'select' ? 'primary' : 'outline'}
                 icon={<MousePointer2 />}
-                onClick={() => setDrawing(false)}
-                aria-pressed={!drawing}
+                onClick={() => setTool('select')}
+                aria-pressed={tool === 'select'}
               >
                 Select parts
               </Button>
-              <span className="text-xs text-muted-foreground">
-                {drawing
-                  ? 'Click across the page under each answer. Drag a red grip to move a line, × to remove it.'
-                  : 'Click a part to choose it.'}
-              </span>
+
+              <span className="mx-1 h-6 w-px bg-border" aria-hidden />
+
+              <div className="flex items-center gap-1" role="group" aria-label="Mark mistakes">
+                {MARK_TOOLS.map((t) => (
+                  <Tooltip key={t.tool}>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="icon-sm"
+                        variant={tool === t.tool ? 'primary' : 'outline'}
+                        icon={t.icon}
+                        onClick={() => setTool(t.tool)}
+                        aria-pressed={tool === t.tool}
+                        aria-label={t.label}
+                      />
+                    </TooltipTrigger>
+                    <TooltipContent>{t.label}</TooltipContent>
+                  </Tooltip>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1.5 px-1" role="group" aria-label="Colour">
+                {MARK_COLORS.map((c) => (
+                  <button
+                    key={c.value}
+                    type="button"
+                    onClick={() => setColor(c.value)}
+                    aria-pressed={color === c.value}
+                    aria-label={`${c.label} ink`}
+                    title={c.label}
+                    className={cn(
+                      'size-5 rounded-full ring-offset-2 ring-offset-card transition-shadow',
+                      color === c.value ? 'ring-2 ring-foreground/70' : 'ring-1 ring-border',
+                    )}
+                    style={{ backgroundColor: c.value }}
+                  />
+                ))}
+              </div>
+
+              <Button size="sm" variant="ghost" icon={<Undo2 />} onClick={undo} disabled={history.length === 0}>
+                Undo
+              </Button>
+
+              <span className="basis-full text-xs text-muted-foreground">{hint}</span>
             </div>
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto rounded-lg bg-muted/40 p-3">
               {files.map(({ attachment, index, key }) => {
@@ -499,10 +684,13 @@ export function MarkingEditor({
                       load={() => examApi.submissionFile(exam.id, submission.student_id, index)}
                       fileName={name}
                       file={sheet[key]}
-                      drawing={drawing}
+                      tool={tool}
+                      color={color}
                       activePart={active?.file === key ? active.part : null}
                       onChange={(next) => setFile(key, next)}
                       onFocusPart={(part) => setActive({ file: key, part })}
+                      onAddMark={(mark) => addMark(key, mark)}
+                      onEraseMark={(i) => eraseMark(key, i)}
                     />
                   </section>
                 )

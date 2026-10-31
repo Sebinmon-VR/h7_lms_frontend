@@ -47,6 +47,7 @@ import {
 } from '@/lib/exams'
 import { MAX_UPLOAD_BYTES, fileNameFromUrl, formatFileSize } from '@/lib/files'
 import { examApi } from '@/api/exam.api'
+import { MarkedAnswerSheet, hasMarking } from '@/components/domain/answer-sheet'
 import { DocumentViewer, InlineFileRow } from '@/components/domain/document-viewer'
 import { useNow } from '@/lib/hooks'
 import { subjectName } from '@/lib/select'
@@ -885,6 +886,7 @@ function Result({ exam, submission }: { exam: StudentExamOut; submission: Studen
   const questions = React.useMemo(() => [...exam.questions].sort((a, b) => a.order - b.order), [exam.questions])
   const answers = React.useMemo(() => new Map(submission.answers.map((a) => [a.question_id, a])), [submission.answers])
   const scores = React.useMemo(() => new Map(submission.question_scores.map((s) => [s.question_id, s])), [submission.question_scores])
+  const anyMarked = published && submission.attachments.some((_, i) => hasMarking(submission.marking_sheet?.[String(i)]))
 
   React.useEffect(() => {
     if (published && submission.percentage != null && submission.percentage >= 75) celebrate()
@@ -1030,10 +1032,29 @@ function Result({ exam, submission }: { exam: StudentExamOut; submission: Studen
 
       {submission.attachments.length > 0 && (
         <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-sm font-bold">Files you uploaded</p>
+          <p className="text-sm font-bold">{anyMarked ? 'Your marked answer sheet' : 'Files you uploaded'}</p>
+          {anyMarked && (
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Your teacher's circles, crosses and notes show what to look at again.
+            </p>
+          )}
           <ul className="mt-2 space-y-1.5">
             {submission.attachments.map((a, index) => {
               const name = a.filename ?? fileNameFromUrl(a.file_url)
+              const marked = published ? submission.marking_sheet?.[String(index)] : undefined
+              if (hasMarking(marked)) {
+                return (
+                  <li key={a.file_url} className="space-y-1.5 pt-1">
+                    <p className="text-xs font-medium text-muted-foreground">{name}</p>
+                    <MarkedAnswerSheet
+                      cacheKey={`my-answer-${exam.id}-${index}-${a.file_url}`}
+                      load={() => examApi.myAnswerFile(exam.id, index)}
+                      fileName={name}
+                      file={marked}
+                    />
+                  </li>
+                )
+              }
               return (
                 <li key={a.file_url}>
                   <InlineFileRow

@@ -1765,10 +1765,26 @@ export interface MarkingPart {
   comment: string | null
 }
 
+export type SheetMarkKind = 'pen' | 'circle' | 'line' | 'tick' | 'cross' | 'note'
+
+/**
+ * A teacher's mark on an answer sheet. `points` are [x, y] as fractions of the file's width
+ * and height: many for a pencil stroke, two for a circle (opposite corners) or an underline,
+ * one for a tick, a cross or a note.
+ */
+export interface SheetMark {
+  kind: SheetMarkKind
+  points: [number, number][]
+  color: string
+  text?: string | null
+}
+
 /** A file split into answers: lines as fractions of the way down (0 top, 1 bottom). */
 export interface MarkedFile {
   dividers: number[]
   segments: MarkingPart[]
+  /** Circles, ticks, crosses, strokes and notes. The student sees them once results are out. */
+  annotations?: SheetMark[]
 }
 
 export interface SubmissionOut {
@@ -1826,6 +1842,8 @@ export interface StudentSubmissionOut {
   passed: boolean | null
   evaluator_remarks: string | null
   question_scores: QuestionScoreOut[]
+  /** The teacher's marking on the answer sheets, by file position. Empty until results are out. */
+  marking_sheet?: Record<string, MarkedFile>
 }
 
 export interface QuestionScoreIn {
