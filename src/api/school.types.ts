@@ -21,7 +21,7 @@
  * through the same five states.
  */
 
-import type { ApiDate, ApiDateTime, ScheduledPeriod, UserRole } from './types'
+import type { ApiDate, ApiDateTime, JobOut, ScheduledPeriod, UserRole } from './types'
 import type { InvoiceStatus, Program } from './tuition.types'
 
 // ==================================================================== admissions
@@ -823,6 +823,28 @@ export interface InstalmentOut {
   concession_amount?: number | null
   /** Added by the office (books, uniform) rather than from the fee structure. */
   is_extra?: boolean
+  /** The bill this line went out on. Null until the account is issued. */
+  bill_number?: string | null
+}
+
+/**
+ * One bill on a student's yearly account: what the office billed in one go —
+ * the first issue, fees held back until later (LATER), or extra items (EXTRA) —
+ * with its own number, so it can be printed and paid on its own. The account's
+ * dues are the sum of its bills.
+ */
+export interface FeeBill {
+  number: string
+  kind: 'ISSUE' | 'LATER' | 'EXTRA' | string
+  issued_at?: ApiDateTime | null
+  labels: string[]
+  amount: number
+  amount_paid: number
+  balance: number
+  /** ISSUED (nothing paid yet), PARTIALLY_PAID, PAID, or CANCELLED once its lines were removed. */
+  status: 'ISSUED' | 'PARTIALLY_PAID' | 'PAID' | 'CANCELLED' | string
+  due_date?: ApiDate | null
+  is_overdue: boolean
 }
 
 /** One ticked fee line and how much of the payment goes to it. */
@@ -836,6 +858,63 @@ export interface ExtraItem {
   name: string
   amount: number
   due_date?: ApiDate | null
+}
+
+/**
+ * Bulk billing: ISSUE their fees for the year, LATER a fee held back (Term 2),
+ * EXTRA the same extra item for everyone. Each student gets a bill of their own.
+ */
+export type BulkBillingAction = 'ISSUE' | 'LATER' | 'EXTRA'
+
+export interface BulkBillingRequest {
+  academic_year_id: number
+  student_ids: number[]
+  action: BulkBillingAction
+  /** ISSUE: the fees to put on (none = every fee). LATER: the held-back fees to bill. */
+  labels?: string[]
+  extra_items?: ExtraItem[]
+  /** Email each student and linked parent their new bill. */
+  email?: boolean
+  /** Preview only: nobody is billed. */
+  dry_run?: boolean
+}
+
+/** One student in a bulk billing preview or run. */
+export interface BulkBillingRow {
+  student_id: number
+  student_name: string
+  admission_number?: string | null
+  class_name?: string | null
+  /** Preview: READY or SKIP. Run: BILLED, SKIPPED or FAILED. */
+  outcome: 'READY' | 'SKIP' | 'BILLED' | 'SKIPPED' | 'FAILED'
+  /** Every line the student could be billed; `chosen` follows the fees ticked. */
+  lines: { label: string; amount: number; due_date?: ApiDate | null; chosen?: boolean }[]
+  amount: number
+  bill_number?: string | null
+  emailed: string[]
+  /** Why a student was skipped or failed, in plain words. */
+  detail?: string | null
+}
+
+export interface BulkBillingResult {
+  action: BulkBillingAction
+  dry_run: boolean
+  academic_year_id: number
+  /** Every fee line seen across the students, for the fee tick boxes. */
+  labels: string[]
+  summary: {
+    students: number
+    counts: Partial<Record<BulkBillingRow['outcome'], number>>
+    amount: number
+    emailed: number
+    mail_configured: boolean
+  }
+  rows: BulkBillingRow[]
+}
+
+/** GET /admin/finance/bulk-billing/{job_id}: the job, and its result once it has finished. */
+export interface BulkBillingJob extends JobOut {
+  result?: BulkBillingResult | null
 }
 
 /** `POST /admin/finance/invoices/{id}/issue` — optional concessions and extra items. */
@@ -972,6 +1051,8 @@ export interface FeeInvoiceOut {
   line_items: BreakdownLine[]
   discounts: AppliedDiscount[]
   instalments: InstalmentOut[]
+  /** The bills on this account, oldest first. Empty until it is issued. */
+  bills?: FeeBill[]
   /** Fee lines held back when the bill was issued; they can be billed later. */
   left_off?: string[]
   payments: FeeInvoicePayment[]
@@ -1002,6 +1083,7 @@ export interface FeeReceiptLine {
   head: string
   is_admission_charge: boolean
   amount: number
+  bill_number?: string | null
 }
 
 /**
@@ -1042,6 +1124,8 @@ export interface FeePaymentReceipt {
   } | null
   lines: FeeReceiptLine[]
   invoice_number?: string | null
+  /** The bills this payment settled. */
+  bill_numbers?: string[] | null
   invoice_total: number
   /** What was still owed straight after this payment. */
   balance_after: number
@@ -1274,6 +1358,8 @@ export interface FeeCollectionRow {
   receipt_id?: number | null
   invoice_id: string
   invoice_number?: string | null
+  /** The bills the payment settled. */
+  bill_numbers?: string[]
   receipt_number?: string | null
   academic_year_id?: number | null
   student_id: number

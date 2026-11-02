@@ -36,6 +36,8 @@ import type {
   PaymentIntentOut,
   Program,
   WaiveInstalmentRequest,
+  BulkBillingJob,
+  BulkBillingRequest,
   ExtraItem,
   InvoiceIssueRequest,
   IssueLeftOffRequest,
@@ -300,6 +302,16 @@ export const financeApi = {
     ),
 
   /** Extra items (books, uniform) on an issued bill, each its own line. */
+  /**
+   * Bills many students at once (or, with `dry_run`, previews it) as a
+   * background job. Poll `bulkBillingStatus` with the job id it returns.
+   */
+  startBulkBilling: (body: BulkBillingRequest, program: Program = 'LMS') =>
+    post<BulkBillingJob>('/admin/finance/bulk-billing', body, { params: { program } }),
+
+  /** How far a bulk billing run has got, with its result once finished. */
+  bulkBillingStatus: (jobId: string) => get<BulkBillingJob>(`/admin/finance/bulk-billing/${jobId}`),
+
   addExtraItems: (invoiceId: string, items: ExtraItem[], program: Program = 'LMS') =>
     post<FeeInvoiceOut>(
       `/admin/finance/invoices/${encodeURIComponent(invoiceId)}/items`,

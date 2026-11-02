@@ -112,7 +112,18 @@ function TotalLine({ label, value, strong }: { label: string; value: string; str
 }
 
 /** What the page shows once Pay has been pressed. */
-function Outcome({ intent, invoice, backTo }: { intent: PaymentIntentOut; invoice: FeeInvoiceOut; backTo: string }) {
+function Outcome({
+  intent,
+  invoice,
+  bills,
+  backTo,
+}: {
+  intent: PaymentIntentOut
+  invoice: FeeInvoiceOut
+  /** The bills the payment was for, as the payer ticked them. */
+  bills: string
+  backTo: string
+}) {
   const paid = intent.status === 'SUCCEEDED'
   const reference = intent.reference ?? `PAY-${intent.id}`
   const charge = intent.charge
@@ -136,7 +147,7 @@ function Outcome({ intent, invoice, backTo }: { intent: PaymentIntentOut; invoic
           <h2 className="text-base font-semibold">{paid ? 'Payment received' : 'Your payment reference'}</h2>
           <p className="text-sm text-muted-foreground">
             {paid
-              ? `Paid against bill ${invoice.invoice_number ?? ''}. The school's receipt follows.`
+              ? `Paid against ${bills.includes(',') ? 'bills' : 'bill'} ${bills}. The school's receipt follows.`
               : intent.detail ?? 'Quote this reference when you pay. Your bill updates once the school records it.'}
           </p>
         </div>
@@ -192,6 +203,14 @@ export function SchoolPayForm({ invoice, backTo }: { invoice: FeeInvoiceOut; bac
   const amount = Math.round(open.reduce((s, i) => s + (ticked[i.label] ? owing(i) : 0), 0) * 100) / 100
   const allTicked = open.length > 0 && open.every((i) => ticked[i.label])
 
+  // The office bills in separate numbered bills; with more than one owing, the
+  // fees are grouped under them and a whole bill can be ticked at once.
+  const billOf = (i: InstalmentOut) => i.bill_number ?? invoice.invoice_number ?? ''
+  const openBills = Array.from(new Set(open.map(billOf)))
+  const grouped = openBills.length > 1
+  const linesOf = (bill: string) => open.filter((i) => billOf(i) === bill)
+  const tickedBills = openBills.filter((b) => linesOf(b).some((i) => ticked[i.label])).join(', ')
+
   const currencies = invoice.available_currencies?.length ? invoice.available_currencies : [invoice.currency]
   const [payCurrency, setPayCurrency] = React.useState(invoice.currency)
   // Each currency's own total, so the dropdown shows what each choice costs.
@@ -219,6 +238,7 @@ export function SchoolPayForm({ invoice, backTo }: { invoice: FeeInvoiceOut; bac
   }, [foreign, online])
 
   const [result, setResult] = React.useState<PaymentIntentOut | null>(null)
+  const [paidBills, setPaidBills] = React.useState('')
   const [error, setError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState(false)
   const isOnline = method !== 'BANK_TRANSFER' && method !== 'OFFICE'
@@ -226,6 +246,7 @@ export function SchoolPayForm({ invoice, backTo }: { invoice: FeeInvoiceOut; bac
   const pay = async () => {
     if (amount <= 0) return setError('Tick at least one fee to pay.')
     setError(null)
+    setPaidBills(tickedBills)
     setBusy(true)
     try {
       const intent = await start.mutateAsync({
@@ -255,7 +276,7 @@ export function SchoolPayForm({ invoice, backTo }: { invoice: FeeInvoiceOut; bac
     }
   }
 
-  if (result) return <Outcome intent={result} invoice={invoice} backTo={backTo} />
+  if (result) return <Outcome intent={result} invoice={invoice} bills={paidBills} backTo={backTo} />
 
   return (
     <div className="w-full">
@@ -272,8 +293,16 @@ export function SchoolPayForm({ invoice, backTo }: { invoice: FeeInvoiceOut; bac
         <FormRow icon={Receipt} label="Bill">
           <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm md:grid-cols-4">
             <div>
-              <dt className="text-xs text-muted-foreground">Bill number</dt>
-              <dd className="whitespace-nowrap font-medium">{invoice.invoice_number ?? '—'}</dd>
+              <dt className="text-xs text-muted-foreground">{grouped ? 'Bills to pay' : 'Bill number'}</dt>
+              <dd className="font-medium">
+                {openBills.length > 0
+                  ? openBills.map((b) => (
+                      <span key={b} className="block whitespace-nowrap">
+                        {b}
+                      </span>
+                    ))
+                  : (invoice.invoice_number ?? '—')}
+              </dd>
             </div>
             <div>
               <dt className="text-xs text-muted-foreground">Session</dt>
@@ -308,7 +337,32 @@ export function SchoolPayForm({ invoice, backTo }: { invoice: FeeInvoiceOut; bac
               </tr>
             </thead>
             <tbody>
-              {open.map((i) => (
+              {(grouped ? openBills : ['']).map((bill) => (
+                <React.Fragment key={bill || 'all'}>
+                  {grouped && (
+                    <tr className="border-b border-border bg-muted/40">
+                      <td className="py-2">
+                        <Checkbox
+                          aria-label={`Pay all of bill ${bill}`}
+                          checked={linesOf(bill).every((i) => ticked[i.label])}
+                          onCheckedChange={(v) =>
+                            setTicked((t) => ({
+                              ...t,
+                              ...Object.fromEntries(linesOf(bill).map((i) => [i.label, v === true])),
+                            }))
+                          }
+                        />
+                      </td>
+                      <td colSpan={3} className="py-2 text-xs">
+                        <span className="font-semibold uppercase tracking-wide">Bill {bill}</span>
+                        <span className="text-muted-foreground">
+                          {' '}
+                          · {formatMoney(linesOf(bill).reduce((s, i) => s + owing(i), 0), invoice.currency)} to pay
+                        </span>
+                      </td>
+                    </tr>
+                  )}
+              {(grouped ? linesOf(bill) : open).map((i) => (
                 <tr key={i.label} className="border-b border-border last:border-b-0">
                   <td className="py-2.5">
                     <Checkbox
@@ -330,6 +384,8 @@ export function SchoolPayForm({ invoice, backTo }: { invoice: FeeInvoiceOut; bac
                   </td>
                   <td className="py-2.5 text-right tabular-nums">{formatMoney(owing(i), invoice.currency)}</td>
                 </tr>
+              ))}
+                </React.Fragment>
               ))}
             </tbody>
           </table>

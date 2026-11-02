@@ -16,7 +16,7 @@ import {
 import * as React from 'react'
 import { useSearchParams } from 'react-router-dom'
 
-import type { FeeInvoiceOut, InstalmentOut, PaymentMethod } from '@/api/types'
+import type { FeeBill, FeeInvoiceOut, InstalmentOut, PaymentMethod } from '@/api/types'
 import {
   useAddExtraItems,
   useCollectFee,
@@ -73,6 +73,7 @@ import {
   printFeeReceipt,
   type SchoolLetterhead,
 } from '@/components/domain/fee-receipt'
+import { FeeBillForPrint, FeeBillSheet, type BillPayer } from '@/components/domain/fee-bill'
 
 /**
  * The fee counter, laid out as one flat sheet the way school offices know it
@@ -88,6 +89,11 @@ import {
  *
  * Any fee can be ticked, in any order, with its own amount — the payment is
  * recorded against exactly those fees, so the receipt says what was paid for.
+ *
+ * The student has one account for the year, but each time the office bills
+ * something (the first issue, fees held back until later, extra items) it goes
+ * out as a numbered bill of its own. The fee table is grouped by bill, and each
+ * bill can be printed and paid on its own.
  *
  * The bill is in rupees; the money can be taken in INR or AED. In AED the
  * amount is the school's rate (Fees → Currencies) plus AED's VAT on top, and the bill is credited the
@@ -129,6 +135,14 @@ interface Row {
   isExtra: boolean
   /** Extra item typed before issue, held here until the bill is issued. */
   pending?: boolean
+  /** The bill the line went out on, once issued. */
+  bill?: string | null
+}
+
+const BILL_KIND_LABEL: Record<string, string> = {
+  ISSUE: 'First bill',
+  LATER: 'Billed later',
+  EXTRA: 'Other items',
 }
 
 /** A fixed rate is the school's own, set under Fees → Currencies; otherwise it is the day's market rate. */
@@ -278,7 +292,9 @@ function LeftOffSection({ bill, studentId }: { bill: FeeInvoiceOut; studentId: n
   return (
     <>
       <SectionBar title="Fees not billed yet">
-        <span className="text-xs text-warning">Left off when the bill was issued. Tick the ones to bill now.</span>
+        <span className="text-xs text-warning">
+          Left off when the bill was issued. Tick the ones to bill now; they go out as a new bill.
+        </span>
       </SectionBar>
       {breakdown.isPending ? (
         <div className="p-4">
@@ -360,7 +376,7 @@ function LeftOffSection({ bill, studentId }: { bill: FeeInvoiceOut; studentId: n
           {error && <FormError message={error} />}
           <Button size="lg" onClick={submit} loading={issueMore.isPending} disabled={chosen.length === 0 || total <= 0}>
             <FileCheck2 />
-            Issue selected fees for {formatMoney(total, bill.currency)}
+            Bill selected fees for {formatMoney(total, bill.currency)}
           </Button>
         </div>
       </div>
@@ -429,6 +445,51 @@ function ReceiptDialog({
           <Button onClick={printFeeReceipt} disabled={!receipt.data}>
             <Printer />
             Print receipt
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function BillDialog({
+  invoice,
+  number,
+  school,
+  payer,
+  onClose,
+}: {
+  invoice: FeeInvoiceOut | null
+  number: string | null
+  school: SchoolLetterhead
+  payer: BillPayer
+  onClose: () => void
+}) {
+  const bill = (number && invoice?.bills?.find((b) => b.number === number)) || null
+  return (
+    <Dialog open={!!bill} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent size="lg">
+        <DialogHeader>
+          <DialogTitle>{bill ? `Bill ${bill.number}` : 'Bill'}</DialogTitle>
+          <DialogDescription>Print it, or save it as a PDF to send to the parent.</DialogDescription>
+        </DialogHeader>
+        <DialogBody className="max-h-[65vh] overflow-y-auto">
+          {invoice && bill && (
+            <>
+              <div className="border border-neutral-300">
+                <FeeBillSheet invoice={invoice} bill={bill} school={school} payer={payer} />
+              </div>
+              <FeeBillForPrint invoice={invoice} bill={bill} school={school} payer={payer} />
+            </>
+          )}
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={printFeeReceipt} disabled={!bill}>
+            <Printer />
+            Print bill
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -590,6 +651,7 @@ export default function FeeCollectionPage() {
           isOverdue: i.is_overdue,
           daysOverdue: i.days_overdue,
           isExtra: !!i.is_extra,
+          bill: issued ? (i.bill_number ?? issued.invoice_number ?? null) : null,
         }
       })
     if (!issued) {
@@ -647,6 +709,37 @@ export default function FeeCollectionPage() {
 
   const tickAll = (on: boolean) => setTicked(Object.fromEntries(payable.map((r) => [r.key, on])))
   const allTicked = payable.length > 0 && payable.every((r) => ticked[r.key])
+
+  // ------------------------------------------------------------ bills
+  // An issued account's lines grouped under the bills they went out on; before
+  // issue the sheet is one list.
+  const [billView, setBillView] = React.useState<string | null>(null)
+  const liveBills = (issued?.bills ?? []).filter((b) => b.status !== 'CANCELLED')
+  const groups = React.useMemo(() => {
+    const bills = issued?.bills ?? []
+    if (!issued || bills.length === 0) return [{ bill: null as FeeBill | null, rows }]
+    const known = new Set(bills.map((b) => b.number))
+    const out = bills
+      .map((b) => ({ bill: b as FeeBill | null, rows: rows.filter((r) => r.bill === b.number) }))
+      .filter((g) => g.rows.length > 0)
+    const stray = rows.filter((r) => !r.bill || !known.has(r.bill))
+    if (stray.length > 0) out.push({ bill: null, rows: stray })
+    return out
+  }, [issued, rows])
+  const position = new Map(groups.flatMap((g) => g.rows).map((r, i) => [r.key, i + 1]))
+  const payThisBill = (number: string) => {
+    setTicked(Object.fromEntries(payable.map((r) => [r.key, r.bill === number])))
+    setPayNow((p) => ({
+      ...p,
+      ...Object.fromEntries(payable.filter((r) => r.bill === number).map((r) => [r.key, String(r.balance)])),
+    }))
+    setError(null)
+  }
+  const payer: BillPayer = {
+    className: student ? classOf.get(student.id) : null,
+    guardianName: student?.guardian_name,
+    guardianPhone: student?.guardian_phone ?? student?.phone,
+  }
 
   // ------------------------------------------------------------ actions
   const addExtra = async () => {
@@ -876,8 +969,14 @@ export default function FeeCollectionPage() {
                     : null}
                 </InfoCell>
                 <InfoCell label="Phone">{student.guardian_phone ?? student.phone}</InfoCell>
-                <InfoCell label="Bill no">{issued?.invoice_number ?? 'Not issued yet'}</InfoCell>
-                <InfoCell label="Bill status">
+                <InfoCell label={liveBills.length > 1 ? 'Bills' : 'Bill no'}>
+                  {issued
+                    ? liveBills.length > 1
+                      ? `${liveBills.length} bills · from ${liveBills[0].number}`
+                      : issued.invoice_number
+                    : 'Not issued yet'}
+                </InfoCell>
+                <InfoCell label={liveBills.length > 1 ? 'Account status' : 'Bill status'}>
                   {issued ? (
                     <Badge tone={INVOICE_STATUS_TONE[issued.status]} size="sm">
                       {INVOICE_STATUS_LABEL[issued.status]}
@@ -955,7 +1054,52 @@ export default function FeeCollectionPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((r, index) => {
+                      {groups.map(({ bill, rows: lines }) => (
+                        <React.Fragment key={bill?.number ?? 'sheet'}>
+                          {bill && (
+                            <tr className="border-b border-border bg-muted/60">
+                              <td colSpan={11} className="px-3 py-1.5">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                                    <span className="font-semibold uppercase tracking-wider">Bill {bill.number}</span>
+                                    <span className="text-muted-foreground">
+                                      {BILL_KIND_LABEL[bill.kind] ?? 'Bill'}
+                                      {bill.issued_at ? ` · ${formatDate(bill.issued_at)}` : ''}
+                                    </span>
+                                    <span className="tabular-nums text-muted-foreground">
+                                      {formatMoney(bill.amount, currency)}
+                                      {bill.balance > 0 && bill.amount_paid > 0
+                                        ? ` · ${formatMoney(bill.balance, currency)} left`
+                                        : ''}
+                                    </span>
+                                    {bill.is_overdue && bill.balance > 0 ? (
+                                      <Badge tone="danger" size="sm">
+                                        Overdue
+                                      </Badge>
+                                    ) : (
+                                      <Badge tone={INVOICE_STATUS_TONE[bill.status as keyof typeof INVOICE_STATUS_TONE] ?? 'neutral'} size="sm">
+                                        {INVOICE_STATUS_LABEL[bill.status as keyof typeof INVOICE_STATUS_LABEL] ?? bill.status}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    {bill.balance > 0 && (
+                                      <Button size="xs" variant="outline" onClick={() => payThisBill(bill.number)}>
+                                        <HandCoins />
+                                        Pay this bill
+                                      </Button>
+                                    )}
+                                    <Button size="xs" variant="ghost" onClick={() => setBillView(bill.number)}>
+                                      <Printer />
+                                      Print bill
+                                    </Button>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                      {lines.map((r) => {
+                        const index = (position.get(r.key) ?? 1) - 1
                         const open = r.balance > 0
                         const checked = !!ticked[r.key] && open
                         const leftOff = !issued && !!excluded[r.key]
@@ -1077,6 +1221,8 @@ export default function FeeCollectionPage() {
                           </tr>
                         )
                       })}
+                        </React.Fragment>
+                      ))}
                     </tbody>
                     <tfoot>
                       <tr className="bg-muted/40 font-semibold">
@@ -1122,7 +1268,7 @@ export default function FeeCollectionPage() {
                   </Field>
                   <Button variant="outline" onClick={addExtra} loading={addExtras.isPending}>
                     <Plus />
-                    Add
+                    {issued ? 'Add as a new bill' : 'Add'}
                   </Button>
                 </div>
                 {sheetError && (
@@ -1382,6 +1528,13 @@ export default function FeeCollectionPage() {
         )}
       </div>
 
+      <BillDialog
+        invoice={issued}
+        number={billView}
+        school={school}
+        payer={payer}
+        onClose={() => setBillView(null)}
+      />
       <ReceiptDialog
         view={receiptView}
         school={school}

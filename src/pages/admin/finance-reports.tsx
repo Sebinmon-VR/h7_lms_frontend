@@ -301,7 +301,7 @@ function CollectionsTable({ rows, currency }: { rows: FeeCollectionRow[]; curren
           <TableHead>Received</TableHead>
           <TableHead className="min-w-52">Student</TableHead>
           <TableHead>Class</TableHead>
-          <TableHead>Invoice</TableHead>
+          <TableHead>Bill</TableHead>
           <TableHead>Against</TableHead>
           <TableHead className="min-w-44">Fees settled</TableHead>
           <TableHead>Method</TableHead>
@@ -325,6 +325,8 @@ function CollectionsTable({ rows, currency }: { rows: FeeCollectionRow[]; curren
                   <History />
                   Before this system
                 </Badge>
+              ) : row.bill_numbers?.length ? (
+                row.bill_numbers.join(', ')
               ) : (
                 row.invoice_number ?? row.invoice_id
               )}
@@ -566,7 +568,7 @@ function TransactionsSheet({ data }: { data: FeeTransactionsReport }) {
                         </Badge>
                       ) : (
                         <span className="block whitespace-nowrap">
-                          {row.invoice_number ?? row.invoice_id}
+                          {row.bill_numbers?.length ? row.bill_numbers.join(', ') : (row.invoice_number ?? row.invoice_id)}
                           {row.receipt_number && (
                             <span className="text-muted-foreground"> · {row.receipt_number}</span>
                           )}

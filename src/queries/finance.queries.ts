@@ -11,6 +11,7 @@ import {
 } from '@/api/finance.api'
 import type {
   ApiDate,
+  BulkBillingRequest,
   CurrencySettingsUpdate,
   DiscountRuleCreate,
   DiscountRuleUpdate,
@@ -456,6 +457,32 @@ export function useFeeCollectionsReport(
     queryFn: () => financeReportsApi.collections(params),
     staleTime: STALE.transactional,
     enabled,
+  })
+}
+
+/** Starts a bulk billing run or preview; follow it with `useBulkBillingJob`. */
+export function useStartBulkBilling() {
+  return useMutation({
+    mutationFn: (body: BulkBillingRequest) => financeApi.startBulkBilling(body),
+  })
+}
+
+/**
+ * A bulk billing run, polled until it finishes. A 404 means the server
+ * restarted mid-run, so there is nothing left to wait for.
+ */
+export function useBulkBillingJob(jobId: string | null) {
+  return useQuery({
+    queryKey: qk.finance.bulkBilling(jobId ?? ''),
+    queryFn: () => financeApi.bulkBillingStatus(jobId as string),
+    enabled: !!jobId,
+    retry: false,
+    staleTime: 0,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      if (status === 'SUCCEEDED' || status === 'FAILED' || query.state.error) return false
+      return 1_500
+    },
   })
 }
 

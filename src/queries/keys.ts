@@ -511,6 +511,8 @@ export const qk = {
       ['finance', 'reports', 'students', academicYearId ?? 'current', classId ?? 'ALL', status ?? 'ALL'] as const,
     reportDues: (academicYearId?: number, classId?: number) =>
       ['finance', 'reports', 'dues', academicYearId ?? 'current', classId ?? 'ALL'] as const,
+    /** One bulk billing run (or preview), polled until it finishes. */
+    bulkBilling: (jobId: string) => ['finance', 'bulk-billing', jobId] as const,
     reportTransactions: (
       from: string, to: string, academicYearId?: number, classId?: number, method?: string, status?: string,
     ) =>

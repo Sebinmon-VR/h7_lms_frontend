@@ -112,12 +112,18 @@ function BillStatement({ bill, onReceipt }: { bill: FeeInvoiceOut; onReceipt: (i
   const payments = (bill.payments ?? []).map((p, index) => ({ ...p, index })).reverse()
   const money = (n: number) => formatMoney(n, bill.currency)
   const concessions = lines.reduce((s, i) => s + (i.concession_amount ?? 0), 0)
+  // The school may bill the year in several numbered bills; the account adds them up.
+  const bills = (bill.bills ?? []).filter((b) => b.status !== 'CANCELLED')
+  const multi = bills.length > 1
 
   return (
     <>
       {/* ------------------------------------------------ the bill at a glance */}
       <div className="grid grid-cols-2 border-l border-t border-border md:grid-cols-3 xl:grid-cols-6">
-        <Stat label="Bill number" value={bill.invoice_number ?? '—'} />
+        <Stat
+          label={multi ? 'Bills' : 'Bill number'}
+          value={multi ? bills.map((b) => b.number).join(', ') : (bill.invoice_number ?? '—')}
+        />
         <Stat label="Session" value={bill.academic_year_name ?? '—'} />
         <Stat label="Total fee" value={money(bill.total_amount)} />
         <Stat label="Paid" value={money(bill.amount_paid)} tone="success" />
@@ -143,6 +149,7 @@ function BillStatement({ bill, onReceipt }: { bill: FeeInvoiceOut; onReceipt: (i
           <thead>
             <tr className="border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
               <th className="w-12 px-4 py-2.5 font-medium">#</th>
+              {multi && <th className="px-4 py-2.5 font-medium">Bill</th>}
               <th className="px-4 py-2.5 font-medium">Fee</th>
               <th className="px-4 py-2.5 font-medium">Due date</th>
               <th className="px-4 py-2.5 text-right font-medium">Amount</th>
@@ -159,6 +166,11 @@ function BillStatement({ bill, onReceipt }: { bill: FeeInvoiceOut; onReceipt: (i
               return (
                 <tr key={i.label} className="border-b border-border">
                   <td className="px-4 py-3 text-muted-foreground">{n + 1}</td>
+                  {multi && (
+                    <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
+                      {i.bill_number ?? bill.invoice_number}
+                    </td>
+                  )}
                   <td className="px-4 py-3">
                     <span className="font-medium">{i.label}</span>
                     {i.components && i.components.length > 0 && !i.is_extra && (
@@ -189,7 +201,10 @@ function BillStatement({ bill, onReceipt }: { bill: FeeInvoiceOut; onReceipt: (i
           </tbody>
           <tfoot>
             <tr className="bg-muted/30 font-semibold">
-              <td colSpan={3} className="px-4 py-3 text-right text-xs uppercase tracking-wide text-muted-foreground">
+              <td
+                colSpan={multi ? 4 : 3}
+                className="px-4 py-3 text-right text-xs uppercase tracking-wide text-muted-foreground"
+              >
                 Total
               </td>
               <td className="px-4 py-3 text-right tabular-nums">{money(bill.total_amount + concessions)}</td>

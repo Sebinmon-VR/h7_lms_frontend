@@ -48,7 +48,7 @@ function letterheadOf(receipt: FeePaymentReceipt, school?: SchoolLetterhead): Sc
  * The H7 mark, drawn inline so it is always on the page when the receipt
  * prints - a logo fetched from another site may not have loaded by then.
  */
-function H7Mark({ size }: { size: number }) {
+export function H7Mark({ size }: { size: number }) {
   const id = React.useId().replace(/:/g, '')
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" aria-label="H7" role="img" className="shrink-0">
@@ -267,7 +267,9 @@ function Copy({
         <div>
           <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Payment details</p>
           <dl>
-            <Field label="Bill no.">{receipt.invoice_number}</Field>
+            <Field label={(receipt.bill_numbers?.length ?? 0) > 1 ? 'Bills' : 'Bill no.'}>
+              {receipt.bill_numbers?.length ? receipt.bill_numbers.join(', ') : receipt.invoice_number}
+            </Field>
             <Field label="Session">{receipt.academic_year_name}</Field>
             <Field label="Paid by">{method}</Field>
             {receipt.reference && <Field label="Reference">{receipt.reference}</Field>}
