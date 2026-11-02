@@ -400,6 +400,14 @@ export const financeApi = {
   confirmRazorpay: (intentId: number, body: RazorpayConfirm) =>
     post<PaymentIntentOut>(`/admin/finance/intents/${intentId}/razorpay`, body),
 
+  /**
+   * Razorpay's window was closed without paying: the attempt is cancelled, or
+   * failed with Razorpay's reason. A payment that went through after all is
+   * credited instead, and comes back SUCCEEDED.
+   */
+  closeIntent: (intentId: number, failureReason?: string | null) =>
+    post<PaymentIntentOut>(`/admin/finance/intents/${intentId}/close`, { failure_reason: failureReason ?? null }),
+
   listIntents: (invoiceId: string) =>
     get<PaymentIntentOut[]>(`/admin/finance/invoices/${invoiceId}/intents`),
 }
@@ -450,6 +458,10 @@ export const myFeesApi = {
   /** Finishes a Razorpay payment: what Checkout handed back, checked and credited. */
   confirmRazorpay: (intentId: number, body: RazorpayConfirm) =>
     post<PaymentIntentOut>(`/fees/me/intents/${intentId}/razorpay`, body),
+
+  /** I closed Razorpay's window without paying (or the payment was declined). */
+  closeIntent: (intentId: number, failureReason?: string | null) =>
+    post<PaymentIntentOut>(`/fees/me/intents/${intentId}/close`, { failure_reason: failureReason ?? null }),
 }
 
 /**
@@ -495,6 +507,11 @@ export const parentFeesApi = {
 
   confirmRazorpay: (studentId: number, intentId: number, body: RazorpayConfirm) =>
     post<PaymentIntentOut>(`/parent/fees/children/${studentId}/intents/${intentId}/razorpay`, body),
+
+  closeIntent: (studentId: number, intentId: number, failureReason?: string | null) =>
+    post<PaymentIntentOut>(`/parent/fees/children/${studentId}/intents/${intentId}/close`, {
+      failure_reason: failureReason ?? null,
+    }),
 }
 
 /**

@@ -1357,6 +1357,8 @@ export interface FeeCollectionRow {
   source: 'INVOICE' | 'OPENING_BALANCE'
   receipt_id?: number | null
   invoice_id: string
+  /** Its place in the invoice's payments: what opens its receipt. Null for older entries. */
+  payment_index?: number | null
   invoice_number?: string | null
   /** The bills the payment settled. */
   bill_numbers?: string[]
@@ -1391,7 +1393,13 @@ export interface FeeCollectionRow {
  * FAILED, still IN_PROGRESS, or ABANDONED once nobody is asking Razorpay about
  * them any more.
  */
-export type FeeTransactionStatus = 'RECEIVED' | 'IN_PROGRESS' | 'FAILED' | 'ABANDONED' | 'REFUNDED'
+export type FeeTransactionStatus =
+  | 'RECEIVED'
+  | 'IN_PROGRESS'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'ABANDONED'
+  | 'REFUNDED'
 
 /** One row of GET /admin/finance/reports/transactions. */
 export interface FeeTransactionRow extends Omit<FeeCollectionRow, 'heads' | 'instalments_settled'> {

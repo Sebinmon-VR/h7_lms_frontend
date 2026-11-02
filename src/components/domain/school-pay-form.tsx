@@ -17,6 +17,7 @@ import {
 import * as React from 'react'
 import { Link } from 'react-router-dom'
 
+import { myFeesApi } from '@/api/finance.api'
 import type { FeeInvoiceOut, GatewayMethod, InstalmentOut, PaymentIntentOut } from '@/api/types'
 import {
   useConfirmMyRazorpay,
@@ -27,7 +28,7 @@ import {
 import { formatDate } from '@/lib/datetime'
 import { GATEWAY_METHOD_HINT, GATEWAY_METHOD_LABEL } from '@/lib/school'
 import { formatMoney } from '@/lib/tuition'
-import { RazorpayDismissed, openRazorpay } from '@/lib/razorpay'
+import { RazorpayDismissed, RazorpayFailed, openRazorpay } from '@/lib/razorpay'
 import { cn } from '@/lib/cn'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -259,7 +260,24 @@ export function SchoolPayForm({ invoice, backTo }: { invoice: FeeInvoiceOut; bac
         },
       })
       if (intent.checkout) {
-        const handedBack = await openRazorpay(intent.checkout, { merchant: 'H7 School' })
+        let handedBack
+        try {
+          handedBack = await openRazorpay(intent.checkout, { merchant: 'H7 School' })
+        } catch (err) {
+          // Closed without paying: tell the school, so the attempt reads as cancelled
+          // (or failed). If the money went through after all, it is credited here.
+          if (err instanceof RazorpayDismissed || err instanceof RazorpayFailed) {
+            const closed = await myFeesApi
+              .closeIntent(intent.id, err instanceof RazorpayFailed ? err.message : null)
+              .catch(() => null)
+            if (closed?.status === 'SUCCEEDED') {
+              setResult(closed)
+              window.scrollTo({ top: 0, behavior: 'smooth' })
+              return
+            }
+          }
+          throw err
+        }
         setResult(await confirm.mutateAsync({ intentId: intent.id, body: handedBack }))
       } else {
         setResult(intent)

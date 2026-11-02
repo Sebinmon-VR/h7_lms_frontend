@@ -37,6 +37,7 @@ import type {
   RazorpayConfirm,
 } from '@/api/types'
 import { formatMoney } from '@/lib/tuition'
+import { RazorpayDismissed, RazorpayFailed } from '@/lib/razorpay'
 import { STALE, qk } from './keys'
 
 // ------------------------------------------------------------------ reads
@@ -815,7 +816,21 @@ export function useCounterRazorpay() {
       if (!intent.checkout) {
         throw new Error(intent.detail ?? 'Razorpay is not connected yet.')
       }
-      const result = await pay(intent)
+      let result: RazorpayConfirm
+      try {
+        result = await pay(intent)
+      } catch (err) {
+        // Closed without paying: record it, so the attempt reads as cancelled (or
+        // failed) rather than in progress. If the money went through after all,
+        // the server credits it and the counter carries on as paid.
+        if (err instanceof RazorpayDismissed || err instanceof RazorpayFailed) {
+          const closed = await financeApi
+            .closeIntent(intent.id, err instanceof RazorpayFailed ? err.message : null)
+            .catch(() => null)
+          if (closed?.status === 'SUCCEEDED') return financeApi.getInvoice(invoiceId)
+        }
+        throw err
+      }
       const settled = await financeApi.confirmRazorpay(intent.id, result)
       if (settled.status !== 'SUCCEEDED') {
         throw new Error(settled.failure_reason ?? 'The payment did not go through.')

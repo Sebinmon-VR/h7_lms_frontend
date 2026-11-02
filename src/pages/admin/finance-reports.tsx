@@ -1,4 +1,4 @@
-import { ArrowLeftRight, BarChart3, Download, History, Receipt, Trash2, Users } from 'lucide-react'
+import { ArrowLeftRight, BarChart3, Download, History, Printer, Receipt, Trash2, Users } from 'lucide-react'
 import * as React from 'react'
 
 import type {
@@ -19,6 +19,7 @@ import {
   useFeeReportExport,
   useFeeRollReport,
   useFeeTransactionsReport,
+  usePaymentReceipt,
   useRecordFeeReceipt,
 } from '@/queries/finance.queries'
 import { useClasses, useUsers } from '@/queries/admin.queries'
@@ -61,6 +62,7 @@ import {
 } from '@/components/ui/table'
 import { EmptyState } from '@/components/feedback/states'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
+import { FeeReceipt, FeeReceiptForPrint, printFeeReceipt } from '@/components/domain/fee-receipt'
 import { PeriodPicker, useReportPeriod } from './tuition/period'
 
 /**
@@ -396,11 +398,27 @@ const TRANSACTION_STATUS: Record<
   RECEIVED: { label: 'Received', tone: 'success' },
   IN_PROGRESS: { label: 'In progress', tone: 'warning' },
   FAILED: { label: 'Failed', tone: 'danger' },
+  CANCELLED: { label: 'Cancelled', tone: 'neutral' },
   ABANDONED: { label: 'Abandoned', tone: 'neutral' },
   REFUNDED: { label: 'Refunded', tone: 'neutral' },
 }
 
-const STATUS_ORDER: FeeTransactionStatus[] = ['RECEIVED', 'IN_PROGRESS', 'FAILED', 'ABANDONED', 'REFUNDED']
+const STATUS_ORDER: FeeTransactionStatus[] = ['RECEIVED', 'IN_PROGRESS', 'FAILED', 'CANCELLED', 'ABANDONED', 'REFUNDED']
+
+/** The sheet's sections, in order. Abandoned attempts sit with the cancelled ones. */
+const SECTIONS: { title: string; statuses: FeeTransactionStatus[]; hint?: string }[] = [
+  { title: 'Received', statuses: ['RECEIVED'] },
+  { title: 'In progress', statuses: ['IN_PROGRESS'], hint: 'Started in the last half hour' },
+  { title: 'Failed', statuses: ['FAILED'], hint: 'Tried and declined' },
+  {
+    title: 'Cancelled',
+    statuses: ['CANCELLED', 'ABANDONED'],
+    hint: 'Closed before paying, or left open without paying',
+  },
+  { title: 'Refunded', statuses: ['REFUNDED'] },
+]
+
+type ReceiptView = { invoiceId: string; index: number }
 
 /** How Razorpay says an online payment was made. */
 const PAID_BY_LABEL: Record<string, string> = {
@@ -438,6 +456,7 @@ function howPaid(row: FeeTransactionRow): string {
  * reason.
  */
 function TransactionsSheet({ data }: { data: FeeTransactionsReport }) {
+  const [receipt, setReceipt] = React.useState<ReceiptView | null>(null)
   const { counts, by_currency: totals } = data.summary
   const unknown = totals.reduce((n, t) => n + t.razorpay_fee_unknown, 0)
   const head = 'border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground'
@@ -499,32 +518,61 @@ function TransactionsSheet({ data }: { data: FeeTransactionsReport }) {
         )}
       </div>
 
-      <SheetStrip title="Transactions">
-        <span className="text-xs text-muted-foreground">Newest first</span>
-      </SheetStrip>
       {data.rows.length === 0 ? (
-        <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-          No transactions match. Payments taken at the counter or online appear here the moment they are recorded.
-        </p>
+        <>
+          <SheetStrip title="Transactions" />
+          <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+            No transactions match. Payments taken at the counter or online appear here the moment they are recorded.
+          </p>
+        </>
       ) : (
-        <div className="max-h-[70vh] overflow-auto">
-          <table className="w-full min-w-[1100px] text-sm">
-            <thead className="sticky top-0 z-10 bg-background">
-              <tr className={head}>
-                <th className="px-2 py-2 font-medium">Date</th>
-                <th className="px-2 py-2 font-medium">Status</th>
-                <th className="px-2 py-2 font-medium">Student</th>
-                <th className="px-2 py-2 font-medium">Bill · for</th>
-                <th className="px-2 py-2 font-medium">How paid · reference</th>
-                <th className="px-2 py-2 text-right font-medium">Fees</th>
-                <th className="px-2 py-2 text-right font-medium">Tax</th>
-                <th className="px-2 py-2 text-right font-medium">Charges</th>
-                <th className="px-2 py-2 text-right font-medium">Total paid</th>
-                <th className="px-2 py-2 text-right font-medium">Razorpay kept</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.rows.map((row, index) => {
+        SECTIONS.map((section) => {
+          const rows = data.rows.filter((r) => section.statuses.includes(r.status))
+          if (rows.length === 0) return null
+          return (
+            <React.Fragment key={section.title}>
+              <SheetStrip title={`${section.title} · ${rows.length}`}>
+                <span className="text-xs text-muted-foreground">{section.hint ?? 'Newest first'}</span>
+              </SheetStrip>
+              <TransactionsTable rows={rows} onReceipt={section.title === 'Received' ? setReceipt : undefined} />
+            </React.Fragment>
+          )
+        })
+      )}
+      <ReceiptViewer view={receipt} onClose={() => setReceipt(null)} />
+    </div>
+  )
+}
+
+/** One section's payments: who, what for, how, and the money, with a receipt for those received. */
+function TransactionsTable({
+  rows,
+  onReceipt,
+}: {
+  rows: FeeTransactionRow[]
+  onReceipt?: (view: ReceiptView) => void
+}) {
+  const head = 'border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground'
+  return (
+    <div className="max-h-[60vh] overflow-auto">
+      <table className="w-full min-w-[1100px] text-sm">
+        <thead className="sticky top-0 z-10 bg-background">
+          <tr className={head}>
+            <th className="px-2 py-2 font-medium">Date</th>
+            <th className="px-2 py-2 font-medium">Status</th>
+            <th className="px-2 py-2 font-medium">Student</th>
+            <th className="px-2 py-2 font-medium">Bill · for</th>
+            <th className="px-2 py-2 font-medium">How paid · reference</th>
+            <th className="px-2 py-2 text-right font-medium">Fees</th>
+            <th className="px-2 py-2 text-right font-medium">Tax</th>
+            <th className="px-2 py-2 text-right font-medium">Charges</th>
+            <th className="px-2 py-2 text-right font-medium">Total paid</th>
+            <th className="px-2 py-2 text-right font-medium">Razorpay kept</th>
+            {onReceipt && <th className="px-2 py-2" />}
+          </tr>
+        </thead>
+        <tbody>
+              {rows.map((row, index) => {
                 const received = row.status === 'RECEIVED'
                 const status = TRANSACTION_STATUS[row.status]
                 const cur = row.paid_currency || row.currency
@@ -638,14 +686,63 @@ function TransactionsSheet({ data }: { data: FeeTransactionsReport }) {
                         '—'
                       )}
                     </td>
+                    {onReceipt && (
+                      <td className="whitespace-nowrap px-2 py-2 text-right">
+                        {row.invoice_id && row.payment_index != null ? (
+                          <Button
+                            variant="outline"
+                            size="xs"
+                            title={row.receipt_number ? `Receipt ${row.receipt_number}` : 'Receipt'}
+                            onClick={() => onReceipt({ invoiceId: row.invoice_id, index: row.payment_index as number })}
+                          >
+                            <Printer />
+                            Receipt
+                          </Button>
+                        ) : (
+                          <span className="text-2xs text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 )
               })}
-            </tbody>
-          </table>
-        </div>
-      )}
+        </tbody>
+      </table>
     </div>
+  )
+}
+
+/** A received payment's receipt, as the counter prints it. */
+function ReceiptViewer({ view, onClose }: { view: ReceiptView | null; onClose: () => void }) {
+  const receipt = usePaymentReceipt(view?.invoiceId ?? null, view?.index ?? null)
+  return (
+    <Dialog open={!!view} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent size="lg">
+        <DialogHeader>
+          <DialogTitle>{receipt.data?.receipt_number ? `Receipt ${receipt.data.receipt_number}` : 'Receipt'}</DialogTitle>
+          <DialogDescription>Print it, or save it as a PDF to send to the parent.</DialogDescription>
+        </DialogHeader>
+        <DialogBody className="max-h-[65vh] overflow-y-auto">
+          <QueryBoundary query={receipt} loading={<Skeleton className="h-96 w-full rounded-xl" />}>
+            {(data) => (
+              <>
+                <FeeReceipt receipt={data} />
+                <FeeReceiptForPrint receipt={data} />
+              </>
+            )}
+          </QueryBoundary>
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={printFeeReceipt} disabled={!receipt.data}>
+            <Printer />
+            Print receipt
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

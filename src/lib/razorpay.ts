@@ -18,6 +18,9 @@ export class RazorpayDismissed extends Error {
   }
 }
 
+/** The payer tried to pay, Razorpay declined it, and they then closed the window. */
+export class RazorpayFailed extends Error {}
+
 type RazorpayResponse = RazorpayConfirm
 interface RazorpayInstance {
   open: () => void
@@ -75,7 +78,7 @@ export async function openRazorpay(
       theme: { color: '#4f46e5' },
       handler: (response: RazorpayResponse) => resolve(response),
       modal: {
-        ondismiss: () => reject(failure ? new Error(failure) : new RazorpayDismissed()),
+        ondismiss: () => reject(failure ? new RazorpayFailed(failure) : new RazorpayDismissed()),
       },
     })
     instance.on('payment.failed', (e) => {
