@@ -403,19 +403,38 @@ const TRANSACTION_STATUS: Record<
   REFUNDED: { label: 'Refunded', tone: 'neutral' },
 }
 
-const STATUS_ORDER: FeeTransactionStatus[] = ['RECEIVED', 'IN_PROGRESS', 'FAILED', 'CANCELLED', 'ABANDONED', 'REFUNDED']
-
 /** The sheet's sections, in order. Abandoned attempts sit with the cancelled ones. */
-const SECTIONS: { title: string; statuses: FeeTransactionStatus[]; hint?: string }[] = [
-  { title: 'Received', statuses: ['RECEIVED'] },
-  { title: 'In progress', statuses: ['IN_PROGRESS'], hint: 'Started in the last half hour' },
-  { title: 'Failed', statuses: ['FAILED'], hint: 'Tried and declined' },
+const SECTIONS: { title: string; statuses: FeeTransactionStatus[]; hint: string; empty: string }[] = [
+  {
+    title: 'Received',
+    statuses: ['RECEIVED'],
+    hint: 'Money in, newest first. The printer opens the receipt.',
+    empty: 'No payments received in this period.',
+  },
+  {
+    title: 'In progress',
+    statuses: ['IN_PROGRESS'],
+    hint: 'Online payments started in the last half hour.',
+    empty: 'Nothing in progress right now.',
+  },
+  {
+    title: 'Failed',
+    statuses: ['FAILED'],
+    hint: 'Tried and declined, with the reason Razorpay gave.',
+    empty: 'No failed payments in this period.',
+  },
   {
     title: 'Cancelled',
     statuses: ['CANCELLED', 'ABANDONED'],
-    hint: 'Closed before paying, or left open without paying',
+    hint: 'Closed before paying, or left open without paying.',
+    empty: 'No cancelled payments in this period.',
   },
-  { title: 'Refunded', statuses: ['REFUNDED'] },
+  {
+    title: 'Refunded',
+    statuses: ['REFUNDED'],
+    hint: 'Paid and given back.',
+    empty: 'No refunds in this period.',
+  },
 ]
 
 type ReceiptView = { invoiceId: string; index: number }
@@ -457,19 +476,18 @@ function howPaid(row: FeeTransactionRow): string {
  */
 function TransactionsSheet({ data }: { data: FeeTransactionsReport }) {
   const [receipt, setReceipt] = React.useState<ReceiptView | null>(null)
-  const { counts, by_currency: totals } = data.summary
+  const [tab, setTab] = React.useState('Received')
+  const { by_currency: totals } = data.summary
+  const countOf = (statuses: FeeTransactionStatus[]) => data.rows.filter((r) => statuses.includes(r.status)).length
+  const tabs = SECTIONS.filter((s) => s.title !== 'Refunded' || countOf(s.statuses) > 0)
+  const active = tabs.find((s) => s.title === tab) ?? tabs[0]
+  const shownRows = data.rows.filter((r) => active.statuses.includes(r.status))
   const unknown = totals.reduce((n, t) => n + t.razorpay_fee_unknown, 0)
   const head = 'border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground'
 
   return (
     <div className="overflow-hidden rounded-md border border-border bg-background">
-      <SheetStrip title={`Totals · ${formatDate(data.from_date)} – ${formatDate(data.to_date)}`}>
-        <span className="text-xs text-muted-foreground">
-          {STATUS_ORDER.filter((s) => s === 'RECEIVED' || counts[s] > 0)
-            .map((s) => `${counts[s]} ${TRANSACTION_STATUS[s].label.toLowerCase()}`)
-            .join(' · ')}
-        </span>
-      </SheetStrip>
+      <SheetStrip title={`Totals · ${formatDate(data.from_date)} – ${formatDate(data.to_date)}`} />
       {totals.length === 0 ? (
         <p className="px-4 py-3 text-sm text-muted-foreground">No money received in this period.</p>
       ) : (
@@ -518,26 +536,30 @@ function TransactionsSheet({ data }: { data: FeeTransactionsReport }) {
         )}
       </div>
 
-      {data.rows.length === 0 ? (
-        <>
-          <SheetStrip title="Transactions" />
-          <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-            No transactions match. Payments taken at the counter or online appear here the moment they are recorded.
-          </p>
-        </>
+      <SheetStrip title="Transactions" />
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
+        <Segmented
+          layoutId="transaction-tab"
+          value={active.title}
+          onChange={setTab}
+          options={tabs.map((section) => ({
+            value: section.title,
+            label: (
+              <span className="inline-flex items-center gap-1.5">
+                {section.title}
+                <span className="rounded-full bg-muted px-1.5 text-2xs tabular-nums text-muted-foreground">
+                  {countOf(section.statuses)}
+                </span>
+              </span>
+            ),
+          }))}
+        />
+        <span className="text-xs text-muted-foreground">{active.hint}</span>
+      </div>
+      {shownRows.length === 0 ? (
+        <p className="border-t border-border px-4 py-8 text-center text-sm text-muted-foreground">{active.empty}</p>
       ) : (
-        SECTIONS.map((section) => {
-          const rows = data.rows.filter((r) => section.statuses.includes(r.status))
-          if (rows.length === 0) return null
-          return (
-            <React.Fragment key={section.title}>
-              <SheetStrip title={`${section.title} · ${rows.length}`}>
-                <span className="text-xs text-muted-foreground">{section.hint ?? 'Newest first'}</span>
-              </SheetStrip>
-              <TransactionsTable rows={rows} onReceipt={section.title === 'Received' ? setReceipt : undefined} />
-            </React.Fragment>
-          )
-        })
+        <TransactionsTable rows={shownRows} onReceipt={active.title === 'Received' ? setReceipt : undefined} />
       )}
       <ReceiptViewer view={receipt} onClose={() => setReceipt(null)} />
     </div>
@@ -554,8 +576,20 @@ function TransactionsTable({
 }) {
   const head = 'border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground'
   return (
-    <div className="max-h-[60vh] overflow-auto">
-      <table className="w-full min-w-[1100px] text-sm">
+    <div className="max-h-[65vh] overflow-auto border-t border-border">
+      <table className="w-full min-w-[1000px] table-fixed text-sm">
+        <colgroup>
+          <col className="w-[84px]" />
+          <col className="w-[112px]" />
+          <col className="w-[150px]" />
+          <col className="w-[132px]" />
+          <col className="w-[150px]" />
+          <col className="w-[92px]" />
+          <col className="w-[104px]" />
+          <col className="w-[96px]" />
+          <col className="w-[80px]" />
+          {onReceipt && <col className="w-[44px]" />}
+        </colgroup>
         <thead className="sticky top-0 z-10 bg-background">
           <tr className={head}>
             <th className="px-2 py-2 font-medium">Date</th>
@@ -564,11 +598,14 @@ function TransactionsTable({
             <th className="px-2 py-2 font-medium">Bill · for</th>
             <th className="px-2 py-2 font-medium">How paid · reference</th>
             <th className="px-2 py-2 text-right font-medium">Fees</th>
-            <th className="px-2 py-2 text-right font-medium">Tax</th>
-            <th className="px-2 py-2 text-right font-medium">Charges</th>
+            <th className="px-2 py-2 text-right font-medium">Tax · charges</th>
             <th className="px-2 py-2 text-right font-medium">Total paid</th>
             <th className="px-2 py-2 text-right font-medium">Razorpay kept</th>
-            {onReceipt && <th className="px-2 py-2" />}
+            {onReceipt && (
+              <th className="px-1 py-2">
+                <span className="sr-only">Receipt</span>
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -587,7 +624,7 @@ function TransactionsTable({
                         {formatTime(row.paid_at)}
                       </span>
                     </td>
-                    <td className="w-48 max-w-48 px-2 py-2">
+                    <td className="px-2 py-2">
                       <Badge tone={status.tone} size="sm">
                         {status.label}
                       </Badge>
@@ -600,11 +637,11 @@ function TransactionsTable({
                         </span>
                       )}
                     </td>
-                    <td className="whitespace-nowrap px-2 py-2">
-                      <span className="block font-medium text-foreground">
+                    <td className="px-2 py-2">
+                      <span className="block truncate font-medium text-foreground" title={row.student_name ?? undefined}>
                         {row.student_name ?? `Student ${row.student_id}`}
                       </span>
-                      <span className="block text-xs text-muted-foreground">
+                      <span className="block truncate text-xs text-muted-foreground">
                         {[row.admission_number, row.class_name].filter(Boolean).join(' · ')}
                       </span>
                     </td>
@@ -615,19 +652,21 @@ function TransactionsTable({
                           Before this system
                         </Badge>
                       ) : (
-                        <span className="block whitespace-nowrap">
-                          {row.bill_numbers?.length ? row.bill_numbers.join(', ') : (row.invoice_number ?? row.invoice_id)}
+                        <>
+                          <span className="block">
+                            {row.bill_numbers?.length ? row.bill_numbers.join(', ') : (row.invoice_number ?? row.invoice_id)}
+                          </span>
                           {row.receipt_number && (
-                            <span className="text-muted-foreground"> · {row.receipt_number}</span>
+                            <span className="block text-muted-foreground">{row.receipt_number}</span>
                           )}
-                        </span>
+                        </>
                       )}
                       {row.against && <span className="block text-muted-foreground">{row.against}</span>}
                     </td>
                     <td className="px-2 py-2 text-xs">
                       <span className="block whitespace-nowrap">{howPaid(row)}</span>
                       {row.reference && row.channel === 'ONLINE' ? (
-                        <span className="block font-mono text-2xs text-muted-foreground">
+                        <span className="block break-all font-mono text-2xs text-muted-foreground">
                           {row.reference}
                           {row.order_id && row.order_id !== row.reference && <span className="block">{row.order_id}</span>}
                         </span>
@@ -644,23 +683,27 @@ function TransactionsTable({
                       )}
                     </td>
                     <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums">
-                      {row.tax_amount > 0 ? (
+                      {row.tax_amount > 0 || row.charges_amount > 0 ? (
                         <>
-                          {formatMoney(row.tax_amount, cur)}
-                          <span className="block text-2xs text-muted-foreground">
-                            {row.tax_label ?? 'Tax'}
-                            {row.tax_percent ? ` ${row.tax_percent}%` : ''}
-                          </span>
+                          {row.tax_amount > 0 && (
+                            <span className="block">
+                              {formatMoney(row.tax_amount, cur)}
+                              <span className="block text-2xs text-muted-foreground">
+                                {row.tax_label ?? 'Tax'}
+                                {row.tax_percent ? ` ${row.tax_percent}%` : ''}
+                              </span>
+                            </span>
+                          )}
+                          {row.charges_amount > 0 && (
+                            <span className="mt-0.5 block" title={row.charges_label ?? undefined}>
+                              {formatMoney(row.charges_amount, cur)}
+                              <span className="block text-2xs text-muted-foreground">Charges</span>
+                            </span>
+                          )}
                         </>
                       ) : (
                         '—'
                       )}
-                    </td>
-                    <td
-                      className="whitespace-nowrap px-2 py-2 text-right tabular-nums"
-                      title={row.charges_label ?? undefined}
-                    >
-                      {row.charges_amount > 0 ? formatMoney(row.charges_amount, cur) : '—'}
                     </td>
                     <td
                       className={cn(
@@ -687,16 +730,16 @@ function TransactionsTable({
                       )}
                     </td>
                     {onReceipt && (
-                      <td className="whitespace-nowrap px-2 py-2 text-right">
+                      <td className="px-1 py-1.5 text-right">
                         {row.invoice_id && row.payment_index != null ? (
                           <Button
                             variant="outline"
-                            size="xs"
+                            size="icon-sm"
+                            aria-label={row.receipt_number ? `Receipt ${row.receipt_number}` : 'Receipt'}
                             title={row.receipt_number ? `Receipt ${row.receipt_number}` : 'Receipt'}
                             onClick={() => onReceipt({ invoiceId: row.invoice_id, index: row.payment_index as number })}
                           >
                             <Printer />
-                            Receipt
                           </Button>
                         ) : (
                           <span className="text-2xs text-muted-foreground">—</span>
@@ -952,7 +995,6 @@ export function FinanceReportsTab({
   const [status, setStatus] = React.useState('ALL')
   const [method, setMethod] = React.useState('ALL')
   const [headId, setHeadId] = React.useState('ALL')
-  const [txStatus, setTxStatus] = React.useState('ALL')
   const { from, to, setPeriod } = useReportPeriod('month')
   const classes = useClasses()
 
@@ -999,7 +1041,6 @@ export function FinanceReportsTab({
       fromDate: from,
       toDate: to,
       method: method === 'ALL' ? undefined : method,
-      status: txStatus === 'ALL' ? undefined : txStatus,
     },
     view === 'transactions',
   )
@@ -1013,12 +1054,7 @@ export function FinanceReportsTab({
   const exportParams = {
     academic_year_id: academicYearId ?? undefined,
     class_id: classFilter,
-    status:
-      view === 'students' && status !== 'ALL'
-        ? status
-        : view === 'transactions' && txStatus !== 'ALL'
-          ? txStatus
-          : undefined,
+    status: view === 'students' && status !== 'ALL' ? status : undefined,
     from_date: dated ? from : undefined,
     to_date: dated ? to : undefined,
     method: dated && method !== 'ALL' ? method : undefined,
@@ -1090,21 +1126,6 @@ export function FinanceReportsTab({
                 {(heads.data ?? []).map((head) => (
                   <SelectItem key={head.id} value={String(head.id)}>
                     {head.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          {view === 'transactions' && (
-            <Select value={txStatus} onValueChange={setTxStatus}>
-              <SelectTrigger className="w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">Every status</SelectItem>
-                {STATUS_ORDER.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {TRANSACTION_STATUS[s].label}
                   </SelectItem>
                 ))}
               </SelectContent>
