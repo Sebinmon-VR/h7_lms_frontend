@@ -459,6 +459,27 @@ export function useFeeCollectionsReport(
   })
 }
 
+export function useFeeTransactionsReport(
+  params: {
+    fromDate: ApiDate
+    toDate: ApiDate
+    academicYearId?: number
+    classId?: number
+    method?: string
+    status?: string
+  },
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: qk.finance.reportTransactions(
+      params.fromDate, params.toDate, params.academicYearId, params.classId, params.method, params.status,
+    ),
+    queryFn: () => financeReportsApi.transactions(params),
+    staleTime: STALE.transactional,
+    enabled,
+  })
+}
+
 /**
  * A CSV download. A mutation rather than a query: it writes a file, which must
  * happen when asked and exactly once - a query would refetch on focus and save

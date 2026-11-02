@@ -6,7 +6,8 @@ import type { RazorpayCheckout, RazorpayConfirm } from '@/api/types'
  * The script is loaded on first use rather than in index.html, so pages that
  * never take a payment never fetch it. Resolves with what Razorpay hands back
  * (order id, payment id, signature), which the server checks before crediting;
- * rejects with `RazorpayDismissed` when the payer closes the window.
+ * rejects with `RazorpayDismissed` when the payer closes the window, or with
+ * Razorpay's own reason when they close it after a payment failed.
  */
 
 const SCRIPT = 'https://checkout.razorpay.com/v1/checkout.js'
@@ -57,6 +58,7 @@ export async function openRazorpay(
   if (!Razorpay) throw new Error('Could not load Razorpay. Try again.')
 
   return new Promise<RazorpayResponse>((resolve, reject) => {
+    let failure: string | null = null
     const instance = new Razorpay({
       key: checkout.key_id,
       order_id: checkout.order_id,
@@ -72,11 +74,14 @@ export async function openRazorpay(
       },
       theme: { color: '#4f46e5' },
       handler: (response: RazorpayResponse) => resolve(response),
-      modal: { ondismiss: () => reject(new RazorpayDismissed()) },
+      modal: {
+        ondismiss: () => reject(failure ? new Error(failure) : new RazorpayDismissed()),
+      },
     })
     instance.on('payment.failed', (e) => {
-      // Razorpay keeps its window open so the payer can retry; this only explains it.
-      console.warn('Razorpay payment failed', e.error?.description)
+      // Razorpay keeps its window open so the payer can retry. The reason is kept
+      // for the page in case they give up and close it instead.
+      failure = e.error?.description || 'The payment did not go through. Try again, or pay another way.'
     })
     instance.open()
   })

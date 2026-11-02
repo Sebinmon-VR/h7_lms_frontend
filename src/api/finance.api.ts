@@ -13,6 +13,7 @@ import type {
   FeeHeadUpdate,
   FeeCollectRequest,
   FeeCollectionsReport,
+  FeeTransactionsReport,
   FeeInvoiceOut,
   FeePaymentReceipt,
   FeeReceiptCreate,
@@ -541,6 +542,34 @@ export const financeReportsApi = {
         class_id: params.classId,
         method: params.method,
         head_id: params.headId,
+        program,
+      }),
+    }),
+
+  /**
+   * Every transaction in a period: payments received with the tax and charges
+   * paid on top and what Razorpay kept, plus online payments that failed, are
+   * still open, or were abandoned.
+   */
+  transactions: (
+    params: {
+      fromDate: ApiDate
+      toDate: ApiDate
+      academicYearId?: number
+      classId?: number
+      method?: string
+      status?: string
+    },
+    program: Program = 'LMS',
+  ) =>
+    get<FeeTransactionsReport>('/admin/finance/reports/transactions', {
+      params: cleanParams({
+        from_date: params.fromDate,
+        to_date: params.toDate,
+        academic_year_id: params.academicYearId,
+        class_id: params.classId,
+        method: params.method,
+        status: params.status,
         program,
       }),
     }),

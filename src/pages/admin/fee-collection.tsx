@@ -1216,7 +1216,7 @@ export default function FeeCollectionPage() {
                               </>
                             ) : (
                               <span className="text-warning">
-                                Razorpay is not connected yet. Add the school's Razorpay test keys on the
+                                Razorpay is not connected yet. Add the school's Razorpay keys on the
                                 server, then this option takes payments.
                               </span>
                             )}

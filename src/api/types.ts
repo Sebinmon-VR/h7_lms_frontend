@@ -1392,6 +1392,17 @@ export interface EmailHealth {
   ok?: boolean
 }
 
+/** Online payment through Razorpay. When probed, `ok` says whether Razorpay accepted the keys. */
+export interface PaymentsHealth extends HealthProbe {
+  configured: boolean
+  /** The public key id (never the secret), to compare with the Razorpay dashboard. */
+  key_id: string | null
+  test_mode: boolean | null
+  webhook_secret_set: boolean
+  /** The address to give Razorpay's webhook, for fee orders and admission payment links. */
+  webhook_path?: string
+}
+
 export interface IntegrationsHealth {
   storage: StorageHealth
   /**
@@ -1402,6 +1413,8 @@ export interface IntegrationsHealth {
   live_classes: LiveClassesHealth
   recording: RecordingHealth
   email: EmailHealth
+  /** Absent from backends older than the payments check. */
+  payments?: PaymentsHealth
   /** False when `?probe=false` asked for a settings-only view. */
   probed: boolean
 }

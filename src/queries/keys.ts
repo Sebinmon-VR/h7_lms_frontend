@@ -511,6 +511,13 @@ export const qk = {
       ['finance', 'reports', 'students', academicYearId ?? 'current', classId ?? 'ALL', status ?? 'ALL'] as const,
     reportDues: (academicYearId?: number, classId?: number) =>
       ['finance', 'reports', 'dues', academicYearId ?? 'current', classId ?? 'ALL'] as const,
+    reportTransactions: (
+      from: string, to: string, academicYearId?: number, classId?: number, method?: string, status?: string,
+    ) =>
+      [
+        'finance', 'reports', 'transactions', from, to,
+        academicYearId ?? 'ALL', classId ?? 'ALL', method ?? 'ALL', status ?? 'ALL',
+      ] as const,
     reportCollections: (
       from: string, to: string, academicYearId?: number, classId?: number, method?: string, headId?: number,
     ) =>

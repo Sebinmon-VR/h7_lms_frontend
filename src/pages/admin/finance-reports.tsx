@@ -1,4 +1,4 @@
-import { BarChart3, Download, History, Receipt, Trash2, Users } from 'lucide-react'
+import { ArrowLeftRight, BarChart3, Download, History, Receipt, Trash2, Users } from 'lucide-react'
 import * as React from 'react'
 
 import type {
@@ -6,6 +6,9 @@ import type {
   FeeReportView,
   FeeRollRow,
   FeeRollStatus,
+  FeeTransactionRow,
+  FeeTransactionStatus,
+  FeeTransactionsReport,
   PaymentMethod,
 } from '@/api/types'
 import {
@@ -15,10 +18,12 @@ import {
   useFeeHeads,
   useFeeReportExport,
   useFeeRollReport,
+  useFeeTransactionsReport,
   useRecordFeeReceipt,
 } from '@/queries/finance.queries'
 import { useClasses, useUsers } from '@/queries/admin.queries'
-import { formatDate, formatDateTime, todayApiDate } from '@/lib/datetime'
+import { cn } from '@/lib/cn'
+import { formatDate, formatDateTime, formatTime, todayApiDate } from '@/lib/datetime'
 import { formatMoney } from '@/lib/tuition'
 import { PAYMENT_METHOD_LABEL } from '@/lib/school'
 import { Badge } from '@/components/ui/badge'
@@ -380,6 +385,268 @@ function CollectionsTable({ rows, currency }: { rows: FeeCollectionRow[]; curren
   )
 }
 
+// ------------------------------------------------------------ transactions
+
+const TRANSACTION_STATUS: Record<
+  FeeTransactionStatus,
+  { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' }
+> = {
+  RECEIVED: { label: 'Received', tone: 'success' },
+  IN_PROGRESS: { label: 'In progress', tone: 'warning' },
+  FAILED: { label: 'Failed', tone: 'danger' },
+  ABANDONED: { label: 'Abandoned', tone: 'neutral' },
+  REFUNDED: { label: 'Refunded', tone: 'neutral' },
+}
+
+const STATUS_ORDER: FeeTransactionStatus[] = ['RECEIVED', 'IN_PROGRESS', 'FAILED', 'ABANDONED', 'REFUNDED']
+
+/** How Razorpay says an online payment was made. */
+const PAID_BY_LABEL: Record<string, string> = {
+  upi: 'UPI',
+  card: 'Card',
+  netbanking: 'Net banking',
+  wallet: 'Wallet',
+  emi: 'EMI',
+  paylater: 'Pay later',
+}
+
+/** The fee counter's grey section strip, so the office reads both screens alike. */
+function SheetStrip({ title, children }: { title: string; children?: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-y border-border bg-muted/70 px-4 py-1.5">
+      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
+      {children}
+    </div>
+  )
+}
+
+function howPaid(row: FeeTransactionRow): string {
+  if (row.channel === 'ONLINE') {
+    const via = row.provider === 'razorpay' || !row.provider ? 'Razorpay' : row.provider
+    return row.paid_by ? `${via} · ${PAID_BY_LABEL[row.paid_by] ?? row.paid_by}` : via
+  }
+  return PAYMENT_METHOD_LABEL[row.method as PaymentMethod] ?? row.method
+}
+
+/**
+ * Every transaction in the period as one sheet: totals per currency paid in,
+ * then each payment with the fees it credited and what was paid on top (tax,
+ * payment charges) and what Razorpay kept, with what reaches the bank under it.
+ * Online payments that did not end in money are listed too, greyed, with the
+ * reason.
+ */
+function TransactionsSheet({ data }: { data: FeeTransactionsReport }) {
+  const { counts, by_currency: totals } = data.summary
+  const unknown = totals.reduce((n, t) => n + t.razorpay_fee_unknown, 0)
+  const head = 'border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground'
+
+  return (
+    <div className="overflow-hidden rounded-md border border-border bg-background">
+      <SheetStrip title={`Totals · ${formatDate(data.from_date)} – ${formatDate(data.to_date)}`}>
+        <span className="text-xs text-muted-foreground">
+          {STATUS_ORDER.filter((s) => s === 'RECEIVED' || counts[s] > 0)
+            .map((s) => `${counts[s]} ${TRANSACTION_STATUS[s].label.toLowerCase()}`)
+            .join(' · ')}
+        </span>
+      </SheetStrip>
+      {totals.length === 0 ? (
+        <p className="px-4 py-3 text-sm text-muted-foreground">No money received in this period.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-sm">
+            <thead>
+              <tr className={head}>
+                <th className="px-2 py-2 font-medium">Paid in</th>
+                <th className="px-2 py-2 text-right font-medium">Payments</th>
+                <th className="px-2 py-2 text-right font-medium">Fees</th>
+                <th className="px-2 py-2 text-right font-medium">Tax</th>
+                <th className="px-2 py-2 text-right font-medium">Payment charges</th>
+                <th className="px-2 py-2 text-right font-medium">Total received</th>
+                <th className="px-2 py-2 text-right font-medium">Razorpay kept</th>
+                <th className="px-2 py-2 text-right font-medium">Net to bank</th>
+              </tr>
+            </thead>
+            <tbody>
+              {totals.map((t) => (
+                <tr key={t.currency} className="border-b border-border last:border-b-0">
+                  <td className="px-2 py-2 font-medium">{t.currency}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{t.count}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{formatMoney(t.fees, t.currency)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{formatMoney(t.tax, t.currency)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{formatMoney(t.charges, t.currency)}</td>
+                  <td className="px-2 py-2 text-right font-semibold tabular-nums text-success">
+                    {formatMoney(t.total, t.currency)}
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums">{formatMoney(t.razorpay_fee, t.currency)}</td>
+                  <td className="px-2 py-2 text-right font-semibold tabular-nums">{formatMoney(t.net, t.currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
+        Credited to bills: {formatMoney(data.summary.credited, data.currency)}. Tax and payment charges are paid
+        on top of the fees and do not reduce what the student owes.
+        {unknown > 0 && (
+          <>
+            {' '}
+            {unknown} online payment{unknown === 1 ? ' was' : 's were'} taken before Razorpay&apos;s own fee was
+            recorded here; check {unknown === 1 ? 'it' : 'them'} in the Razorpay dashboard.
+          </>
+        )}
+      </div>
+
+      <SheetStrip title="Transactions">
+        <span className="text-xs text-muted-foreground">Newest first</span>
+      </SheetStrip>
+      {data.rows.length === 0 ? (
+        <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+          No transactions match. Payments taken at the counter or online appear here the moment they are recorded.
+        </p>
+      ) : (
+        <div className="max-h-[70vh] overflow-auto">
+          <table className="w-full min-w-[1100px] text-sm">
+            <thead className="sticky top-0 z-10 bg-background">
+              <tr className={head}>
+                <th className="px-2 py-2 font-medium">Date</th>
+                <th className="px-2 py-2 font-medium">Status</th>
+                <th className="px-2 py-2 font-medium">Student</th>
+                <th className="px-2 py-2 font-medium">Bill · for</th>
+                <th className="px-2 py-2 font-medium">How paid · reference</th>
+                <th className="px-2 py-2 text-right font-medium">Fees</th>
+                <th className="px-2 py-2 text-right font-medium">Tax</th>
+                <th className="px-2 py-2 text-right font-medium">Charges</th>
+                <th className="px-2 py-2 text-right font-medium">Total paid</th>
+                <th className="px-2 py-2 text-right font-medium">Razorpay kept</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.rows.map((row, index) => {
+                const received = row.status === 'RECEIVED'
+                const status = TRANSACTION_STATUS[row.status]
+                const cur = row.paid_currency || row.currency
+                return (
+                  <tr
+                    key={`${row.reference ?? row.receipt_id ?? 'r'}-${index}`}
+                    className={cn('border-b border-border align-top', !received && 'text-muted-foreground')}
+                  >
+                    <td className="whitespace-nowrap px-2 py-2 text-xs tabular-nums">
+                      <span className="block">{formatDate(row.paid_at)}</span>
+                      <span className="block text-muted-foreground">
+                        {formatTime(row.paid_at)}
+                      </span>
+                    </td>
+                    <td className="w-48 max-w-48 px-2 py-2">
+                      <Badge tone={status.tone} size="sm">
+                        {status.label}
+                      </Badge>
+                      {row.recovered && (
+                        <span className="mt-1 block text-2xs text-muted-foreground">Credited by the safety net</span>
+                      )}
+                      {row.failure_reason && (
+                        <span className="mt-1 line-clamp-2 text-2xs text-danger" title={row.failure_reason}>
+                          {row.failure_reason}
+                        </span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-2">
+                      <span className="block font-medium text-foreground">
+                        {row.student_name ?? `Student ${row.student_id}`}
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        {[row.admission_number, row.class_name].filter(Boolean).join(' · ')}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 text-xs">
+                      {row.channel === 'PAST' ? (
+                        <Badge tone="neutral" size="sm" title={row.note ?? undefined}>
+                          <History />
+                          Before this system
+                        </Badge>
+                      ) : (
+                        <span className="block whitespace-nowrap">
+                          {row.invoice_number ?? row.invoice_id}
+                          {row.receipt_number && (
+                            <span className="text-muted-foreground"> · {row.receipt_number}</span>
+                          )}
+                        </span>
+                      )}
+                      {row.against && <span className="block text-muted-foreground">{row.against}</span>}
+                    </td>
+                    <td className="px-2 py-2 text-xs">
+                      <span className="block whitespace-nowrap">{howPaid(row)}</span>
+                      {row.reference && row.channel === 'ONLINE' ? (
+                        <span className="block font-mono text-2xs text-muted-foreground">
+                          {row.reference}
+                          {row.order_id && row.order_id !== row.reference && <span className="block">{row.order_id}</span>}
+                        </span>
+                      ) : (
+                        row.reference && <span className="block text-muted-foreground">{row.reference}</span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums">
+                      {formatMoney(row.paid_fee_amount, cur)}
+                      {cur !== row.currency && (
+                        <span className="block text-2xs text-muted-foreground">
+                          {formatMoney(row.amount, row.currency)} to the bill
+                        </span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums">
+                      {row.tax_amount > 0 ? (
+                        <>
+                          {formatMoney(row.tax_amount, cur)}
+                          <span className="block text-2xs text-muted-foreground">
+                            {row.tax_label ?? 'Tax'}
+                            {row.tax_percent ? ` ${row.tax_percent}%` : ''}
+                          </span>
+                        </>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td
+                      className="whitespace-nowrap px-2 py-2 text-right tabular-nums"
+                      title={row.charges_label ?? undefined}
+                    >
+                      {row.charges_amount > 0 ? formatMoney(row.charges_amount, cur) : '—'}
+                    </td>
+                    <td
+                      className={cn(
+                        'whitespace-nowrap px-2 py-2 text-right font-semibold tabular-nums',
+                        received && 'text-success',
+                      )}
+                    >
+                      {formatMoney(row.paid_amount, cur)}
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums">
+                      {row.razorpay_fee != null ? (
+                        <>
+                          {formatMoney(row.razorpay_fee, cur)}
+                          {row.net_amount != null && (
+                            <span className="block text-2xs text-muted-foreground">
+                              {formatMoney(row.net_amount, cur)} to bank
+                            </span>
+                          )}
+                        </>
+                      ) : received && row.channel === 'ONLINE' ? (
+                        <span className="text-2xs text-muted-foreground">Not recorded</span>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /**
  * Money received before this system existed, entered after the fact.
  *
@@ -586,6 +853,7 @@ export function FinanceReportsTab({
   const [status, setStatus] = React.useState('ALL')
   const [method, setMethod] = React.useState('ALL')
   const [headId, setHeadId] = React.useState('ALL')
+  const [txStatus, setTxStatus] = React.useState('ALL')
   const { from, to, setPeriod } = useReportPeriod('month')
   const classes = useClasses()
 
@@ -625,6 +893,18 @@ export function FinanceReportsTab({
     },
     view === 'collections',
   )
+  const transactions = useFeeTransactionsReport(
+    {
+      academicYearId: academicYearId ?? undefined,
+      classId: classFilter,
+      fromDate: from,
+      toDate: to,
+      method: method === 'ALL' ? undefined : method,
+      status: txStatus === 'ALL' ? undefined : txStatus,
+    },
+    view === 'transactions',
+  )
+  const dated = view === 'collections' || view === 'transactions'
 
   const classOptions = [
     { value: '', label: 'Every class' },
@@ -634,10 +914,15 @@ export function FinanceReportsTab({
   const exportParams = {
     academic_year_id: academicYearId ?? undefined,
     class_id: classFilter,
-    status: view === 'students' && status !== 'ALL' ? status : undefined,
-    from_date: view === 'collections' ? from : undefined,
-    to_date: view === 'collections' ? to : undefined,
-    method: view === 'collections' && method !== 'ALL' ? method : undefined,
+    status:
+      view === 'students' && status !== 'ALL'
+        ? status
+        : view === 'transactions' && txStatus !== 'ALL'
+          ? txStatus
+          : undefined,
+    from_date: dated ? from : undefined,
+    to_date: dated ? to : undefined,
+    method: dated && method !== 'ALL' ? method : undefined,
     head_id: view === 'collections' && headId !== 'ALL' ? Number(headId) : undefined,
   }
 
@@ -653,6 +938,7 @@ export function FinanceReportsTab({
               { value: 'students', label: 'Students', icon: <Users /> },
               { value: 'dues', label: 'Dues', icon: <BarChart3 /> },
               { value: 'collections', label: 'Collections', icon: <Receipt /> },
+              { value: 'transactions', label: 'Transactions', icon: <ArrowLeftRight /> },
             ]}
           />
           <div className="min-w-44">
@@ -677,7 +963,7 @@ export function FinanceReportsTab({
               </SelectContent>
             </Select>
           )}
-          {view === 'collections' && (
+          {dated && (
             <>
               <PeriodPicker from={from} to={to} onChange={setPeriod} />
               <Select value={method} onValueChange={setMethod}>
@@ -693,20 +979,37 @@ export function FinanceReportsTab({
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={headId} onValueChange={setHeadId}>
-                <SelectTrigger className="w-44">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">Every fee</SelectItem>
-                  {(heads.data ?? []).map((head) => (
-                    <SelectItem key={head.id} value={String(head.id)}>
-                      {head.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </>
+          )}
+          {view === 'collections' && (
+            <Select value={headId} onValueChange={setHeadId}>
+              <SelectTrigger className="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">Every fee</SelectItem>
+                {(heads.data ?? []).map((head) => (
+                  <SelectItem key={head.id} value={String(head.id)}>
+                    {head.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {view === 'transactions' && (
+            <Select value={txStatus} onValueChange={setTxStatus}>
+              <SelectTrigger className="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">Every status</SelectItem>
+                {STATUS_ORDER.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {TRANSACTION_STATUS[s].label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -862,6 +1165,12 @@ export function FinanceReportsTab({
               )}
             </>
           )}
+        </QueryBoundary>
+      )}
+
+      {view === 'transactions' && (
+        <QueryBoundary query={transactions} loading={<Skeleton className="h-96 w-full rounded-md" />}>
+          {(data) => <TransactionsSheet data={data} />}
         </QueryBoundary>
       )}
     </div>

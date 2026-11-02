@@ -1114,7 +1114,7 @@ export interface FeeCollectRequest extends FeePaymentRecord {
 /** Where a student's bill stands. OVERDUE is derived: an unsettled invoice past a due date. */
 export type FeeRollStatus = 'NOT_BILLED' | 'DRAFT' | 'ISSUED' | 'PARTIALLY_PAID' | 'PAID' | 'OVERDUE'
 
-export type FeeReportView = 'students' | 'dues' | 'collections'
+export type FeeReportView = 'students' | 'dues' | 'collections' | 'transactions'
 
 /** Amounts still owing, bucketed by how long past due. Not-billed students sit in `not_due`. */
 export interface FeeAgeing {
@@ -1283,6 +1283,81 @@ export interface FeeCollectionRow {
   class_name?: string | null
   recorded_by?: number | null
   recorded_by_name?: string | null
+  /**
+   * What the payer handed over beside the fees, frozen when the payment was
+   * taken. Equal to `amount` / `currency` when it was paid exactly as billed.
+   */
+  paid_currency: string
+  paid_amount: number
+  /** The fees part of `paid_amount`, in `paid_currency`. */
+  paid_fee_amount: number
+  tax_label?: string | null
+  tax_percent?: number | null
+  tax_amount: number
+  /** The gateway's fee and any convenience charge, added on top. */
+  charges_amount: number
+  charges_label?: string | null
+  exchange_rate?: number | null
+}
+
+/**
+ * RECEIVED: money in. The rest are online payments that did not end in money:
+ * FAILED, still IN_PROGRESS, or ABANDONED once nobody is asking Razorpay about
+ * them any more.
+ */
+export type FeeTransactionStatus = 'RECEIVED' | 'IN_PROGRESS' | 'FAILED' | 'ABANDONED' | 'REFUNDED'
+
+/** One row of GET /admin/finance/reports/transactions. */
+export interface FeeTransactionRow extends Omit<FeeCollectionRow, 'heads' | 'instalments_settled'> {
+  status: FeeTransactionStatus
+  /** COUNTER: taken by the office. ONLINE: through the gateway. PAST: from before this system. */
+  channel: 'COUNTER' | 'ONLINE' | 'PAST'
+  /** The fees it was for. */
+  against?: string | null
+  provider?: string | null
+  order_id?: string | null
+  /** How an online payment was made: upi, card, netbanking, wallet. */
+  paid_by?: string | null
+  /** What Razorpay kept, GST included. Null when it is not known. */
+  razorpay_fee?: number | null
+  razorpay_tax?: number | null
+  /** `paid_amount` less what Razorpay kept. */
+  net_amount?: number | null
+  /** Credited by the safety net (webhook or recovery check), not the payer's page. */
+  recovered: boolean
+  failure_reason?: string | null
+}
+
+/** Received money in one currency. Rupees and dirhams are never added together. */
+export interface FeeTransactionTotals {
+  currency: string
+  count: number
+  fees: number
+  tax: number
+  charges: number
+  total: number
+  razorpay_fee: number
+  /** Online payments settled before Razorpay's own fee was recorded. */
+  razorpay_fee_unknown: number
+  net: number
+}
+
+/** GET /admin/finance/reports/transactions. */
+export interface FeeTransactionsReport {
+  from_date: ApiDate
+  to_date: ApiDate
+  academic_year_id?: number | null
+  class_id?: number | null
+  method?: string | null
+  status?: FeeTransactionStatus | null
+  currency: string
+  summary: {
+    counts: Record<FeeTransactionStatus, number>
+    /** Credited to bills, in the bills' currency. */
+    credited: number
+    by_currency: FeeTransactionTotals[]
+  }
+  rows: FeeTransactionRow[]
 }
 
 /** GET /admin/finance/reports/collections. */

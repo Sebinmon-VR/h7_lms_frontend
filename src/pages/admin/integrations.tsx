@@ -8,6 +8,7 @@ import {
   RefreshCw,
   ShieldAlert,
   Video,
+  Wallet,
   XCircle,
 } from 'lucide-react'
 import * as React from 'react'
@@ -26,7 +27,7 @@ import { PageHeader } from '@/components/layout/page-header'
 /**
  * Diagnostics for the Azure services the backend runs on: storage (Azure Blob
  * Storage), live classes (Azure Communication Services), class recording and
- * email.
+ * email; and for online payment (Razorpay), whose keys are replaced now and then.
  *
  * The page shows the backend's own `detail` and `problems` strings verbatim
  * rather than paraphrasing them. They name the exact misconfiguration — a
@@ -177,7 +178,7 @@ function storageProviderName(provider: string | null | undefined): string | null
 
 function IntegrationsGrid({ data }: { data: IntegrationsHealth }) {
   const testUpload = useStorageTestUpload()
-  const { storage, live_classes: live, recording, email } = data
+  const { storage, live_classes: live, recording, email, payments } = data
   const storageProblems = storage.problems ?? []
   const liveProblems = [...(live?.problems ?? []), ...(live?.recording?.problems ?? [])]
 
@@ -304,6 +305,27 @@ function IntegrationsGrid({ data }: { data: IntegrationsHealth }) {
         )}
 
         <EmailCard email={email} />
+
+        {payments && (
+          <IntegrationCard
+            title="Online payments"
+            icon={<Wallet className="size-4" />}
+            probe={payments}
+            probed={data.probed}
+          >
+            <Detail label="Service" value="Razorpay" />
+            <Detail label="Configured" value={<Bool value={payments.configured} />} />
+            <Detail
+              label="Mode"
+              value={payments.test_mode == null ? null : payments.test_mode ? 'Test' : 'Live'}
+            />
+            <Detail label="Key ID" value={payments.key_id} mono />
+            <Detail label="Webhook secret set" value={<Bool value={payments.webhook_secret_set} />} />
+            {/* Where Razorpay must send its events; without it a payment whose page
+                never reports back waits for the five-minute recovery check. */}
+            <Detail label="Webhook" value={payments.webhook_path} mono />
+          </IntegrationCard>
+        )}
       </div>
 
       {/* A round trip proves writes work, which reachability alone does not. */}
@@ -347,7 +369,7 @@ export default function AdminIntegrationsPage() {
     <>
       <PageHeader
         title="Integrations"
-        description="Where files are stored, how live classes run and are recorded, how email is sent, and what is currently broken."
+        description="Where files are stored, how live classes run and are recorded, how email is sent, whether online payment works, and what is currently broken."
         actions={
           <Button
             variant="outline"
