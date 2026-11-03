@@ -190,6 +190,7 @@ export const qk = {
       ['exams', 'submissions', examId, studentId] as const,
     reportCards: () => ['exams', 'report-cards'] as const,
     reportCard: (cardId: string) => ['exams', 'report-cards', cardId] as const,
+    paperMarks: (classId: number) => ['exams', 'paper-marks', classId] as const,
   },
   /**
    * The online tuition product.

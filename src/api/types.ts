@@ -2008,3 +2008,61 @@ export interface ReportCardBatch {
   cards: ReportCardOut[]
   warnings: string[]
 }
+
+// ---------------------------------------------- marks for exams held on paper
+
+/** One subject's column on a paper exam sheet. `marks` is keyed by student id; a blank is absent. */
+export interface PaperSheetSubject {
+  subject_id: number
+  max_marks: number | null
+  marks: Record<string, number>
+}
+
+export interface PaperMarkSheet {
+  exam_name: string
+  /** A plain date, `YYYY-MM-DD`. */
+  conducted_on: string | null
+  subjects: PaperSheetSubject[]
+  entered_by: string[]
+  updated_at: ApiDateTime | null
+}
+
+export interface PaperRegisterStudent {
+  id: number
+  full_name: string
+  roll_number: string | null
+  admission_number: string | null
+}
+
+export interface PaperMarksRegister {
+  class_id: number
+  class_room: ClassRoomOut | null
+  students: PaperRegisterStudent[]
+  /** Taught in the class, or already on one of its sheets. */
+  subjects: SubjectOut[]
+  /** The rest of the school's subjects, for an exam in one not taught in this class. */
+  other_subjects: SubjectOut[]
+  sheets: PaperMarkSheet[]
+}
+
+export interface PaperMarkSheetSave {
+  class_id: number
+  exam_name: string
+  /** The sheet being edited; null for a new one. */
+  previous_exam_name: string | null
+  conducted_on: string
+  /** Every subject the exam had. One the sheet had that is left out is removed, marks and all. */
+  subjects: {
+    subject_id: number
+    max_marks: number
+    /** `null` clears the student's mark. */
+    marks: { student_id: number; marks_obtained: number | null }[]
+  }[]
+}
+
+export interface PaperMarkSheetSaved {
+  sheet: PaperMarkSheet
+  saved: number
+  cleared: number
+  unchanged: number
+}

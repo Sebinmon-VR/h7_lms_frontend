@@ -159,19 +159,6 @@ export const TEACHER_GUIDE: GuidePart[] = [
         tips: ['Each card shows how many have handed in and how many are outstanding.', '**Reopen** lets a student hand in again.'],
         keywords: ['homework', 'assignment', 'set work', 'mark homework'],
       },
-      {
-        id: 'teacher-results-gradebook',
-        title: 'Gradebook',
-        summary: 'Record and review marks for tests taken outside the LMS.',
-        steps: [
-          'Open **Gradebook** and choose the **Class** and **Subject**.',
-          'Press **Record exam**, enter the **Exam name** and what it is **Out of**.',
-          'Type each student’s mark (leave a student blank to skip them) and press the **Save … grades** button, which shows how many it will save.',
-          'To change a mark, click it, edit it, and press **Save mark** (or **Delete**).',
-        ],
-        tips: ['Exams set and marked in **Exams** appear here once their results are published.'],
-        keywords: ['gradebook', 'marks', 'test', 'grades'],
-      },
     ],
   },
   {
@@ -180,10 +167,31 @@ export const TEACHER_GUIDE: GuidePart[] = [
     topics: [
       ...TEACHER_EXAM_TOPICS,
       {
+        id: 'teacher-paper-marks',
+        title: 'Paper exam marks',
+        summary: 'Enter the marks of an exam written on paper in school, so they count on the report cards.',
+        steps: [
+          'Open **Report Cards** and press **Paper exam marks**.',
+          'Choose the **Class**. The exams already entered are listed; press **Open** to change one, or fill in the empty sheet for a new exam.',
+          'Enter the **Exam** name (it is printed on the report card) and the **Date written**.',
+          'Under **Subjects in this exam**, tick the subjects the exam had. Every subject taught in the class starts ticked; untick the rest, or add a subject not taught in the class.',
+          'In the **Out of** row, enter the maximum marks for each subject.',
+          'Type each student’s mark. Leave the box empty, or type AB, if the student was absent. Press Enter to move down the column.',
+          'Press **Save marks**. Then issue the report cards as usual, with a period that includes the exam date.',
+        ],
+        tips: [
+          'An empty box is never counted as zero. The report card shows the paper as not sat.',
+          'Only a class’s class teacher (or an administrator) can enter these marks.',
+          'Exams held in the LMS are not entered here; they count on their own once their results are published.',
+        ],
+        keywords: ['paper exam', 'offline exam', 'marks', 'mark register', 'term exam', 'gradebook', 'grades'],
+      },
+      {
         id: 'teacher-report-cards',
         title: 'Report cards',
         summary: 'Issue term report cards for a class you lead, read them, then release them to students.',
         steps: [
+          'If the exam was written on paper, enter its marks first under **Paper exam marks**.',
           'Open **Report Cards** and press **Issue report cards**.',
           'Choose the **Class** and enter a **Title**, such as Term 1 Report Card 2026. Set **Exams from** and **Exams until**.',
           'Choose the options (published results only, attendance, rank in the class). Leave **Release to students now** off so you can check first.',

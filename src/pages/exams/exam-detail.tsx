@@ -1083,7 +1083,7 @@ export default function ExamDetailPage() {
         description={
           <>
             {evaluated} marked script{evaluated === 1 ? '' : 's'} will be released. Students then see their marks, the
-            answer key and your remarks, and each result appears in the gradebook.
+            answer key and your remarks, and each result appears in the student’s marks.
             {toMark > 0 && (
               <>
                 {' '}

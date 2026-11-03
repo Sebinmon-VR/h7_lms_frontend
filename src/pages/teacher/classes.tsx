@@ -103,9 +103,9 @@ function LedClasses() {
                   </Link>
                 </Button>
                 <Button asChild variant="outline" size="sm">
-                  <Link to="/teacher/gradebook">
+                  <Link to={`/teacher/report-cards/paper-marks?class=${mapping.class_room.id}`}>
                     <FileText className="size-4" />
-                    Grades
+                    Exam marks
                   </Link>
                 </Button>
               </div>
@@ -260,9 +260,9 @@ export default function TeacherClassesPage() {
                       </Link>
                     </Button>
                     <Button asChild variant="outline" size="sm">
-                      <Link to="/teacher/gradebook">
+                      <Link to="/teacher/exams">
                         <FileText className="size-4" />
-                        Grades
+                        Exams
                       </Link>
                     </Button>
                   </div>

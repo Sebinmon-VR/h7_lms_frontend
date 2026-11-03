@@ -126,7 +126,6 @@ const TeacherTopics = lazy(() => import('@/pages/teacher/topics'))
 const TeacherMeetings = lazy(() => import('@/pages/teacher/meetings'))
 const TeacherMaterials = lazy(() => import('@/pages/teacher/materials'))
 const TeacherRecordings = lazy(() => import('@/pages/teacher/recordings'))
-const TeacherGradebook = lazy(() => import('@/pages/teacher/gradebook'))
 const TeacherInsights = lazy(() => import('@/pages/teacher/insights'))
 const TeacherTimetable = lazy(() => import('@/pages/teacher/timetable'))
 
@@ -157,6 +156,7 @@ const ReportCards = lazy(() => import('@/pages/exams/report-cards'))
 const ReportCardDetail = lazy(() =>
   import('@/pages/exams/report-cards').then((m) => ({ default: m.ReportCardDetailPage })),
 )
+const PaperMarks = lazy(() => import('@/pages/exams/paper-marks'))
 
 // The arena (quiz battles). Students play under /student/arena; teachers and
 // admins share the set-up screens, mounted under both prefixes like the exams.
@@ -190,6 +190,7 @@ function examRoutes(prefix: '/admin' | '/teacher') {
       <Route path={`${prefix}/exams/:examId/edit`} element={<ExamForm />} />
       <Route path={`${prefix}/exams/:examId/grade/:studentId`} element={<ExamGrading />} />
       <Route path={`${prefix}/report-cards`} element={<ReportCards />} />
+      <Route path={`${prefix}/report-cards/paper-marks`} element={<PaperMarks />} />
       <Route path={`${prefix}/report-cards/:cardId`} element={<ReportCardDetail />} />
     </>
   )
@@ -324,7 +325,8 @@ export function AppRoutes() {
                 <Route path="/teacher/meetings" element={<TeacherMeetings />} />
                 <Route path="/teacher/materials" element={<TeacherMaterials />} />
                 <Route path="/teacher/recordings" element={<TeacherRecordings />} />
-                <Route path="/teacher/gradebook" element={<TeacherGradebook />} />
+                {/* The gradebook was replaced by paper exam marks under Report Cards. */}
+                <Route path="/teacher/gradebook" element={<Navigate to="/teacher/report-cards/paper-marks" replace />} />
                 <Route path="/teacher/insights" element={<TeacherInsights />} />
                 <Route path="/teacher/timetable" element={<TeacherTimetable />} />
                 <Route path="/teacher/homework" element={<HomeworkPage />} />

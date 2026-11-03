@@ -10,6 +10,8 @@ import type {
   ExamCreate,
   ExamOut,
   ExamUpdate,
+  PaperMarkSheetSave,
+  PaperMarksRegister,
   QuestionFormUpdate,
   ReportCardGenerate,
   ReportCardOut,
@@ -398,6 +400,73 @@ export function useDeleteReportCard() {
       toast.success('Report card deleted')
     },
     onError: (error) => toast.error('Could not delete the report card', { description: describe(error) }),
+  })
+}
+
+// =====================================================================
+// Staff — marks for exams held on paper
+// =====================================================================
+
+export function usePaperMarks(classId: number | null) {
+  return useQuery({
+    queryKey: qk.exams.paperMarks(classId ?? 0),
+    queryFn: () => examApi.paperMarks(classId as number),
+    staleTime: STALE.transactional,
+    enabled: classId != null,
+  })
+}
+
+/** The marks also show in students' marks and the teacher insights, so those are refreshed too. */
+function usePaperMarksRefresh() {
+  const qc = useQueryClient()
+  return (classId: number) => {
+    void qc.invalidateQueries({ queryKey: qk.exams.paperMarks(classId) })
+    void qc.invalidateQueries({ queryKey: qk.teacher.grades() })
+    void qc.invalidateQueries({ queryKey: qk.student.grades() })
+    markMonitoringStale()
+  }
+}
+
+/** Errors are shown inline by the register page. */
+export function useSavePaperMarks() {
+  const qc = useQueryClient()
+  const refresh = usePaperMarksRefresh()
+  return useMutation({
+    meta: { silent: true },
+    mutationFn: (body: PaperMarkSheetSave) => examApi.savePaperMarks(body),
+    onSuccess: (result, body) => {
+      // In place before the refetch, so a renamed sheet stays open rather than
+      // flashing back to a blank one while the list catches up.
+      qc.setQueryData<PaperMarksRegister>(qk.exams.paperMarks(body.class_id), (prev) =>
+        prev
+          ? {
+              ...prev,
+              sheets: [
+                result.sheet,
+                ...prev.sheets.filter(
+                  (s) => s.exam_name !== body.previous_exam_name && s.exam_name !== result.sheet.exam_name,
+                ),
+              ],
+            }
+          : prev,
+      )
+      refresh(body.class_id)
+      toast.success(`Saved the marks for ${result.sheet.exam_name}`)
+    },
+  })
+}
+
+export function useDeletePaperMarks() {
+  const refresh = usePaperMarksRefresh()
+  return useMutation({
+    meta: { silent: true },
+    mutationFn: ({ classId, examName }: { classId: number; examName: string }) =>
+      examApi.deletePaperMarks(classId, examName),
+    onSuccess: (_void, { classId, examName }) => {
+      refresh(classId)
+      toast.success(`Deleted the marks for ${examName}`)
+    },
+    onError: (error) => toast.error('Could not delete these marks', { description: describe(error) }),
   })
 }
 

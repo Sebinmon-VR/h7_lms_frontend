@@ -10,6 +10,9 @@ import type {
   ExamStats,
   ExamStatus,
   ExamUpdate,
+  PaperMarkSheetSave,
+  PaperMarkSheetSaved,
+  PaperMarksRegister,
   QuestionFormUpdate,
   ReportCardBatch,
   ReportCardGenerate,
@@ -151,6 +154,17 @@ export const examApi = {
     put<ReportCardOut>(`/report-cards/${cardId}`, body),
 
   deleteReportCard: (cardId: string) => del(`/report-cards/${cardId}`),
+
+  /** The class's students, subjects and every sheet of marks for exams held on paper. */
+  paperMarks: (classId: number) =>
+    get<PaperMarksRegister>('/report-cards/paper-marks', { params: { class_id: classId } }),
+
+  /** Saves one exam's sheet. A `null` mark clears it: absent, never zero. */
+  savePaperMarks: (body: PaperMarkSheetSave) =>
+    put<PaperMarkSheetSaved>('/report-cards/paper-marks', body, { timeout: 120_000 }),
+
+  deletePaperMarks: (classId: number, examName: string) =>
+    del('/report-cards/paper-marks', { params: { class_id: classId, exam_name: examName } }),
 
   // ----------------------------------------------------------- student
 

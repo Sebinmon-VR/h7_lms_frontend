@@ -308,7 +308,6 @@ const TEACHER_NAV: NavSection[] = [
       },
       { to: '/teacher/meetings', label: 'Live Classes', icon: Video, description: 'Set up a session or share a recording' },
       { to: '/teacher/recordings', label: 'Recordings', icon: Clapperboard, description: 'Review class videos and publish them' },
-      { to: '/teacher/gradebook', label: 'Gradebook', icon: FileText, description: 'Record and review test marks' },
       {
         to: '/teacher/homework',
         label: 'Homework',
@@ -342,7 +341,7 @@ const TEACHER_NAV: NavSection[] = [
         to: '/teacher/report-cards',
         label: 'Report Cards',
         icon: FileBadge,
-        description: 'Issue term cards for the classes you lead',
+        description: 'Enter paper exam marks and issue term cards for the classes you lead',
       },
     ],
   },
