@@ -5,11 +5,11 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDashed,
-  ExternalLink,
   Hourglass,
   KeyRound,
   Lightbulb,
   Paperclip,
+  PenLine,
   RotateCcw,
   Save,
   Sparkles,
@@ -43,7 +43,9 @@ import {
   isObjectiveType,
   sortQuestions,
 } from '@/lib/exams'
-import { fileKind, fileNameFromUrl, resolveFileUrl } from '@/lib/files'
+import { fileKind, fileNameFromUrl } from '@/lib/files'
+import { examApi } from '@/api/exam.api'
+import { InlineFileRow } from '@/components/domain/document-viewer'
 import { formatPercent, performanceTone } from '@/lib/format'
 import { className as classLabel, subjectName } from '@/lib/select'
 import { Avatar } from '@/components/ui/avatar'
@@ -55,9 +57,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { SubmissionStatusBadge } from '@/components/domain/badges'
-import { FileTypeIcon } from '@/components/domain/file-type-icon'
 import { ErrorState } from '@/components/feedback/states'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
+import { MarkingEditor } from './marking-editor'
 import { useExamScope } from './exam-scope'
 
 /**
@@ -115,45 +117,36 @@ function scrollTo(id: string) {
 
 // ----------------------------------------------------------- attachments
 
-function AttachmentPreview({ attachment }: { attachment: AttachmentOut }) {
-  const url = resolveFileUrl(attachment.file_url)
+function AttachmentPreview({
+  attachment,
+  examId,
+  studentId,
+  index,
+}: {
+  attachment: AttachmentOut
+  examId: number
+  studentId: number
+  /** Position in the student's full list of uploads, which is how the file is fetched. */
+  index: number
+}) {
   const kind = fileKind(attachment.filename ?? attachment.file_url)
   const name = attachment.filename ?? fileNameFromUrl(attachment.file_url)
-  const [expanded, setExpanded] = React.useState(kind === 'image')
+  const meta = [
+    attachment.uploaded_at ? `Uploaded ${formatRelative(attachment.uploaded_at)}` : '',
+    attachment.storage_warning ? 'saved' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border">
-      <div className="flex items-center gap-3 px-3 py-2">
-        <FileTypeIcon url={name} size="sm" />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{name}</p>
-          <p className="text-2xs text-muted-foreground">
-            {attachment.uploaded_at ? `Uploaded ${formatRelative(attachment.uploaded_at)}` : ''}
-            {attachment.storage_warning ? ' · saved' : ''}
-          </p>
-        </div>
-        {(kind === 'image' || kind === 'pdf') && (
-          <Button variant="ghost" size="sm" onClick={() => setExpanded((v) => !v)}>
-            {expanded ? 'Hide' : 'Preview'}
-          </Button>
-        )}
-        {url && (
-          <Button asChild variant="outline" size="sm" icon={<ExternalLink />}>
-            <a href={url} target="_blank" rel="noreferrer">
-              Open
-            </a>
-          </Button>
-        )}
-      </div>
-      {expanded && url && kind === 'image' && (
-        <a href={url} target="_blank" rel="noreferrer" className="block border-t border-border bg-muted/40">
-          <img src={url} alt={name} className="mx-auto max-h-[70vh] w-auto max-w-full object-contain" loading="lazy" />
-        </a>
-      )}
-      {expanded && url && kind === 'pdf' && (
-        <iframe src={url} title={name} className="h-[70vh] w-full border-t border-border bg-white" />
-      )}
-    </div>
+    <InlineFileRow
+      name={name}
+      meta={meta || undefined}
+      cacheKey={`submission-${examId}-${studentId}-${index}-${attachment.file_url}`}
+      load={() => examApi.submissionFile(examId, studentId, index)}
+      defaultOpen={kind === 'image' || kind === 'pdf'}
+      height="70vh"
+    />
   )
 }
 
@@ -362,6 +355,7 @@ export default function GradingPage() {
   const [seeded, setSeeded] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [confirmReopen, setConfirmReopen] = React.useState(false)
+  const [markingOpen, setMarkingOpen] = React.useState(false)
 
   // Seed once per script (keyed by id + last update), never over live edits.
   React.useEffect(() => {
@@ -443,7 +437,7 @@ export default function GradingPage() {
     lineErrors.length === 0 &&
     !overTotal &&
     !flatInvalid &&
-    (isGrade ? grade !== '' : total != null)
+    (isGrade ? grade !== '' || total != null : total != null)
 
   const buildPayload = (): EvaluationIn => {
     const body: EvaluationIn = { remarks: remarks.trim() || null }
@@ -458,7 +452,7 @@ export default function GradingPage() {
     } else if (flatMarks.trim() !== '') {
       body.marks_obtained = Number(flatMarks)
     }
-    if (isGrade) body.grade = grade
+    if (isGrade && grade) body.grade = grade
     return body
   }
 
@@ -603,10 +597,32 @@ export default function GradingPage() {
                 <span className="text-xs text-muted-foreground">
                   {scriptAttachments.length} file{scriptAttachments.length === 1 ? '' : 's'}
                 </span>
+                {submission.status !== 'IN_PROGRESS' && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon={<PenLine />}
+                    className="ml-auto"
+                    onClick={() => setMarkingOpen(true)}
+                  >
+                    Mark on the answer sheet
+                  </Button>
+                )}
               </div>
+              {submission.marking_total != null && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Marked on the sheet: {formatMark(submission.marking_total)} / {formatMark(maxMarks)}
+                </p>
+              )}
               <div className="mt-3 space-y-2">
                 {scriptAttachments.map((a) => (
-                  <AttachmentPreview key={a.file_url} attachment={a} />
+                  <AttachmentPreview
+                    key={a.file_url}
+                    attachment={a}
+                    examId={submission.exam_id}
+                    studentId={submission.student_id}
+                    index={submission.attachments.findIndex((x) => x.file_url === a.file_url)}
+                  />
                 ))}
               </div>
             </Card>
@@ -669,7 +685,13 @@ export default function GradingPage() {
                 {questionFiles.length > 0 && (
                   <div className="mt-3 space-y-2">
                     {questionFiles.map((a) => (
-                      <AttachmentPreview key={a.file_url} attachment={a} />
+                      <AttachmentPreview
+                        key={a.file_url}
+                        attachment={a}
+                        examId={submission.exam_id}
+                        studentId={submission.student_id}
+                        index={submission.attachments.findIndex((x) => x.file_url === a.file_url)}
+                      />
                     ))}
                   </div>
                 )}
@@ -747,23 +769,26 @@ export default function GradingPage() {
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     This exam has no question form, so record the total you awarded on the answer sheet.
                   </p>
-                  {exam.grading_scheme === 'MARKS' && (
-                    <div className="mt-2.5 flex items-center gap-2">
-                      <Input
-                        type="number"
-                        min={0}
-                        max={maxMarks}
-                        step="any"
-                        inputMode="decimal"
-                        value={flatMarks}
-                        invalid={flatInvalid || overTotal}
-                        aria-label="Total marks"
-                        className="h-9 w-28 text-right text-base font-semibold"
-                        onChange={(e) => setFlatMarks(e.target.value)}
-                      />
-                      <span className="text-sm text-muted-foreground">/ {formatMark(maxMarks)}</span>
-                    </div>
+                  {exam.grading_scheme === 'GRADE' && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      On a graded exam, enter the marks and the grade is worked out from them — or pick the grade below.
+                    </p>
                   )}
+                  <div className="mt-2.5 flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={maxMarks}
+                      step="any"
+                      inputMode="decimal"
+                      value={flatMarks}
+                      invalid={flatInvalid || overTotal}
+                      aria-label="Total marks"
+                      className="h-9 w-28 text-right text-base font-semibold"
+                      onChange={(e) => setFlatMarks(e.target.value)}
+                    />
+                    <span className="text-sm text-muted-foreground">/ {formatMark(maxMarks)}</span>
+                  </div>
                 </div>
               )}
 
@@ -839,6 +864,24 @@ export default function GradingPage() {
           </Card>
         </aside>
       </div>
+
+      {exam && submission && submission.status !== 'IN_PROGRESS' && (
+        <MarkingEditor
+          open={markingOpen}
+          onOpenChange={setMarkingOpen}
+          exam={exam}
+          submission={submission}
+          onRecordTotal={async (sheetTotal) => {
+            setFlatMarks(String(sheetTotal))
+            // On a graded exam the grade is left out, so the server gives the band the marks reach.
+            await evaluate.mutateAsync({
+              examId: exam.id,
+              studentId,
+              body: { marks_obtained: sheetTotal, remarks: remarks.trim() || null },
+            })
+          }}
+        />
+      )}
 
       <ConfirmDialog
         open={confirmReopen}

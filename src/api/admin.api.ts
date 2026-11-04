@@ -85,24 +85,19 @@ export const adminApi = {
   /** Merge semantics — only the keys sent are written. */
   updateUser: (userId: number, body: UserUpdate) => put<UserOut>(`/admin/users/${userId}`, body),
 
-  /** A JPG, PNG or WEBP of at most 5 MB, already cropped; replaces any earlier photo. */
-  uploadUserPhoto: (userId: number, photo: Blob, filename = 'photo.jpg') => {
+  uploadUserPhoto: (userId: number, photo: Blob) => {
     const form = new FormData()
-    form.append('file', photo, filename)
+    form.append('file', photo, 'photo.jpg')
     return post<UserOut>(`/admin/users/${userId}/photo`, form, { timeout: 60_000 })
   },
 
-  /** Takes the photo off, so their initials show again. */
   removeUserPhoto: (userId: number) => delWithBody<UserOut>(`/admin/users/${userId}/photo`),
 
-  /**
-   * A picture the browser cannot draw (iPhone HEIC, TIFF…) back as a JPG it
-   * can. Nothing is stored; the page crops the result and uploads that.
-   */
-  previewUserPhoto: (file: File) => {
+  /** A picture this browser cannot open (an iPhone HEIC, a TIFF…) back as a JPG. Stores nothing. */
+  previewUserPhoto: (picture: File) => {
     const form = new FormData()
-    form.append('file', file)
-    return post<Blob>('/admin/users/photo/preview', form, { responseType: 'blob', timeout: 60_000 })
+    form.append('file', picture)
+    return post<Blob>('/admin/users/photo/preview', form, { timeout: 120_000, responseType: 'blob' })
   },
 
   /**

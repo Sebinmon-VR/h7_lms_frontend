@@ -10,6 +10,8 @@ import type {
   ExamCreate,
   ExamOut,
   ExamUpdate,
+  PaperMarkSheetSave,
+  PaperMarksRegister,
   QuestionFormUpdate,
   ReportCardGenerate,
   ReportCardOut,
@@ -402,6 +404,73 @@ export function useDeleteReportCard() {
 }
 
 // =====================================================================
+// Staff — marks for exams held on paper
+// =====================================================================
+
+export function usePaperMarks(classId: number | null) {
+  return useQuery({
+    queryKey: qk.exams.paperMarks(classId ?? 0),
+    queryFn: () => examApi.paperMarks(classId as number),
+    staleTime: STALE.transactional,
+    enabled: classId != null,
+  })
+}
+
+/** The marks also show in students' marks and the teacher insights, so those are refreshed too. */
+function usePaperMarksRefresh() {
+  const qc = useQueryClient()
+  return (classId: number) => {
+    void qc.invalidateQueries({ queryKey: qk.exams.paperMarks(classId) })
+    void qc.invalidateQueries({ queryKey: qk.teacher.grades() })
+    void qc.invalidateQueries({ queryKey: qk.student.grades() })
+    markMonitoringStale()
+  }
+}
+
+/** Errors are shown inline by the register page. */
+export function useSavePaperMarks() {
+  const qc = useQueryClient()
+  const refresh = usePaperMarksRefresh()
+  return useMutation({
+    meta: { silent: true },
+    mutationFn: (body: PaperMarkSheetSave) => examApi.savePaperMarks(body),
+    onSuccess: (result, body) => {
+      // In place before the refetch, so a renamed sheet stays open rather than
+      // flashing back to a blank one while the list catches up.
+      qc.setQueryData<PaperMarksRegister>(qk.exams.paperMarks(body.class_id), (prev) =>
+        prev
+          ? {
+              ...prev,
+              sheets: [
+                result.sheet,
+                ...prev.sheets.filter(
+                  (s) => s.exam_name !== body.previous_exam_name && s.exam_name !== result.sheet.exam_name,
+                ),
+              ],
+            }
+          : prev,
+      )
+      refresh(body.class_id)
+      toast.success(`Saved the marks for ${result.sheet.exam_name}`)
+    },
+  })
+}
+
+export function useDeletePaperMarks() {
+  const refresh = usePaperMarksRefresh()
+  return useMutation({
+    meta: { silent: true },
+    mutationFn: ({ classId, examName }: { classId: number; examName: string }) =>
+      examApi.deletePaperMarks(classId, examName),
+    onSuccess: (_void, { classId, examName }) => {
+      refresh(classId)
+      toast.success(`Deleted the marks for ${examName}`)
+    },
+    onError: (error) => toast.error('Could not delete these marks', { description: describe(error) }),
+  })
+}
+
+// =====================================================================
 // Student
 // =====================================================================
 
@@ -419,6 +488,23 @@ export function useMyExams(enabled = true, live = false) {
     refetchInterval: live ? 60_000 : false,
     enabled,
   })
+}
+
+/**
+ * The exam this student is sitting right now, if any: started, not handed in, and still
+ * open for hand-in. Only real exams and tests lock the app - homework or a project can run
+ * for days, and nobody should be shut out of everything else for that long.
+ */
+export function useActiveExam(enabled = true) {
+  const query = useMyExams(enabled, true)
+  return (
+    (query.data ?? []).find(
+      (e) =>
+        e.submission_status === 'IN_PROGRESS' &&
+        e.can_submit &&
+        (e.category === 'EXAM' || e.category === 'TEST'),
+    ) ?? null
+  )
 }
 
 export function useMyExam(examId: number | null, enabled = true) {
@@ -482,6 +568,20 @@ export function useSaveAnswers() {
     mutationFn: ({ examId, body }: { examId: number; body: AnswerSaveIn }) =>
       examApi.saveAnswers(examId, body),
     onSuccess: write,
+  })
+}
+
+export function useRemoveAnswerFile() {
+  const write = useMyScriptWriter()
+  return useMutation({
+    meta: { silent: true },
+    mutationFn: ({ examId, index }: { examId: number; index: number }) =>
+      examApi.removeMyAnswerFile(examId, index),
+    onSuccess: (updated) => {
+      write(updated)
+      toast.success('File removed')
+    },
+    onError: (error) => toast.error('The file could not be removed', { description: describe(error) }),
   })
 }
 

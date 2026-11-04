@@ -1,4 +1,4 @@
-import { BarChart3, Download, History, Receipt, Trash2, Users } from 'lucide-react'
+import { ArrowLeftRight, BarChart3, Download, History, Printer, Receipt, Trash2, Users } from 'lucide-react'
 import * as React from 'react'
 
 import type {
@@ -6,6 +6,9 @@ import type {
   FeeReportView,
   FeeRollRow,
   FeeRollStatus,
+  FeeTransactionRow,
+  FeeTransactionStatus,
+  FeeTransactionsReport,
   PaymentMethod,
 } from '@/api/types'
 import {
@@ -15,10 +18,13 @@ import {
   useFeeHeads,
   useFeeReportExport,
   useFeeRollReport,
+  useFeeTransactionsReport,
+  usePaymentReceipt,
   useRecordFeeReceipt,
 } from '@/queries/finance.queries'
 import { useClasses, useUsers } from '@/queries/admin.queries'
-import { formatDate, formatDateTime, todayApiDate } from '@/lib/datetime'
+import { cn } from '@/lib/cn'
+import { formatDate, formatDateTime, formatTime, todayApiDate } from '@/lib/datetime'
 import { formatMoney } from '@/lib/tuition'
 import { PAYMENT_METHOD_LABEL } from '@/lib/school'
 import { Badge } from '@/components/ui/badge'
@@ -56,6 +62,7 @@ import {
 } from '@/components/ui/table'
 import { EmptyState } from '@/components/feedback/states'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
+import { FeeReceipt, FeeReceiptForPrint, printFeeReceipt } from '@/components/domain/fee-receipt'
 import { PeriodPicker, useReportPeriod } from './tuition/period'
 
 /**
@@ -296,7 +303,7 @@ function CollectionsTable({ rows, currency }: { rows: FeeCollectionRow[]; curren
           <TableHead>Received</TableHead>
           <TableHead className="min-w-52">Student</TableHead>
           <TableHead>Class</TableHead>
-          <TableHead>Invoice</TableHead>
+          <TableHead>Bill</TableHead>
           <TableHead>Against</TableHead>
           <TableHead className="min-w-44">Fees settled</TableHead>
           <TableHead>Method</TableHead>
@@ -320,6 +327,8 @@ function CollectionsTable({ rows, currency }: { rows: FeeCollectionRow[]; curren
                   <History />
                   Before this system
                 </Badge>
+              ) : row.bill_numbers?.length ? (
+                row.bill_numbers.join(', ')
               ) : (
                 row.invoice_number ?? row.invoice_id
               )}
@@ -377,6 +386,406 @@ function CollectionsTable({ rows, currency }: { rows: FeeCollectionRow[]; curren
         ))}
       </TableBody>
     </Table>
+  )
+}
+
+// ------------------------------------------------------------ transactions
+
+const TRANSACTION_STATUS: Record<
+  FeeTransactionStatus,
+  { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' }
+> = {
+  RECEIVED: { label: 'Received', tone: 'success' },
+  IN_PROGRESS: { label: 'In progress', tone: 'warning' },
+  FAILED: { label: 'Failed', tone: 'danger' },
+  CANCELLED: { label: 'Cancelled', tone: 'neutral' },
+  ABANDONED: { label: 'Abandoned', tone: 'neutral' },
+  REFUNDED: { label: 'Refunded', tone: 'neutral' },
+}
+
+/** The sheet's sections, in order. Abandoned attempts sit with the cancelled ones. */
+const SECTIONS: { title: string; statuses: FeeTransactionStatus[]; hint: string; empty: string }[] = [
+  {
+    title: 'Received',
+    statuses: ['RECEIVED'],
+    hint: 'Money in, newest first. The printer opens the receipt.',
+    empty: 'No payments received in this period.',
+  },
+  {
+    title: 'In progress',
+    statuses: ['IN_PROGRESS'],
+    hint: 'Online payments started in the last half hour.',
+    empty: 'Nothing in progress right now.',
+  },
+  {
+    title: 'Failed',
+    statuses: ['FAILED'],
+    hint: 'Tried and declined, with the reason Razorpay gave.',
+    empty: 'No failed payments in this period.',
+  },
+  {
+    title: 'Cancelled',
+    statuses: ['CANCELLED', 'ABANDONED'],
+    hint: 'Closed before paying, or left open without paying.',
+    empty: 'No cancelled payments in this period.',
+  },
+  {
+    title: 'Refunded',
+    statuses: ['REFUNDED'],
+    hint: 'Paid and given back.',
+    empty: 'No refunds in this period.',
+  },
+]
+
+type ReceiptView = { invoiceId: string; index: number }
+
+/** How Razorpay says an online payment was made. */
+const PAID_BY_LABEL: Record<string, string> = {
+  upi: 'UPI',
+  card: 'Card',
+  netbanking: 'Net banking',
+  wallet: 'Wallet',
+  emi: 'EMI',
+  paylater: 'Pay later',
+}
+
+/** The fee counter's grey section strip, so the office reads both screens alike. */
+function SheetStrip({ title, children }: { title: string; children?: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-y border-border bg-muted/70 px-4 py-1.5">
+      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
+      {children}
+    </div>
+  )
+}
+
+function howPaid(row: FeeTransactionRow): string {
+  if (row.channel === 'ONLINE') {
+    const via = row.provider === 'razorpay' || !row.provider ? 'Razorpay' : row.provider
+    return row.paid_by ? `${via} · ${PAID_BY_LABEL[row.paid_by] ?? row.paid_by}` : via
+  }
+  return PAYMENT_METHOD_LABEL[row.method as PaymentMethod] ?? row.method
+}
+
+/**
+ * Every transaction in the period as one sheet: totals per currency paid in,
+ * then each payment with the fees it credited and what was paid on top (tax,
+ * payment charges) and what Razorpay kept, with what reaches the bank under it.
+ * Online payments that did not end in money are listed too, greyed, with the
+ * reason.
+ */
+function TransactionsSheet({ data }: { data: FeeTransactionsReport }) {
+  const [receipt, setReceipt] = React.useState<ReceiptView | null>(null)
+  const [tab, setTab] = React.useState('Received')
+  const { by_currency: totals } = data.summary
+  const countOf = (statuses: FeeTransactionStatus[]) => data.rows.filter((r) => statuses.includes(r.status)).length
+  const tabs = SECTIONS.filter((s) => s.title !== 'Refunded' || countOf(s.statuses) > 0)
+  const active = tabs.find((s) => s.title === tab) ?? tabs[0]
+  const shownRows = data.rows.filter((r) => active.statuses.includes(r.status))
+  const unknown = totals.reduce((n, t) => n + t.razorpay_fee_unknown, 0)
+  const head = 'border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground'
+
+  return (
+    <div className="overflow-hidden rounded-md border border-border bg-background">
+      <SheetStrip title={`Totals · ${formatDate(data.from_date)} – ${formatDate(data.to_date)}`} />
+      {totals.length === 0 ? (
+        <p className="px-4 py-3 text-sm text-muted-foreground">No money received in this period.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-sm">
+            <thead>
+              <tr className={head}>
+                <th className="px-2 py-2 font-medium">Paid in</th>
+                <th className="px-2 py-2 text-right font-medium">Payments</th>
+                <th className="px-2 py-2 text-right font-medium">Fees</th>
+                <th className="px-2 py-2 text-right font-medium">Tax</th>
+                <th className="px-2 py-2 text-right font-medium">Payment charges</th>
+                <th className="px-2 py-2 text-right font-medium">Total received</th>
+                <th className="px-2 py-2 text-right font-medium">Razorpay kept</th>
+                <th className="px-2 py-2 text-right font-medium">Net to bank</th>
+              </tr>
+            </thead>
+            <tbody>
+              {totals.map((t) => (
+                <tr key={t.currency} className="border-b border-border last:border-b-0">
+                  <td className="px-2 py-2 font-medium">{t.currency}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{t.count}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{formatMoney(t.fees, t.currency)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{formatMoney(t.tax, t.currency)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{formatMoney(t.charges, t.currency)}</td>
+                  <td className="px-2 py-2 text-right font-semibold tabular-nums text-success">
+                    {formatMoney(t.total, t.currency)}
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums">{formatMoney(t.razorpay_fee, t.currency)}</td>
+                  <td className="px-2 py-2 text-right font-semibold tabular-nums">{formatMoney(t.net, t.currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
+        Credited to bills: {formatMoney(data.summary.credited, data.currency)}. Tax and payment charges are paid
+        on top of the fees and do not reduce what the student owes.
+        {unknown > 0 && (
+          <>
+            {' '}
+            {unknown} online payment{unknown === 1 ? ' was' : 's were'} taken before Razorpay&apos;s own fee was
+            recorded here; check {unknown === 1 ? 'it' : 'them'} in the Razorpay dashboard.
+          </>
+        )}
+      </div>
+
+      <SheetStrip title="Transactions" />
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
+        <Segmented
+          layoutId="transaction-tab"
+          value={active.title}
+          onChange={setTab}
+          options={tabs.map((section) => ({
+            value: section.title,
+            label: (
+              <span className="inline-flex items-center gap-1.5">
+                {section.title}
+                <span className="rounded-full bg-muted px-1.5 text-2xs tabular-nums text-muted-foreground">
+                  {countOf(section.statuses)}
+                </span>
+              </span>
+            ),
+          }))}
+        />
+        <span className="text-xs text-muted-foreground">{active.hint}</span>
+      </div>
+      {shownRows.length === 0 ? (
+        <p className="border-t border-border px-4 py-8 text-center text-sm text-muted-foreground">{active.empty}</p>
+      ) : (
+        <TransactionsTable rows={shownRows} onReceipt={active.title === 'Received' ? setReceipt : undefined} />
+      )}
+      <ReceiptViewer view={receipt} onClose={() => setReceipt(null)} />
+    </div>
+  )
+}
+
+/** One section's payments: who, what for, how, and the money, with a receipt for those received. */
+function TransactionsTable({
+  rows,
+  onReceipt,
+}: {
+  rows: FeeTransactionRow[]
+  onReceipt?: (view: ReceiptView) => void
+}) {
+  const head = 'border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground'
+  return (
+    <div className="max-h-[65vh] overflow-auto border-t border-border">
+      <table className="w-full min-w-[1000px] table-fixed text-sm">
+        <colgroup>
+          <col className="w-[84px]" />
+          <col className="w-[112px]" />
+          <col className="w-[150px]" />
+          <col className="w-[132px]" />
+          <col className="w-[150px]" />
+          <col className="w-[92px]" />
+          <col className="w-[104px]" />
+          <col className="w-[96px]" />
+          <col className="w-[80px]" />
+          {onReceipt && <col className="w-[44px]" />}
+        </colgroup>
+        <thead className="sticky top-0 z-10 bg-background">
+          <tr className={head}>
+            <th className="px-2 py-2 font-medium">Date</th>
+            <th className="px-2 py-2 font-medium">Status</th>
+            <th className="px-2 py-2 font-medium">Student</th>
+            <th className="px-2 py-2 font-medium">Bill · for</th>
+            <th className="px-2 py-2 font-medium">How paid · reference</th>
+            <th className="px-2 py-2 text-right font-medium">Fees</th>
+            <th className="px-2 py-2 text-right font-medium">Tax · charges</th>
+            <th className="px-2 py-2 text-right font-medium">Total paid</th>
+            <th className="px-2 py-2 text-right font-medium">Razorpay kept</th>
+            {onReceipt && (
+              <th className="px-1 py-2">
+                <span className="sr-only">Receipt</span>
+              </th>
+            )}
+          </tr>
+        </thead>
+        <tbody>
+              {rows.map((row, index) => {
+                const received = row.status === 'RECEIVED'
+                const status = TRANSACTION_STATUS[row.status]
+                const cur = row.paid_currency || row.currency
+                return (
+                  <tr
+                    key={`${row.reference ?? row.receipt_id ?? 'r'}-${index}`}
+                    className={cn('border-b border-border align-top', !received && 'text-muted-foreground')}
+                  >
+                    <td className="whitespace-nowrap px-2 py-2 text-xs tabular-nums">
+                      <span className="block">{formatDate(row.paid_at)}</span>
+                      <span className="block text-muted-foreground">
+                        {formatTime(row.paid_at)}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2">
+                      <Badge tone={status.tone} size="sm">
+                        {status.label}
+                      </Badge>
+                      {row.recovered && (
+                        <span className="mt-1 block text-2xs text-muted-foreground">Credited by the safety net</span>
+                      )}
+                      {row.failure_reason && (
+                        <span className="mt-1 line-clamp-2 text-2xs text-danger" title={row.failure_reason}>
+                          {row.failure_reason}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-2 py-2">
+                      <span className="block truncate font-medium text-foreground" title={row.student_name ?? undefined}>
+                        {row.student_name ?? `Student ${row.student_id}`}
+                      </span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {[row.admission_number, row.class_name].filter(Boolean).join(' · ')}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 text-xs">
+                      {row.channel === 'PAST' ? (
+                        <Badge tone="neutral" size="sm" title={row.note ?? undefined}>
+                          <History />
+                          Before this system
+                        </Badge>
+                      ) : (
+                        <>
+                          <span className="block">
+                            {row.bill_numbers?.length ? row.bill_numbers.join(', ') : (row.invoice_number ?? row.invoice_id)}
+                          </span>
+                          {row.receipt_number && (
+                            <span className="block text-muted-foreground">{row.receipt_number}</span>
+                          )}
+                        </>
+                      )}
+                      {row.against && <span className="block text-muted-foreground">{row.against}</span>}
+                    </td>
+                    <td className="px-2 py-2 text-xs">
+                      <span className="block whitespace-nowrap">{howPaid(row)}</span>
+                      {row.reference && row.channel === 'ONLINE' ? (
+                        <span className="block break-all font-mono text-2xs text-muted-foreground">
+                          {row.reference}
+                          {row.order_id && row.order_id !== row.reference && <span className="block">{row.order_id}</span>}
+                        </span>
+                      ) : (
+                        row.reference && <span className="block text-muted-foreground">{row.reference}</span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums">
+                      {formatMoney(row.paid_fee_amount, cur)}
+                      {cur !== row.currency && (
+                        <span className="block text-2xs text-muted-foreground">
+                          {formatMoney(row.amount, row.currency)} to the bill
+                        </span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums">
+                      {row.tax_amount > 0 || row.charges_amount > 0 ? (
+                        <>
+                          {row.tax_amount > 0 && (
+                            <span className="block">
+                              {formatMoney(row.tax_amount, cur)}
+                              <span className="block text-2xs text-muted-foreground">
+                                {row.tax_label ?? 'Tax'}
+                                {row.tax_percent ? ` ${row.tax_percent}%` : ''}
+                              </span>
+                            </span>
+                          )}
+                          {row.charges_amount > 0 && (
+                            <span className="mt-0.5 block" title={row.charges_label ?? undefined}>
+                              {formatMoney(row.charges_amount, cur)}
+                              <span className="block text-2xs text-muted-foreground">Charges</span>
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td
+                      className={cn(
+                        'whitespace-nowrap px-2 py-2 text-right font-semibold tabular-nums',
+                        received && 'text-success',
+                      )}
+                    >
+                      {formatMoney(row.paid_amount, cur)}
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums">
+                      {row.razorpay_fee != null ? (
+                        <>
+                          {formatMoney(row.razorpay_fee, cur)}
+                          {row.net_amount != null && (
+                            <span className="block text-2xs text-muted-foreground">
+                              {formatMoney(row.net_amount, cur)} to bank
+                            </span>
+                          )}
+                        </>
+                      ) : received && row.channel === 'ONLINE' ? (
+                        <span className="text-2xs text-muted-foreground">Not recorded</span>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    {onReceipt && (
+                      <td className="px-1 py-1.5 text-right">
+                        {row.invoice_id && row.payment_index != null ? (
+                          <Button
+                            variant="outline"
+                            size="icon-sm"
+                            aria-label={row.receipt_number ? `Receipt ${row.receipt_number}` : 'Receipt'}
+                            title={row.receipt_number ? `Receipt ${row.receipt_number}` : 'Receipt'}
+                            onClick={() => onReceipt({ invoiceId: row.invoice_id, index: row.payment_index as number })}
+                          >
+                            <Printer />
+                          </Button>
+                        ) : (
+                          <span className="text-2xs text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                )
+              })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+/** A received payment's receipt, as the counter prints it. */
+function ReceiptViewer({ view, onClose }: { view: ReceiptView | null; onClose: () => void }) {
+  const receipt = usePaymentReceipt(view?.invoiceId ?? null, view?.index ?? null)
+  return (
+    <Dialog open={!!view} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent size="lg">
+        <DialogHeader>
+          <DialogTitle>{receipt.data?.receipt_number ? `Receipt ${receipt.data.receipt_number}` : 'Receipt'}</DialogTitle>
+          <DialogDescription>Print it, or save it as a PDF to send to the parent.</DialogDescription>
+        </DialogHeader>
+        <DialogBody className="max-h-[65vh] overflow-y-auto">
+          <QueryBoundary query={receipt} loading={<Skeleton className="h-96 w-full rounded-xl" />}>
+            {(data) => (
+              <>
+                <FeeReceipt receipt={data} />
+                <FeeReceiptForPrint receipt={data} />
+              </>
+            )}
+          </QueryBoundary>
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={printFeeReceipt} disabled={!receipt.data}>
+            <Printer />
+            Print receipt
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -625,6 +1034,17 @@ export function FinanceReportsTab({
     },
     view === 'collections',
   )
+  const transactions = useFeeTransactionsReport(
+    {
+      academicYearId: academicYearId ?? undefined,
+      classId: classFilter,
+      fromDate: from,
+      toDate: to,
+      method: method === 'ALL' ? undefined : method,
+    },
+    view === 'transactions',
+  )
+  const dated = view === 'collections' || view === 'transactions'
 
   const classOptions = [
     { value: '', label: 'Every class' },
@@ -635,9 +1055,9 @@ export function FinanceReportsTab({
     academic_year_id: academicYearId ?? undefined,
     class_id: classFilter,
     status: view === 'students' && status !== 'ALL' ? status : undefined,
-    from_date: view === 'collections' ? from : undefined,
-    to_date: view === 'collections' ? to : undefined,
-    method: view === 'collections' && method !== 'ALL' ? method : undefined,
+    from_date: dated ? from : undefined,
+    to_date: dated ? to : undefined,
+    method: dated && method !== 'ALL' ? method : undefined,
     head_id: view === 'collections' && headId !== 'ALL' ? Number(headId) : undefined,
   }
 
@@ -653,6 +1073,7 @@ export function FinanceReportsTab({
               { value: 'students', label: 'Students', icon: <Users /> },
               { value: 'dues', label: 'Dues', icon: <BarChart3 /> },
               { value: 'collections', label: 'Collections', icon: <Receipt /> },
+              { value: 'transactions', label: 'Transactions', icon: <ArrowLeftRight /> },
             ]}
           />
           <div className="min-w-44">
@@ -677,7 +1098,7 @@ export function FinanceReportsTab({
               </SelectContent>
             </Select>
           )}
-          {view === 'collections' && (
+          {dated && (
             <>
               <PeriodPicker from={from} to={to} onChange={setPeriod} />
               <Select value={method} onValueChange={setMethod}>
@@ -693,20 +1114,22 @@ export function FinanceReportsTab({
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={headId} onValueChange={setHeadId}>
-                <SelectTrigger className="w-44">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">Every fee</SelectItem>
-                  {(heads.data ?? []).map((head) => (
-                    <SelectItem key={head.id} value={String(head.id)}>
-                      {head.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </>
+          )}
+          {view === 'collections' && (
+            <Select value={headId} onValueChange={setHeadId}>
+              <SelectTrigger className="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">Every fee</SelectItem>
+                {(heads.data ?? []).map((head) => (
+                  <SelectItem key={head.id} value={String(head.id)}>
+                    {head.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -862,6 +1285,12 @@ export function FinanceReportsTab({
               )}
             </>
           )}
+        </QueryBoundary>
+      )}
+
+      {view === 'transactions' && (
+        <QueryBoundary query={transactions} loading={<Skeleton className="h-96 w-full rounded-md" />}>
+          {(data) => <TransactionsSheet data={data} />}
         </QueryBoundary>
       )}
     </div>

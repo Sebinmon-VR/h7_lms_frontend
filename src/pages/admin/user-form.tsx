@@ -25,7 +25,7 @@ import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { FormActions, FormPage, FormSection } from '@/components/forms/form-page'
 import { ActiveBadge, RoleBadge } from '@/components/domain/badges'
 import { ProfileFieldsSection, sectionAnchor } from '@/components/domain/profile-fields'
-import { PhotoUploader } from '@/components/domain/photo-uploader'
+import { PhotoField } from '@/components/domain/photo-field'
 import {
   DemoAccessFields,
   DemoBadge,
@@ -428,7 +428,7 @@ function EditUserForm({ user }: { user: UserOut }) {
       openTab(sectionAnchor('Demo access'))
       return
     }
-    // The photo is uploaded on its own (see PhotoUploader); sending the URL
+    // The photo is uploaded on its own (see PhotoField); sending the URL
     // held here could put back a photo that was just replaced.
     const { photo_url: _photo, ...profileBody } = profile
     try {
@@ -546,8 +546,11 @@ function EditUserForm({ user }: { user: UserOut }) {
       <div className="px-4 sm:px-8">
         {/* ------------------------------------------- photo and identity */}
         <div className="flex flex-col gap-5 border-b border-border py-6 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 items-center gap-5">
-            <PhotoUploader user={user} layout="inline" />
+          <div className="min-w-0 space-y-2">
+            <PhotoField user={user} />
+            <p className="text-2xs text-muted-foreground">
+              Saved straight away. The middle of the picture is cropped to a square.
+            </p>
           </div>
           <dl className="grid shrink-0 grid-cols-2 gap-x-8 gap-y-1 text-xs sm:text-right">
             {(user.admission_number || user.employee_id) && (

@@ -29,6 +29,7 @@ export function useExamScope() {
       gradePath: (examId: number, studentId: number) => `${base}/exams/${examId}/grade/${studentId}`,
       reportCardsPath: `${base}/report-cards`,
       reportCardPath: (cardId: string) => `${base}/report-cards/${cardId}`,
+      paperMarksPath: `${base}/report-cards/paper-marks`,
     }),
     [isAdmin, user?.id, base],
   )

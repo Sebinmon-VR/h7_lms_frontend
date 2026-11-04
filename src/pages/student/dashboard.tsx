@@ -47,6 +47,7 @@ import {
   type Achievement,
 } from '@/components/fun/fun-ui'
 import { HeroHeader } from '@/components/layout/page-header'
+import { ExamAlerts } from '@/components/domain/exam-alerts'
 import { AdminStudentNotice, NotEnrolledState, useEnrollmentStatus } from './student-guard'
 
 /**
@@ -313,6 +314,8 @@ export default function StudentDashboardPage() {
     <>
       {confetti}
 
+      <ExamAlerts />
+
       <FunHero
         greeting={`${friendlyGreeting(now)}, ${user?.full_name?.split(' ')[0] ?? 'there'}!`}
         mood={liveNow ? 'cheer' : 'happy'}
@@ -395,7 +398,6 @@ export default function StudentDashboardPage() {
                 asChild
                 variant={meetingLive ? 'primary' : 'outline'}
                 size="lg"
-                className={meetingLive ? 'animate-pulse-ring' : undefined}
               >
                 <a href={upcomingMeeting.meeting_link} target="_blank" rel="noopener noreferrer">
                   <Video className="size-4" />

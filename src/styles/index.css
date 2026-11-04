@@ -160,6 +160,91 @@
     --fun-soft-alpha: 0.2;
   }
 
+  /* A document page (fees, receipts): the light palette on a white page, even in dark mode. */
+  .paper-light,
+  .dark .paper-light {
+    color-scheme: light;
+    --background: 240 20% 98%; /* #FAFAFC */
+    --foreground: 240 16% 12%;
+    --surface: 240 20% 96%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 16% 12%;
+
+    --muted: 240 14% 94%;
+    --muted-foreground: 240 6% 45%;
+
+    --border: 240 12% 89%;
+    --input: 240 12% 89%;
+    --ring: 243 75% 59%;
+
+    --primary: 243 75% 59%; /* #6366F1 */
+    --primary-foreground: 0 0% 100%;
+    --primary-soft: 243 75% 96%;
+
+    --accent: 258 90% 66%; /* #8B5CF6 */
+    --accent-foreground: 0 0% 100%;
+    --accent-soft: 258 90% 96%;
+
+    --success: 160 84% 39%;
+    --success-foreground: 0 0% 100%;
+    --success-soft: 152 76% 95%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 26 60% 14%;
+    --warning-soft: 45 93% 94%;
+
+    --danger: 350 89% 60%;
+    --danger-foreground: 0 0% 100%;
+    --danger-soft: 350 100% 96%;
+
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
+    --info-soft: 200 100% 95%;
+
+    --shadow-color: 240 30% 25%;
+    --radius: 0.875rem;
+
+    /* Attendance semantics — referenced by pills and charts alike. */
+    --status-present: 160 84% 39%;
+    --status-absent: 350 89% 60%;
+    --status-late: 38 92% 50%;
+    --status-excused: 199 89% 48%;
+
+    /* Categorical series for charts. Ordered for maximum adjacent contrast. */
+    --chart-1: 243 75% 59%;
+    --chart-2: 258 90% 66%;
+    --chart-3: 199 89% 48%;
+    --chart-4: 160 84% 39%;
+    --chart-5: 38 92% 50%;
+    --chart-6: 330 81% 60%;
+
+    /* ----------------------------------------------------------------
+       Playful palette — student and teacher surfaces only.
+       Nine hues spread around the wheel so any two subjects a learner
+       sees side by side are obviously different. Every subject is
+       assigned one deterministically (see lib/subjects.ts), which is
+       what makes "the green one is Maths" hold across the whole app.
+       Kept separate from the chart series: these are identity colours
+       for large filled shapes, not data encodings.
+       ---------------------------------------------------------------- */
+    --fun-1: 4 88% 62%; /* coral   */
+    --fun-2: 26 95% 56%; /* orange  */
+    --fun-3: 43 96% 50%; /* amber   */
+    --fun-4: 88 62% 45%; /* lime    */
+    --fun-5: 158 72% 40%; /* green   */
+    --fun-6: 187 78% 42%; /* teal    */
+    --fun-7: 205 90% 52%; /* sky     */
+    --fun-8: 258 88% 64%; /* violet  */
+    --fun-9: 328 80% 60%; /* pink    */
+
+    /* Ink laid over a filled --fun-* shape. Dark text on these mid-tone
+       fills reads better than white at small sizes in light mode. */
+    --fun-ink: 240 30% 14%;
+    /* Tint strength for the soft/background variant of a fun colour. */
+    --fun-soft-alpha: 0.14;
+    --background: 0 0% 100%;
+  }
+
   * {
     @apply border-border;
   }
@@ -406,5 +491,39 @@
     inset: 0 auto auto 0;
     width: 100%;
     margin: 0;
+  }
+}
+
+/* Fee receipts: the same trick, for `printFeeReceipt()`. Two copies fit one A4 sheet.
+   The printed copy is portalled straight under <body>, outside any dialog, so nothing
+   transformed or scrolled can clip it; it exists only while a receipt is printing. */
+.fee-receipt-portal {
+  display: none;
+}
+@media print {
+  body.printing-fee-receipt .fee-receipt-portal {
+    display: block;
+  }
+  body.printing-fee-receipt {
+    background: white;
+  }
+  body.printing-fee-receipt * {
+    visibility: hidden;
+  }
+  body.printing-fee-receipt .fee-receipt-print,
+  body.printing-fee-receipt .fee-receipt-print * {
+    visibility: visible;
+  }
+  body.printing-fee-receipt .fee-receipt-print {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    margin: 0;
+    /* The receipt's dark table header and PAID stamp are part of it, not decoration. */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body.printing-fee-receipt .fee-receipt-print .shadow-sm {
+    box-shadow: none;
   }
 }

@@ -7,9 +7,6 @@ import type {
   AttendanceOut,
   AttendanceUpdate,
   BatchAttendanceCreate,
-  ExamGradeOut,
-  GradeEntryCreate,
-  GradeEntryUpdate,
   LiveMeetingCreate,
   LiveMeetingOut,
   LiveMeetingUpdate,
@@ -591,63 +588,6 @@ export function useDeleteMaterial() {
         void qc.invalidateQueries({ queryKey: qk.student.materials() })
         void qc.invalidateQueries({ queryKey: qk.teacher.meetings() })
       }
-    },
-  })
-}
-
-export function useCreateGrade() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (body: GradeEntryCreate) => teacherApi.createGrade(body),
-    onSuccess: (created) => {
-      qc.setQueryData<ExamGradeOut[]>(qk.teacher.grades(), (prev) => (prev ? [created, ...prev] : prev))
-      void qc.invalidateQueries({ queryKey: qk.teacher.grades() })
-      markMonitoringStale()
-    },
-  })
-}
-
-/**
- * Not optimistic: the backend re-validates marks against the MERGED record, so
- * a partial update can still 400 (`marks_obtained` above the stored
- * `max_marks`). Showing the new mark before the server accepts it would mean
- * showing a number that is about to be rejected.
- */
-export function useUpdateGrade() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ gradeId, body }: { gradeId: number; body: GradeEntryUpdate }) =>
-      teacherApi.updateGrade(gradeId, body),
-    onSuccess: (updated) => {
-      qc.setQueryData<ExamGradeOut[]>(qk.teacher.grades(), (prev) =>
-        prev?.map((g) => (g.id === updated.id ? updated : g)),
-      )
-      void qc.invalidateQueries({ queryKey: qk.teacher.grades() })
-      markMonitoringStale()
-      toast.success('Grade updated')
-    },
-  })
-}
-
-export function useDeleteGrade() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (gradeId: number) => teacherApi.deleteGrade(gradeId),
-    onMutate: async (gradeId) => {
-      await qc.cancelQueries({ queryKey: qk.teacher.grades() })
-      const snapshot = qc.getQueryData<ExamGradeOut[]>(qk.teacher.grades())
-      qc.setQueryData<ExamGradeOut[]>(qk.teacher.grades(), (prev) => prev?.filter((g) => g.id !== gradeId))
-      return { snapshot }
-    },
-    onError: (_error, _gradeId, context) => {
-      if (context?.snapshot) qc.setQueryData(qk.teacher.grades(), context.snapshot)
-    },
-    onSuccess: () => {
-      markMonitoringStale()
-      toast.success('Grade deleted')
-    },
-    onSettled: () => {
-      void qc.invalidateQueries({ queryKey: qk.teacher.grades() })
     },
   })
 }

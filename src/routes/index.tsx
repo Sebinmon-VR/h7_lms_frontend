@@ -51,13 +51,16 @@ const AdminAdmissionRequests = lazy(() => import('@/pages/admin/admission-reques
 const AdminLiveClasses = lazy(() => import('@/pages/admin/live-classes'))
 const AdminFamilies = lazy(() => import('@/pages/admin/families'))
 const AdminFinance = lazy(() => import('@/pages/admin/finance'))
+const AdminFeeCollection = lazy(() => import('@/pages/admin/fee-collection'))
 const AdminNotices = lazy(() => import('@/pages/admin/notices'))
 const AdminOversight = lazy(() => import('@/pages/admin/oversight'))
 const AdminSchoolSettings = lazy(() => import('@/pages/admin/school-settings'))
+const AdminGuideVideos = lazy(() => import('@/pages/admin/guide-videos'))
 
 const NoticeFeed = lazy(() => import('@/pages/shared/notices'))
 const CalendarPage = lazy(() => import('@/pages/shared/calendar'))
 const SupportPage = lazy(() => import('@/pages/shared/support'))
+const UserGuidePage = lazy(() => import('@/pages/shared/user-guide'))
 const HomeworkPage = lazy(() => import('@/pages/shared/homework'))
 const LeavePage = lazy(() => import('@/pages/shared/leave'))
 const ExtraClassesPage = lazy(() => import('@/pages/shared/extra-classes'))
@@ -124,7 +127,6 @@ const TeacherTopics = lazy(() => import('@/pages/teacher/topics'))
 const TeacherMeetings = lazy(() => import('@/pages/teacher/meetings'))
 const TeacherMaterials = lazy(() => import('@/pages/teacher/materials'))
 const TeacherRecordings = lazy(() => import('@/pages/teacher/recordings'))
-const TeacherGradebook = lazy(() => import('@/pages/teacher/gradebook'))
 const TeacherInsights = lazy(() => import('@/pages/teacher/insights'))
 const TeacherTimetable = lazy(() => import('@/pages/teacher/timetable'))
 
@@ -155,6 +157,7 @@ const ReportCards = lazy(() => import('@/pages/exams/report-cards'))
 const ReportCardDetail = lazy(() =>
   import('@/pages/exams/report-cards').then((m) => ({ default: m.ReportCardDetailPage })),
 )
+const PaperMarks = lazy(() => import('@/pages/exams/paper-marks'))
 
 // The arena (quiz battles). Students play under /student/arena; teachers and
 // admins share the set-up screens, mounted under both prefixes like the exams.
@@ -188,6 +191,7 @@ function examRoutes(prefix: '/admin' | '/teacher') {
       <Route path={`${prefix}/exams/:examId/edit`} element={<ExamForm />} />
       <Route path={`${prefix}/exams/:examId/grade/:studentId`} element={<ExamGrading />} />
       <Route path={`${prefix}/report-cards`} element={<ReportCards />} />
+      <Route path={`${prefix}/report-cards/paper-marks`} element={<PaperMarks />} />
       <Route path={`${prefix}/report-cards/:cardId`} element={<ReportCardDetail />} />
     </>
   )
@@ -234,6 +238,7 @@ export function AppRoutes() {
             <Route path="/notices" element={<NoticeFeed />} />
             <Route path="/calendar" element={<CalendarPage />} />
             <Route path="/support" element={<SupportPage />} />
+            <Route path="/guide" element={<UserGuidePage />} />
 
             <Route element={<RequireRole allow={['ADMIN']} />}>
               <Route path="/admin" element={<AdminDashboard />} />
@@ -276,9 +281,12 @@ export function AppRoutes() {
               <Route path="/admin/admission-requests" element={<AdminAdmissionRequests />} />
               <Route path="/admin/families" element={<AdminFamilies />} />
               <Route path="/admin/finance" element={<AdminFinance />} />
+              {/* Not under /admin/finance, so the two sidebar entries light up separately. */}
+              <Route path="/admin/fee-collection" element={<AdminFeeCollection />} />
               <Route path="/admin/notices" element={<AdminNotices />} />
               <Route path="/admin/oversight" element={<AdminOversight />} />
               <Route path="/admin/settings" element={<AdminSchoolSettings />} />
+              <Route path="/admin/guide-videos" element={<AdminGuideVideos />} />
               {/* Admins reach the approval queues at their own prefix, which
                   is what the navigation links to; the pages themselves read
                   the role and show the deciding half. */}
@@ -322,7 +330,8 @@ export function AppRoutes() {
                 <Route path="/teacher/meetings" element={<TeacherMeetings />} />
                 <Route path="/teacher/materials" element={<TeacherMaterials />} />
                 <Route path="/teacher/recordings" element={<TeacherRecordings />} />
-                <Route path="/teacher/gradebook" element={<TeacherGradebook />} />
+                {/* The gradebook was replaced by offline exam marks under Report Cards. */}
+                <Route path="/teacher/gradebook" element={<Navigate to="/teacher/report-cards/paper-marks" replace />} />
                 <Route path="/teacher/insights" element={<TeacherInsights />} />
                 <Route path="/teacher/timetable" element={<TeacherTimetable />} />
                 <Route path="/teacher/homework" element={<HomeworkPage />} />

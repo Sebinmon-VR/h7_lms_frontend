@@ -21,8 +21,10 @@ import type {
   PaymentIntentCreate,
   PaymentIntentOut,
   Program,
+  RazorpayConfirm,
 } from '@/api/types'
 import { useSupportContact } from '@/queries/support.queries'
+import { usePaymentQuote } from '@/queries/finance.queries'
 import { formatDate, formatDateTime } from '@/lib/datetime'
 import { formatMoney } from '@/lib/tuition'
 import {
@@ -36,6 +38,7 @@ import {
   ONLINE_GATEWAY_METHODS,
 } from '@/lib/school'
 import { cn } from '@/lib/cn'
+import { RazorpayDismissed, openRazorpay } from '@/lib/razorpay'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -104,6 +107,18 @@ export interface CheckoutProps {
   /** Earlier attempts on this invoice, newest first. */
   intents: PaymentIntentOut[]
   onPay: (body: PaymentIntentCreate) => Promise<PaymentIntentOut>
+  /**
+   * Credits a Razorpay payment once Checkout hands it back. When given and the
+   * intent comes back with Razorpay `checkout` options, Checkout opens over
+   * this page instead of a redirect.
+   */
+  onConfirmRazorpay?: (intentId: number, result: RazorpayConfirm) => Promise<PaymentIntentOut>
+  /**
+   * Currencies the payer may pay in (e.g. INR and AED). The bill stays in its
+   * own currency; another one is priced at today's rate plus its tax. Omit to
+   * pay only in the bill's currency.
+   */
+  payCurrencies?: string[]
   paying: boolean
 }
 
@@ -539,6 +554,8 @@ export function Checkout({
   backLabel = 'Back to my fees',
   intents,
   onPay,
+  onConfirmRazorpay,
+  payCurrencies,
   paying,
 }: CheckoutProps) {
   const contact = useSupportContact(program)
@@ -566,6 +583,11 @@ export function Checkout({
     return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * 100) / 100 : 0
   }, [choice, custom, invoice.instalments, outstanding])
 
+  const [payCurrency, setPayCurrency] = React.useState<string>(currency)
+  const foreign = !!payCurrencies && payCurrency !== currency
+  const quote = usePaymentQuote('me', foreign ? amount : 0, payCurrency)
+  const payLabel = foreign && quote.data ? formatMoney(quote.data.total, quote.data.currency) : formatMoney(amount, currency)
+
   const tooMuch = amount > outstanding + 0.001
   const valid = amount > 0 && !tooMuch
   const remaining = Math.max(outstanding - amount, 0)
@@ -579,10 +601,20 @@ export function Checkout({
         amount,
         instalment_label: choice.kind === 'instalment' ? choice.label : null,
         method,
+        currency: foreign ? payCurrency : null,
       })
-      setResult(intent)
+      if (intent.checkout && onConfirmRazorpay) {
+        const handedBack = await openRazorpay(intent.checkout, { merchant })
+        setResult(await onConfirmRazorpay(intent.id, handedBack))
+      } else {
+        setResult(intent)
+      }
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (err) {
+      if (err instanceof RazorpayDismissed) {
+        setError('The payment window was closed before paying. Nothing was charged.')
+        return
+      }
       setError((err as { message?: string })?.message ?? 'The payment could not be started.')
     }
   }
@@ -764,6 +796,51 @@ export function Checkout({
                   )}
                 </div>
 
+                {payCurrencies && payCurrencies.length > 1 && (
+                  <div className="space-y-2 border-t border-border pt-3">
+                    <p className="text-sm font-medium">Pay in</p>
+                    <div className="flex gap-2">
+                      {payCurrencies.map((code) => (
+                        <Button
+                          key={code}
+                          size="sm"
+                          variant={payCurrency === code ? 'solid' : 'outline'}
+                          onClick={() => setPayCurrency(code)}
+                        >
+                          {code}
+                        </Button>
+                      ))}
+                    </div>
+                    {foreign &&
+                      (quote.data ? (
+                        <dl className="space-y-1 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
+                          <div className="flex justify-between gap-3">
+                            <dt className="text-muted-foreground">Fees in {quote.data.currency}</dt>
+                            <dd className="tabular-nums">{formatMoney(quote.data.fee_amount, quote.data.currency)}</dd>
+                          </div>
+                          {quote.data.tax_amount > 0 && (
+                            <div className="flex justify-between gap-3">
+                              <dt className="text-muted-foreground">
+                                {quote.data.tax_label ?? 'Tax'} {quote.data.tax_percent}%
+                              </dt>
+                              <dd className="tabular-nums">{formatMoney(quote.data.tax_amount, quote.data.currency)}</dd>
+                            </div>
+                          )}
+                          <div className="flex justify-between gap-3 font-semibold">
+                            <dt>You pay</dt>
+                            <dd className="tabular-nums">{formatMoney(quote.data.total, quote.data.currency)}</dd>
+                          </div>
+                          <p className="text-2xs text-muted-foreground">
+                            Today's rate: {formatMoney(1, currency)} = {quote.data.exchange_rate} {quote.data.currency}.
+                            In {quote.data.currency}, pay by an international card.
+                          </p>
+                        </dl>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Getting today's rate…</p>
+                      ))}
+                  </div>
+                )}
+
                 <dl className="space-y-1.5 border-t border-border pt-3 text-sm">
                   <div className="flex justify-between gap-3">
                     <dt className="text-muted-foreground">Method</dt>
@@ -777,10 +854,10 @@ export function Checkout({
 
                 <FormError message={error} />
 
-                <Button block size="lg" loading={paying} disabled={!valid} onClick={pay}>
+                <Button block size="lg" loading={paying} disabled={!valid || (foreign && !quote.data)} onClick={pay}>
                   {online ? <Lock /> : <Banknote />}
                   {online
-                    ? `Pay ${formatMoney(amount, currency)}`
+                    ? `Pay ${payLabel}`
                     : method === 'BANK_TRANSFER'
                       ? 'Get a transfer reference'
                       : 'Get a payment reference'}

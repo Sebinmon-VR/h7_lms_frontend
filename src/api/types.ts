@@ -1055,6 +1055,8 @@ export interface TimetableEntryOut {
   /** Null when no teacher is mapped to the subject and class. */
   teacher_id: number | null
   teacher: UserOut | null
+  /** Set only on a date a substitute is taking this period. */
+  substitution?: PeriodSubstitutionOut | null
   day_of_week: DayOfWeek
   start_time: ApiTime
   end_time: ApiTime
@@ -1113,6 +1115,29 @@ export interface TimetableBulkResult {
  * instants it maps to — so the client never redoes weekday or timezone maths.
  */
 export type PeriodTeacherStatus = 'UPCOMING' | 'IN' | 'LEFT' | 'NOT_YET' | 'ABSENT'
+
+/** A substitute taking one period on one date. The recurring timetable is unchanged. */
+export interface PeriodSubstitutionOut {
+  on_date: ApiDate
+  substitute_teacher_id: number
+  substitute_teacher: UserOut | null
+  original_teacher_id: number | null
+  original_teacher: UserOut | null
+  note: string | null
+}
+
+/** A teacher's name and id, for choosing a substitute. */
+export interface TeacherSummaryOut {
+  id: number
+  full_name: string
+}
+
+export interface CoverCreate {
+  timetable_entry_id: number
+  on_date: ApiDate
+  substitute_teacher_id: number
+  note?: string | null
+}
 
 export interface ScheduledPeriod {
   entry: TimetableEntryOut
@@ -1367,6 +1392,17 @@ export interface EmailHealth {
   ok?: boolean
 }
 
+/** Online payment through Razorpay. When probed, `ok` says whether Razorpay accepted the keys. */
+export interface PaymentsHealth extends HealthProbe {
+  configured: boolean
+  /** The public key id (never the secret), to compare with the Razorpay dashboard. */
+  key_id: string | null
+  test_mode: boolean | null
+  webhook_secret_set: boolean
+  /** The address to give Razorpay's webhook, for fee orders and admission payment links. */
+  webhook_path?: string
+}
+
 export interface IntegrationsHealth {
   storage: StorageHealth
   /**
@@ -1377,6 +1413,8 @@ export interface IntegrationsHealth {
   live_classes: LiveClassesHealth
   recording: RecordingHealth
   email: EmailHealth
+  /** Absent from backends older than the payments check. */
+  payments?: PaymentsHealth
   /** False when `?probe=false` asked for a settings-only view. */
   probed: boolean
 }
@@ -1505,6 +1543,11 @@ interface ExamRules {
   shuffle_questions?: boolean
   auto_grade_objective?: boolean
   max_upload_files?: number
+  /** Release the draft by itself at `auto_publish_at`, or at `starts_at` when that is empty. */
+  auto_publish?: boolean
+  auto_publish_at?: ApiDateTime | null
+  /** Sit the exam in a live call, watched by the teacher. */
+  live_invigilation?: boolean
 }
 
 /** POST /exams. `teacher_id` is for an admin filing on a teacher's behalf. */
@@ -1545,6 +1588,10 @@ export interface ExamUpdate {
   shuffle_questions?: boolean
   auto_grade_objective?: boolean
   max_upload_files?: number
+  auto_publish?: boolean
+  auto_publish_at?: ApiDateTime | null
+  /** Sit the exam in a live call, watched by the teacher. */
+  live_invigilation?: boolean
 }
 
 /** PUT /exams/{id}/questions — replaces the whole form. Refused once scripts are in. */
@@ -1629,6 +1676,11 @@ export interface ExamOut {
   question_paper_provider: string | null
   question_paper_warning: string | null
   max_upload_files: number
+  auto_publish?: boolean
+  auto_publish_at?: ApiDateTime | null
+  /** Why an auto-publishing draft was not released when it came due. */
+  auto_publish_error?: string | null
+  live_invigilation?: boolean
   results_published: boolean
   results_published_at: ApiDateTime | null
   created_at: ApiDateTime
@@ -1666,6 +1718,8 @@ export interface StudentExamOut {
   late_submission_allowed: boolean
   question_paper_url: string | null
   max_upload_files: number
+  /** Sat in a live call: the exam page lives inside /call/exam/<id>. */
+  live_invigilation?: boolean
   /** Empty in a listing and before the window opens. */
   questions: StudentQuestionOut[]
   question_count: number
@@ -1716,6 +1770,36 @@ export interface QuestionScoreOut {
 }
 
 /** One script, as staff read it during valuation. */
+/** One answer on an answer sheet, between two of the teacher's lines. */
+export interface MarkingPart {
+  label: string
+  marks: number | null
+  max_marks: number | null
+  comment: string | null
+}
+
+export type SheetMarkKind = 'pen' | 'circle' | 'line' | 'tick' | 'cross' | 'note'
+
+/**
+ * A teacher's mark on an answer sheet. `points` are [x, y] as fractions of the file's width
+ * and height: many for a pencil stroke, two for a circle (opposite corners) or an underline,
+ * one for a tick, a cross or a note.
+ */
+export interface SheetMark {
+  kind: SheetMarkKind
+  points: [number, number][]
+  color: string
+  text?: string | null
+}
+
+/** A file split into answers: lines as fractions of the way down (0 top, 1 bottom). */
+export interface MarkedFile {
+  dividers: number[]
+  segments: MarkingPart[]
+  /** Circles, ticks, crosses, strokes and notes. The student sees them once results are out. */
+  annotations?: SheetMark[]
+}
+
 export interface SubmissionOut {
   id: string
   exam_id: number
@@ -1730,6 +1814,12 @@ export interface SubmissionOut {
   expires_at: ApiDateTime | null
   is_late: boolean
   late_by_minutes: number
+  /** Set while the student has stepped out of the exam. */
+  away_since?: ApiDateTime | null
+  away_log?: { left_at: ApiDateTime; returned_at: ApiDateTime | null }[]
+  /** The teacher's marking on the answer sheets, keyed by the file's position ("0", "1"...). */
+  marking_sheet?: Record<string, MarkedFile>
+  marking_total?: number | null
   answers: AnswerOut[]
   attachments: AttachmentOut[]
   question_scores: QuestionScoreOut[]
@@ -1765,6 +1855,8 @@ export interface StudentSubmissionOut {
   passed: boolean | null
   evaluator_remarks: string | null
   question_scores: QuestionScoreOut[]
+  /** The teacher's marking on the answer sheets, by file position. Empty until results are out. */
+  marking_sheet?: Record<string, MarkedFile>
 }
 
 export interface QuestionScoreIn {
@@ -1915,4 +2007,62 @@ export interface ReportCardBatch {
   published: boolean
   cards: ReportCardOut[]
   warnings: string[]
+}
+
+// ---------------------------------------------- marks for exams held on paper
+
+/** One subject's column on a paper exam sheet. `marks` is keyed by student id; a blank is absent. */
+export interface PaperSheetSubject {
+  subject_id: number
+  max_marks: number | null
+  marks: Record<string, number>
+}
+
+export interface PaperMarkSheet {
+  exam_name: string
+  /** A plain date, `YYYY-MM-DD`. */
+  conducted_on: string | null
+  subjects: PaperSheetSubject[]
+  entered_by: string[]
+  updated_at: ApiDateTime | null
+}
+
+export interface PaperRegisterStudent {
+  id: number
+  full_name: string
+  roll_number: string | null
+  admission_number: string | null
+}
+
+export interface PaperMarksRegister {
+  class_id: number
+  class_room: ClassRoomOut | null
+  students: PaperRegisterStudent[]
+  /** Taught in the class, or already on one of its sheets. */
+  subjects: SubjectOut[]
+  /** The rest of the school's subjects, for an exam in one not taught in this class. */
+  other_subjects: SubjectOut[]
+  sheets: PaperMarkSheet[]
+}
+
+export interface PaperMarkSheetSave {
+  class_id: number
+  exam_name: string
+  /** The sheet being edited; null for a new one. */
+  previous_exam_name: string | null
+  conducted_on: string
+  /** Every subject the exam had. One the sheet had that is left out is removed, marks and all. */
+  subjects: {
+    subject_id: number
+    max_marks: number
+    /** `null` clears the student's mark. */
+    marks: { student_id: number; marks_obtained: number | null }[]
+  }[]
+}
+
+export interface PaperMarkSheetSaved {
+  sheet: PaperMarkSheet
+  saved: number
+  cleared: number
+  unchanged: number
 }

@@ -21,10 +21,10 @@ export function useStudentAttendance(enabled = true) {
   })
 }
 
-export function useStudentTopics(enabled = true) {
+export function useStudentTopics(enabled = true, classId?: number) {
   return useQuery({
-    queryKey: qk.student.topics(),
-    queryFn: studentApi.topics,
+    queryKey: qk.student.topics(classId),
+    queryFn: () => studentApi.topics(classId),
     staleTime: STALE.transactional,
     enabled,
   })
@@ -39,10 +39,10 @@ export function useStudentMeetings(enabled = true) {
   })
 }
 
-export function useStudentMaterials(enabled = true) {
+export function useStudentMaterials(enabled = true, classId?: number) {
   return useQuery({
-    queryKey: qk.student.materials(),
-    queryFn: studentApi.materials,
+    queryKey: qk.student.materials(classId),
+    queryFn: () => studentApi.materials(classId),
     staleTime: STALE.transactional,
     enabled,
   })

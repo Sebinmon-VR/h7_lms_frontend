@@ -592,37 +592,6 @@ export function useCreateUser() {
  * would sit in the wrong list until the refetch lands. `onSettled` invalidates
  * every user list, which corrects it.
  */
-/** Puts the server's copy of one user into every cached user list. */
-function replaceCachedUser(qc: ReturnType<typeof useQueryClient>, updated: UserOut) {
-  qc.setQueriesData<UserOut[]>({ queryKey: qk.admin.usersRoot() }, (prev) =>
-    prev?.map((u) => (u.id === updated.id ? updated : u)),
-  )
-}
-
-export function useUploadUserPhoto() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ userId, photo }: { userId: number; photo: Blob }) => adminApi.uploadUserPhoto(userId, photo),
-    onSuccess: (updated) => {
-      replaceCachedUser(qc, updated)
-      toast.success('Photo updated')
-    },
-    onError: (error) => toast.error(error instanceof Error ? error.message : 'Could not upload the photo.'),
-  })
-}
-
-export function useRemoveUserPhoto() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (userId: number) => adminApi.removeUserPhoto(userId),
-    onSuccess: (updated) => {
-      replaceCachedUser(qc, updated)
-      toast.success('Photo removed')
-    },
-    onError: (error) => toast.error(error instanceof Error ? error.message : 'Could not remove the photo.'),
-  })
-}
-
 export function useUpdateUser() {
   const qc = useQueryClient()
   return useMutation({
@@ -776,6 +745,32 @@ export function useReactivateUser() {
       void qc.invalidateQueries({ queryKey: qk.admin.usersRoot() })
     },
   })
+}
+
+/** Puts the saved user straight into every cached list, so the new face shows at once. */
+function usePhotoMutation<TVars>(mutationFn: (vars: TVars) => Promise<UserOut>) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn,
+    onSuccess: (user) => {
+      qc.setQueriesData<UserOut[]>({ queryKey: qk.admin.usersRoot() }, (prev) =>
+        prev?.map((u) => (u.id === user.id ? user : u)),
+      )
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.admin.usersRoot() })
+    },
+  })
+}
+
+export function useUploadUserPhoto() {
+  return usePhotoMutation(({ userId, photo }: { userId: number; photo: Blob }) =>
+    adminApi.uploadUserPhoto(userId, photo),
+  )
+}
+
+export function useRemoveUserPhoto() {
+  return usePhotoMutation((userId: number) => adminApi.removeUserPhoto(userId))
 }
 
 export function useCreateClass() {

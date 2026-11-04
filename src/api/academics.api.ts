@@ -10,6 +10,7 @@ import type {
   HomeworkSubmissionOut,
   HomeworkSubmit,
   HomeworkUpdate,
+  AffectedPeriod,
   LeaveApply,
   LeaveBalanceOut,
   LeaveDecision,
@@ -94,6 +95,10 @@ export const leaveApi = {
    * match, or the backend refuses it.
    */
   apply: (body: LeaveApply) => post<LeaveRequestOut>('/leave', body),
+
+  /** The periods you have across these dates. Saves nothing. */
+  affected: (start: ApiDate, end: ApiDate) =>
+    get<AffectedPeriod[]>('/leave/affected', { params: { start_date: start, end_date: end } }),
 
   mine: (status?: LeaveStatus) =>
     get<LeaveRequestOut[]>('/leave/me', { params: cleanParams({ status }) }),

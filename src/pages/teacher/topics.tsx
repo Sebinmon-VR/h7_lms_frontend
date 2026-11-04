@@ -43,6 +43,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { FiledBy } from '@/components/domain/filed-by'
+import { ClassChips } from '@/components/domain/class-chips'
+import { CourseTabs } from '@/components/domain/course-tabs'
 import { EmptyState } from '@/components/feedback/states'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import {
@@ -493,9 +495,26 @@ export default function TeacherTopicsPage() {
     setDialogOpen(true)
   }
 
+  const [classFilter, setClassFilter] = React.useState<string | null>(null)
+
+  const classOptions = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const t of topicsQuery.data ?? []) map.set(String(t.class_id), t.class_room?.name ?? `Class ${t.class_id}`)
+    return [...map.entries()].map(([value, label]) => ({ value, label }))
+  }, [topicsQuery.data])
+
+  /** One class's topics at a time, so the progress and timeline below never mix classes. */
+  const inClass = React.useMemo(
+    () =>
+      classFilter
+        ? (topicsQuery.data ?? []).filter((t) => String(t.class_id) === classFilter)
+        : (topicsQuery.data ?? []),
+    [topicsQuery.data, classFilter],
+  )
+
   const progress = React.useMemo(
-    () => syllabusProgress(topicsQuery.data ?? [], (t) => subjectName(t)),
-    [topicsQuery.data],
+    () => syllabusProgress(inClass, (t) => subjectName(t)),
+    [inClass],
   )
 
   if (isAdmin) {
@@ -510,7 +529,7 @@ export default function TeacherTopicsPage() {
   return (
     <>
       <PageHeader
-        title="Syllabus"
+        title="Lessons & Materials"
         description="A running log of what you have taught. Students see this as their syllabus progress. If you are a class teacher, the topics other teachers logged for your class appear here too, marked with their name."
         actions={
           <Button variant="primary" icon={<Plus />} onClick={openCreate}>
@@ -518,6 +537,20 @@ export default function TeacherTopicsPage() {
           </Button>
         }
       />
+
+      <CourseTabs active="lessons" lessonsTo="/teacher/topics" materialsTo="/teacher/materials" />
+
+      {classOptions.length > 1 && (
+        <div className="mb-6">
+          <ClassChips
+            allowAll
+            label="Class"
+            options={classOptions}
+            value={classFilter}
+            onChange={setClassFilter}
+          />
+        </div>
+      )}
 
       {progress.length > 0 && (
         <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -570,7 +603,13 @@ export default function TeacherTopicsPage() {
           />
         }
       >
-        {(topics) => <TopicTimeline topics={topics} onEdit={openEdit} onDelete={setDeleting} />}
+        {(topics) => (
+          <TopicTimeline
+            topics={classFilter ? topics.filter((t) => String(t.class_id) === classFilter) : topics}
+            onEdit={openEdit}
+            onDelete={setDeleting}
+          />
+        )}
       </QueryBoundary>
 
       <TopicFormDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} />

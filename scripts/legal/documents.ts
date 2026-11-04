@@ -51,10 +51,10 @@ export function unfilledPlaceholders(): string[] {
  * accepted current terms. Use a date so "which text did they agree to?" is
  * answerable from the value alone.
  */
-export const LEGAL_VERSION = '2026-08-17'
+export const LEGAL_VERSION = '2026-10-30'
 
 /** Shown as the effective date at the top of each document. */
-export const LEGAL_EFFECTIVE_DATE = '17 August 2026'
+export const LEGAL_EFFECTIVE_DATE = '30 October 2026'
 
 export type LegalBlock =
   | { type: 'p'; text: string }
@@ -108,14 +108,14 @@ export const PRIVACY_POLICY: LegalDocument = {
   id: 'privacy',
   title: 'Privacy Policy',
   summary:
-    'How H7 EdTech handles the personal data of students, guardians and staff, and who is responsible for it.',
+    'How the H7 EdTech app and website handle the personal data of students, parents and guardians, and staff, and who is responsible for it.',
   sections: [
     {
       heading: 'Who is responsible for your data',
       blocks: [
         p(
           'H7 EdTech is a school management application supplied to your school by ' +
-            `${LEGAL_ENTITY.processor} ("we", "us").`,
+            `${LEGAL_ENTITY.processor} ("we", "us"). This policy applies to the H7 EdTech app for Android and iOS and to the H7 EdTech website, which share one account and one set of records.`,
         ),
         p(
           'Your school is the data controller (in India, the Data Fiduciary). The school decides what personal data is collected, why, and how long it is kept. We act only as a data processor: we operate the software and process data on the school\'s documented instructions, and we do not use it for our own purposes.',
@@ -134,6 +134,12 @@ export const PRIVACY_POLICY: LegalDocument = {
         p(
           'For students, the personal data in the app is the data the parent or guardian provided to the school during admission. The school is responsible for obtaining and holding the consent that permits it to be processed.',
         ),
+        p(
+          'Parent and guardian accounts are also created by the school, and linked by the school to their children. A family that applies through the school\'s online admission form submits its details and documents to the school; an account is created only if the school admits the student.',
+        ),
+        p(
+          'You can change your password in the app, and reset a forgotten one by email.',
+        ),
       ],
     },
     {
@@ -141,17 +147,25 @@ export const PRIVACY_POLICY: LegalDocument = {
       blocks: [
         p('Depending on your role, the app may hold:'),
         ul([
-          'Identity and contact details: full name, email address, phone and alternate phone, date of birth, gender, and a profile photograph.',
+          'Identity and contact details: full name, email address, phone and alternate phone, date of birth, gender, and a profile photograph uploaded by the school.',
           'Postal address: address lines, city, state, postal code and country.',
           'Student records: admission number, roll number, admission date, blood group, and the class the student is enrolled in.',
-          'Guardian details: guardian name, phone, email and relationship to the student.',
+          'Guardian details: guardian name, phone, email and relationship to the student, and which children a parent or guardian account is linked to.',
+          'Admission applications: the form a family submits to the school and the documents uploaded with it, such as birth certificates and previous school records.',
           'Staff records: employee ID, designation, qualification, specialisation, date of joining and years of experience.',
           'Academic records: attendance, examination marks, syllabus topics covered, timetable periods, subject assignments and class-teacher assignments.',
-          'Content: study materials uploaded by teachers, and scheduled live classes — including, where the school has switched recording on, recordings of those classes and a log of when each person joined and left.',
+          'Content: study materials and lessons recorded by teachers, notices, calendar events, and scheduled live classes — including, where the school has switched recording on, recordings of those classes and a log of when each person joined and left, from which the class register can be suggested.',
+          'Homework and exams: work set by teachers; students\' answers and the files they upload, such as photos or scans of answer sheets; when an exam was started, handed in, and whether the student stepped out of it; teachers\' marks, marking and comments; and report cards.',
+          'Live classes and supervised exams: when you join a live class or a supervised exam, the app uses your camera and microphone, only after you allow it, so your teacher and class can see and hear you. Video and sound are not kept unless the school records the session.',
+          'Fees and payments: fee plans, invoices, payments, receipts and outstanding balances. Card, UPI and bank details are entered on the payment provider\'s secure page and are never received or stored by us.',
+          'Staff leave and cover: leave applications (type, dates, reason, contact details while away and any attachments), leave balances, and which teacher covers a class.',
+          'Requests and messages: support tickets and replies, requests for extra classes, and the attachments sent with them.',
+          'Learning games: quiz battle results, points, badges and items earned, leaderboard positions, and virtual lab experiment results.',
+          'Online tuition: tuition classes, subjects, packages, attendance and invoices, for students and tutors in that programme.',
           'Administrative notes recorded by the school about a user. These are internal to the school and are never shown to the person they describe.',
         ]),
         p(
-          'We do not collect location data, contacts, advertising identifiers or biometric data. The app contains no advertising or analytics tracking software, and we do not sell personal data or use it to build profiles.',
+          'We do not collect your location, contacts, advertising identifiers or biometric data. The app sends your device\'s time-zone setting (for example "Asia/Kolkata") so class times are shown in your local time; this is not your location. The app contains no advertising or analytics tracking software, and we do not sell personal data or use it to build profiles.',
         ),
       ],
     },
@@ -165,6 +179,7 @@ export const PRIVACY_POLICY: LegalDocument = {
           'A marker of when you last opened your notifications, so "new" means new to you.',
           'A record that you accepted this policy and the terms, with the version and date.',
           'A notification token, if you enable class reminders, so reminders can reach this device.',
+          'Files you open, such as study materials or a question paper, in the app\'s temporary cache so your device can display them.',
         ]),
         p(
           'This storage is private to the app. Signing out clears your token and session; uninstalling the app removes all of it.',
@@ -178,6 +193,11 @@ export const PRIVACY_POLICY: LegalDocument = {
           'To authenticate you and show only what your role permits.',
           'To record and display attendance, marks, syllabus progress and timetables.',
           'To distribute study materials and to schedule and join live classes.',
+          'To set, sit, supervise and mark homework and exams, and to issue report cards.',
+          'To bill fees, take payments and issue receipts.',
+          'To handle staff leave and arrange cover for classes.',
+          'To handle admission applications on the school\'s behalf.',
+          'To answer support requests, and to run the learning games and virtual lab.',
           'To send reminders about upcoming classes, if you have enabled them.',
           'To email account credentials when the school issues or resets them.',
           'To keep the service secure and to diagnose faults.',
@@ -188,6 +208,9 @@ export const PRIVACY_POLICY: LegalDocument = {
       heading: 'Who else processes the data',
       blocks: [
         p(
+          'We share personal data only with your school, with the service providers below, and where the law requires it. We do not sell, rent or trade personal data, and we do not share it with advertisers or data brokers.',
+        ),
+        p(
           'We use the following providers to run the service. They process data on our behalf under contract and may not use it for their own purposes:',
         ),
         ul([
@@ -195,7 +218,14 @@ export const PRIVACY_POLICY: LegalDocument = {
           'Microsoft Azure Blob Storage — stores uploaded study materials and class recordings.',
           'Microsoft Azure Communication Services — hosts live video classes inside the app, records them where the school has enabled it, and delivers credential and reminder emails.',
           'Microsoft Azure App Service and Azure Static Web Apps — host the application server and website, in the India South Central region.',
-          'Expo — delivers app updates and, if reminders are enabled, push notifications.',
+          'Expo — delivers app updates and, if reminders are enabled, push notifications, which reach your device through Google Firebase Cloud Messaging (Android) or the Apple Push Notification service (iOS).',
+        ]),
+        p(
+          'Two other kinds of service receive data only when you use them:',
+        ),
+        ul([
+          'Razorpay processes online fee payments on its own secure payment page. It receives the payment details you enter there, with the amount and the invoice it pays, and handles them under its own privacy policy.',
+          'Videos your school links to on YouTube, Google Drive or Microsoft OneDrive open on that service, which handles your visit under its own privacy policy.',
         ]),
         p(
           'Some of these providers operate infrastructure outside your country. Where personal data is transferred across a border, it is done under the provider\'s contractual safeguards and only to the extent needed to run the service.',
@@ -206,8 +236,9 @@ export const PRIVACY_POLICY: LegalDocument = {
       heading: 'Who can see your data inside the app',
       blocks: [
         ul([
-          'Students see only their own attendance, marks, materials, timetable and classes.',
-          'Teachers see the classes and subjects they are assigned to, and the records they create.',
+          'Students see only their own attendance, marks, materials, timetable and classes. Classmates see each other\'s names in live classes and quiz battles, and a student\'s name and points on their class and school leaderboards.',
+          'Parents and guardians see the records of the children linked to their account, as far as the school allows — for example academics, attendance or fees.',
+          'Teachers see the classes and subjects they are assigned to, and the records they create, including how their students are progressing through an exam.',
           'A class teacher additionally sees, and may correct, everything recorded against the class they lead — including records entered by other teachers.',
           'School administrators see all records for their school.',
         ]),
@@ -236,6 +267,9 @@ export const PRIVACY_POLICY: LegalDocument = {
         p(
           'Under India\'s Digital Personal Data Protection Act 2023, anyone under 18 is a child, and their data may only be processed with verifiable parental consent. The school, as Data Fiduciary, is responsible for obtaining and holding that consent. We do not use children\'s data for advertising, tracking or behavioural monitoring, and the app shows no advertisements.',
         ),
+        p(
+          'The app contains no advertising or third-party analytics software and does not use the device\'s advertising ID. Children cannot make purchases in the app; fees are paid by parents or guardians.',
+        ),
       ],
     },
     DELETION_SECTION,
@@ -260,7 +294,7 @@ export const PRIVACY_POLICY: LegalDocument = {
       heading: 'Security',
       blocks: [
         p(
-          'Passwords are never stored in readable form — only as a salted one-way hash that cannot be turned back into the password. Traffic between the app and the server is encrypted in transit. Access inside the app is enforced by role on the server, not merely hidden in the interface.',
+          'Passwords are never stored in readable form — only as a salted one-way hash that cannot be turned back into the password. Traffic between the app and the server is encrypted in transit. Files are kept in private storage and opened through links that expire. Access inside the app is enforced by role on the server, not merely hidden in the interface.',
         ),
         p(
           'No system is perfectly secure. If a breach affects your data, we will notify your school without undue delay so the school can meet its own notification duties.',

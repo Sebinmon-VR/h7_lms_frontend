@@ -204,7 +204,7 @@ export function JoinRoomButton({
       size={size}
       loading={join.isPending}
       onClick={open}
-      className={cn(state.live && 'animate-pulse-ring', className)}
+      className={className}
     >
       <Video />
       {state.label}

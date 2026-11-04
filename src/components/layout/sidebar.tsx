@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { motion } from 'framer-motion'
-import { ChevronRight, Lock, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { BookOpen, ChevronRight, Lock, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { NavLink, useLocation } from 'react-router-dom'
 
 import { useAuth } from '@/providers/auth-provider'
@@ -15,6 +15,7 @@ import { ProgramSwitcher } from './program-switcher'
 
 /** The same test NavLink applies, so "which group am I in" agrees with the highlight. */
 function isItemActive(item: NavItem, pathname: string): boolean {
+  if (item.alsoActiveFor?.some((path) => pathname.startsWith(path))) return true
   if (item.end) return pathname === item.to
   return pathname === item.to || pathname.startsWith(`${item.to}/`)
 }
@@ -110,6 +111,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                     // A demo account sees every module, padlocked until the school
                     // unlocks it; opening one shows what it is and how to get it.
                     const locked = !!lockedModuleFor(user, item.to)
+                    const pairedActive = item.alsoActiveFor?.some((path) => pathname.startsWith(path)) ?? false
                     const link = (
                       <NavLink
                         to={item.to}
@@ -119,7 +121,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                           cn(
                             'group relative flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors',
                             collapsed && 'justify-center px-0 py-2',
-                            isActive
+                            isActive || pairedActive
                               ? 'text-primary'
                               : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
                             locked && !isActive && 'opacity-60',
@@ -128,7 +130,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                       >
                         {({ isActive }) => (
                           <>
-                            {isActive && (
+                            {(isActive || pairedActive) && (
                               <motion.span
                                 layoutId="sidebar-active"
                                 transition={{ type: 'spring', stiffness: 420, damping: 36 }}
@@ -173,6 +175,23 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           <p className="mb-1.5 px-2 text-2xs uppercase tracking-wider text-muted-foreground">
             {PORTAL_LABEL[role]} portal
           </p>
+        )}
+        {role && ['ADMIN', 'TEACHER', 'CLASS_TEACHER', 'STUDENT'].includes(role) && (
+          <NavLink
+            to="/guide"
+            onClick={onNavigate}
+            title={collapsed ? 'Guide' : undefined}
+            className={({ isActive }) =>
+              cn(
+                'mb-1 flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors',
+                collapsed && 'justify-center px-0',
+                isActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+              )
+            }
+          >
+            <BookOpen className="size-4" />
+            {!collapsed && <span>Guide</span>}
+          </NavLink>
         )}
         <button
           type="button"

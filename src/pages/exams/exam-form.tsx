@@ -65,6 +65,9 @@ interface FormState {
   autoGrade: boolean
   shuffle: boolean
   maxUploadFiles: string
+  autoPublish: boolean
+  autoPublishAt: string | null
+  liveInvigilation: boolean
 }
 
 const EMPTY: FormState = {
@@ -87,6 +90,9 @@ const EMPTY: FormState = {
   autoGrade: true,
   shuffle: false,
   maxUploadFiles: '5',
+  autoPublish: false,
+  autoPublishAt: null,
+  liveInvigilation: false,
 }
 
 function toIso(value: string | null | undefined): string | null {
@@ -115,6 +121,9 @@ function fromExam(exam: ExamOut): FormState {
     autoGrade: exam.auto_grade_objective,
     shuffle: exam.shuffle_questions,
     maxUploadFiles: String(exam.max_upload_files ?? 5),
+    autoPublish: !!exam.auto_publish,
+    autoPublishAt: toIso(exam.auto_publish_at),
+    liveInvigilation: !!exam.live_invigilation,
   }
 }
 
@@ -461,6 +470,9 @@ export default function ExamFormPage() {
     shuffle_questions: form.shuffle,
     auto_grade_objective: form.autoGrade,
     max_upload_files: num(form.maxUploadFiles) ?? 5,
+    auto_publish: form.autoPublish,
+    auto_publish_at: form.autoPublish ? form.autoPublishAt : null,
+    live_invigilation: form.liveInvigilation,
     teacher_id: scope.isAdmin && form.teacherId ? Number(form.teacherId) : null,
     questions: [],
   })
@@ -506,6 +518,11 @@ export default function ExamFormPage() {
     if (form.autoGrade !== before.autoGrade) body.auto_grade_objective = form.autoGrade
     const files = num(form.maxUploadFiles)
     if (files != null && String(files) !== before.maxUploadFiles) body.max_upload_files = files
+    if (form.autoPublish !== before.autoPublish) body.auto_publish = form.autoPublish
+    if (form.liveInvigilation !== before.liveInvigilation) body.live_invigilation = form.liveInvigilation
+    if (form.autoPublish && form.autoPublishAt && form.autoPublishAt !== before.autoPublishAt) {
+      body.auto_publish_at = form.autoPublishAt
+    }
     if (scope.isAdmin && form.teacherId && Number(form.teacherId) !== exam.teacher_id) body.teacher_id = Number(form.teacherId)
 
     return body
@@ -703,7 +720,7 @@ export default function ExamFormPage() {
             aria-label="Exam mode"
             options={[
               { value: 'ONLINE', label: 'Online form' },
-              { value: 'OFFLINE', label: 'On paper' },
+              { value: 'OFFLINE', label: 'Upload paper' },
             ]}
             className={cn(editing && 'pointer-events-none opacity-60')}
           />
@@ -788,6 +805,39 @@ export default function ExamFormPage() {
             <span className="font-medium">Accept late work during the concession</span>
             <span className="block text-xs text-muted-foreground">
               Off means the deadline is hard: nothing is accepted after each student&rsquo;s time runs out.
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-3 rounded-lg border border-border px-3 py-2.5">
+          <Switch checked={form.autoPublish} onCheckedChange={(v) => set('autoPublish', v)} className="mt-0.5" />
+          <span className="text-sm">
+            <span className="font-medium">Publish automatically</span>
+            <span className="block text-xs text-muted-foreground">
+              The draft is released to students by itself at the time below, so nobody has to press Publish.
+              It must have its questions or question paper by then.
+            </span>
+          </span>
+        </label>
+        {form.autoPublish && (
+          <Field
+            id="exam-auto-publish-at"
+            label="Publish at"
+            hint="Leave blank to publish when the exam opens. Publish earlier so students see it coming."
+          >
+            <DateTimePicker
+              id="exam-auto-publish-at"
+              value={form.autoPublishAt}
+              onChange={(v) => set('autoPublishAt', v)}
+            />
+          </Field>
+        )}
+        <label className="flex items-start gap-3 rounded-lg border border-border px-3 py-2.5">
+          <Switch checked={form.liveInvigilation} onCheckedChange={(v) => set('liveInvigilation', v)} className="mt-0.5" />
+          <span className="text-sm">
+            <span className="font-medium">Sit with live invigilation</span>
+            <span className="block text-xs text-muted-foreground">
+              Students sit the exam in a live room with their camera on, and you watch them. The paper and the
+              upload are inside the room. It opens 15 minutes before the exam.
             </span>
           </span>
         </label>

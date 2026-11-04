@@ -21,7 +21,7 @@
  * through the same five states.
  */
 
-import type { ApiDate, ApiDateTime, ScheduledPeriod, UserRole } from './types'
+import type { ApiDate, ApiDateTime, JobOut, ScheduledPeriod, UserRole } from './types'
 import type { InvoiceStatus, Program } from './tuition.types'
 
 // ==================================================================== admissions
@@ -819,6 +819,137 @@ export interface InstalmentOut {
   days_overdue: number
   late_fee_amount?: number | null
   waived_reason?: string | null
+  /** Taken off this line by the office when the bill was issued. */
+  concession_amount?: number | null
+  /** Added by the office (books, uniform) rather than from the fee structure. */
+  is_extra?: boolean
+  /** The bill this line went out on. Null until the account is issued. */
+  bill_number?: string | null
+}
+
+/**
+ * One bill on a student's yearly account: what the office billed in one go —
+ * the first issue, fees held back until later (LATER), or extra items (EXTRA) —
+ * with its own number, so it can be printed and paid on its own. The account's
+ * dues are the sum of its bills.
+ */
+export interface FeeBill {
+  number: string
+  kind: 'ISSUE' | 'LATER' | 'EXTRA' | string
+  issued_at?: ApiDateTime | null
+  labels: string[]
+  amount: number
+  amount_paid: number
+  balance: number
+  /** ISSUED (nothing paid yet), PARTIALLY_PAID, PAID, or CANCELLED once its lines were removed. */
+  status: 'ISSUED' | 'PARTIALLY_PAID' | 'PAID' | 'CANCELLED' | string
+  due_date?: ApiDate | null
+  is_overdue: boolean
+}
+
+/** One ticked fee line and how much of the payment goes to it. */
+export interface PaymentAllocation {
+  label: string
+  amount: number
+}
+
+/** A fee outside the fee structure: books, uniform, a trip. */
+export interface ExtraItem {
+  name: string
+  amount: number
+  due_date?: ApiDate | null
+}
+
+/**
+ * Bulk billing: ISSUE their fees for the year, LATER a fee held back (Term 2),
+ * EXTRA the same extra item for everyone. Each student gets a bill of their own.
+ */
+export type BulkBillingAction = 'ISSUE' | 'LATER' | 'EXTRA'
+
+export interface BulkBillingRequest {
+  academic_year_id: number
+  student_ids: number[]
+  action: BulkBillingAction
+  /** ISSUE: the fees to put on (none = every fee). LATER: the held-back fees to bill. */
+  labels?: string[]
+  extra_items?: ExtraItem[]
+  /** Email each student and linked parent their new bill. */
+  email?: boolean
+  /** Preview only: nobody is billed. */
+  dry_run?: boolean
+}
+
+/** One student in a bulk billing preview or run. */
+export interface BulkBillingRow {
+  student_id: number
+  student_name: string
+  admission_number?: string | null
+  class_name?: string | null
+  /** Preview: READY or SKIP. Run: BILLED, SKIPPED or FAILED. */
+  outcome: 'READY' | 'SKIP' | 'BILLED' | 'SKIPPED' | 'FAILED'
+  /** Every line the student could be billed; `chosen` follows the fees ticked. */
+  lines: { label: string; amount: number; due_date?: ApiDate | null; chosen?: boolean }[]
+  amount: number
+  bill_number?: string | null
+  emailed: string[]
+  /** Why a student was skipped or failed, in plain words. */
+  detail?: string | null
+}
+
+export interface BulkBillingResult {
+  action: BulkBillingAction
+  dry_run: boolean
+  academic_year_id: number
+  /** Every fee line seen across the students, for the fee tick boxes. */
+  labels: string[]
+  summary: {
+    students: number
+    counts: Partial<Record<BulkBillingRow['outcome'], number>>
+    amount: number
+    emailed: number
+    mail_configured: boolean
+  }
+  rows: BulkBillingRow[]
+}
+
+/** GET /admin/finance/bulk-billing/{job_id}: the job, and its result once it has finished. */
+export interface BulkBillingJob extends JobOut {
+  result?: BulkBillingResult | null
+}
+
+/** `POST /admin/finance/invoices/{id}/issue` — optional concessions and extra items. */
+export interface InvoiceIssueRequest {
+  concessions?: { label: string; amount: number }[]
+  concession_reason?: string | null
+  extra_items?: ExtraItem[]
+  /** Fee lines unticked by the office: left off this bill entirely. */
+  exclude?: string[]
+}
+
+/** `POST /admin/finance/invoices/{id}/issue-more` — bill fees left off at issue. */
+export interface IssueLeftOffRequest {
+  labels: string[]
+  concessions?: { label: string; amount: number }[]
+  concession_reason?: string | null
+}
+
+/** Razorpay Checkout's options for an intent. Never a secret. */
+export interface RazorpayCheckout {
+  provider: 'razorpay'
+  key_id: string
+  order_id: string
+  amount_minor: number
+  currency: string
+  description?: string | null
+  prefill?: { name?: string | null; email?: string | null; contact?: string | null }
+  test_mode: boolean
+}
+
+/** What Razorpay Checkout hands back after a payment. */
+export interface RazorpayConfirm {
+  razorpay_order_id: string
+  razorpay_payment_id: string
+  razorpay_signature: string
 }
 
 /**
@@ -880,6 +1011,8 @@ export interface FeeBreakdownOut {
 }
 
 export interface FeeInvoicePayment {
+  /** `RCT-2026-27-0001`. Absent on adjustments and on payments taken before numbering. */
+  receipt_number?: string | null
   amount?: number
   method?: PaymentMethod | string | null
   reference?: string | null
@@ -887,6 +1020,9 @@ export interface FeeInvoicePayment {
   instalment_label?: string | null
   note?: string | null
   recorded_by?: number | null
+  /** Paid in another currency, or with tax on top: what was handed over. */
+  paid_currency?: string | null
+  paid_amount?: number | null
   [key: string]: unknown
 }
 
@@ -915,6 +1051,10 @@ export interface FeeInvoiceOut {
   line_items: BreakdownLine[]
   discounts: AppliedDiscount[]
   instalments: InstalmentOut[]
+  /** The bills on this account, oldest first. Empty until it is issued. */
+  bills?: FeeBill[]
+  /** Fee lines held back when the bill was issued; they can be billed later. */
+  left_off?: string[]
   payments: FeeInvoicePayment[]
   subtotal: number
   discount_total: number
@@ -937,6 +1077,71 @@ export interface FeeInvoiceOut {
   updated_at?: ApiDateTime | null
 }
 
+/** One line of a receipt: what part of the payment settled which instalment and fee. */
+export interface FeeReceiptLine {
+  instalment?: string | null
+  head: string
+  is_admission_charge: boolean
+  amount: number
+  bill_number?: string | null
+}
+
+/**
+ * GET /admin/finance/invoices/{id}/payments/{index}/receipt — the printable
+ * receipt for one payment, fresh or reprinted. `lines` replays the invoice's
+ * own allocation, so it agrees with the collections report.
+ */
+export interface FeePaymentReceipt {
+  invoice_id: string
+  payment_index: number
+  receipt_number?: string | null
+  paid_at?: ApiDateTime | null
+  amount: number
+  currency: string
+  method?: PaymentMethod | string | null
+  reference?: string | null
+  note?: string | null
+  /** Paid in another currency: what was handed over, its tax and the rate. */
+  paid_currency?: string | null
+  paid_amount?: number | null
+  paid_fee_amount?: number | null
+  paid_tax_label?: string | null
+  paid_tax_percent?: number | null
+  paid_tax_amount?: number | null
+  paid_gateway_fee?: number | null
+  paid_gateway_fee_label?: string | null
+  exchange_rate?: number | null
+  /** The school as it heads the receipt, from School Settings. */
+  school?: {
+    name?: string | null
+    address?: string | null
+    phone?: string | null
+    email?: string | null
+    website?: string | null
+    logo_url?: string | null
+    /** The logo itself as a data: URI, so it is on the page when the receipt prints. */
+    logo_data?: string | null
+  } | null
+  lines: FeeReceiptLine[]
+  invoice_number?: string | null
+  /** The bills this payment settled. */
+  bill_numbers?: string[] | null
+  invoice_total: number
+  /** What was still owed straight after this payment. */
+  balance_after: number
+  /** What is owed today, for a reprint long after the fact. */
+  balance_now: number
+  academic_year_name?: string | null
+  student_id: number
+  student_name?: string | null
+  admission_number?: string | null
+  roll_number?: string | null
+  class_name?: string | null
+  guardian_name?: string | null
+  guardian_phone?: string | null
+  recorded_by_name?: string | null
+}
+
 /**
  * Named `Fee`-prefixed because `tuition.types` already exports a
  * `PaymentRecord` with a different shape for the tuition biller.
@@ -950,13 +1155,38 @@ export interface FeePaymentRecord {
   paid_at?: ApiDateTime | null
   /** Apply to one instalment; omit to settle oldest-first. */
   instalment_label?: string | null
+  /** The fees ticked and how much goes to each; overrides `instalment_label`. */
+  allocations?: PaymentAllocation[] | null
+  /** Paid in this currency (e.g. AED); `amount` stays in the bill's currency. */
+  currency?: string | null
   note?: string | null
+}
+
+/** What is collected, in the payer's currency, to settle an amount of the bill. */
+export interface PaymentQuote {
+  base_currency: string
+  base_amount: number
+  currency: string
+  symbol?: string | null
+  exchange_rate: number
+  fee_amount: number
+  tax_label?: string | null
+  tax_percent: number
+  tax_amount: number
+  convenience_amount: number
+  /** Online only: the payment gateway's fee, passed on to the payer. */
+  gateway_fee_label?: string | null
+  gateway_fee_percent?: number
+  gateway_fee?: number
+  total: number
+  rate_status?: string | null
+  rate_fetched_at?: string | null
 }
 
 /**
  * `POST /admin/finance/students/{id}/collect` — the counter's one step. A
- * payment against a STUDENT: the year's invoice is built and issued first if
- * they have not been billed, then the money is recorded on it.
+ * payment against a STUDENT's issued bill for the year; refused before the
+ * office has issued it.
  */
 export interface FeeCollectRequest extends FeePaymentRecord {
   /** Defaults to the current year. */
@@ -968,7 +1198,7 @@ export interface FeeCollectRequest extends FeePaymentRecord {
 /** Where a student's bill stands. OVERDUE is derived: an unsettled invoice past a due date. */
 export type FeeRollStatus = 'NOT_BILLED' | 'DRAFT' | 'ISSUED' | 'PARTIALLY_PAID' | 'PAID' | 'OVERDUE'
 
-export type FeeReportView = 'students' | 'dues' | 'collections'
+export type FeeReportView = 'students' | 'dues' | 'collections' | 'transactions'
 
 /** Amounts still owing, bucketed by how long past due. Not-billed students sit in `not_due`. */
 export interface FeeAgeing {
@@ -1127,7 +1357,12 @@ export interface FeeCollectionRow {
   source: 'INVOICE' | 'OPENING_BALANCE'
   receipt_id?: number | null
   invoice_id: string
+  /** Its place in the invoice's payments: what opens its receipt. Null for older entries. */
+  payment_index?: number | null
   invoice_number?: string | null
+  /** The bills the payment settled. */
+  bill_numbers?: string[]
+  receipt_number?: string | null
   academic_year_id?: number | null
   student_id: number
   student_name?: string | null
@@ -1136,6 +1371,87 @@ export interface FeeCollectionRow {
   class_name?: string | null
   recorded_by?: number | null
   recorded_by_name?: string | null
+  /**
+   * What the payer handed over beside the fees, frozen when the payment was
+   * taken. Equal to `amount` / `currency` when it was paid exactly as billed.
+   */
+  paid_currency: string
+  paid_amount: number
+  /** The fees part of `paid_amount`, in `paid_currency`. */
+  paid_fee_amount: number
+  tax_label?: string | null
+  tax_percent?: number | null
+  tax_amount: number
+  /** The gateway's fee and any convenience charge, added on top. */
+  charges_amount: number
+  charges_label?: string | null
+  exchange_rate?: number | null
+}
+
+/**
+ * RECEIVED: money in. The rest are online payments that did not end in money:
+ * FAILED, still IN_PROGRESS, or ABANDONED once nobody is asking Razorpay about
+ * them any more.
+ */
+export type FeeTransactionStatus =
+  | 'RECEIVED'
+  | 'IN_PROGRESS'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'ABANDONED'
+  | 'REFUNDED'
+
+/** One row of GET /admin/finance/reports/transactions. */
+export interface FeeTransactionRow extends Omit<FeeCollectionRow, 'heads' | 'instalments_settled'> {
+  status: FeeTransactionStatus
+  /** COUNTER: taken by the office. ONLINE: through the gateway. PAST: from before this system. */
+  channel: 'COUNTER' | 'ONLINE' | 'PAST'
+  /** The fees it was for. */
+  against?: string | null
+  provider?: string | null
+  order_id?: string | null
+  /** How an online payment was made: upi, card, netbanking, wallet. */
+  paid_by?: string | null
+  /** What Razorpay kept, GST included. Null when it is not known. */
+  razorpay_fee?: number | null
+  razorpay_tax?: number | null
+  /** `paid_amount` less what Razorpay kept. */
+  net_amount?: number | null
+  /** Credited by the safety net (webhook or recovery check), not the payer's page. */
+  recovered: boolean
+  failure_reason?: string | null
+}
+
+/** Received money in one currency. Rupees and dirhams are never added together. */
+export interface FeeTransactionTotals {
+  currency: string
+  count: number
+  fees: number
+  tax: number
+  charges: number
+  total: number
+  razorpay_fee: number
+  /** Online payments settled before Razorpay's own fee was recorded. */
+  razorpay_fee_unknown: number
+  net: number
+}
+
+/** GET /admin/finance/reports/transactions. */
+export interface FeeTransactionsReport {
+  from_date: ApiDate
+  to_date: ApiDate
+  academic_year_id?: number | null
+  class_id?: number | null
+  method?: string | null
+  status?: FeeTransactionStatus | null
+  currency: string
+  summary: {
+    counts: Record<FeeTransactionStatus, number>
+    /** Credited to bills, in the bills' currency. */
+    credited: number
+    by_currency: FeeTransactionTotals[]
+  }
+  rows: FeeTransactionRow[]
 }
 
 /** GET /admin/finance/reports/collections. */
@@ -1173,6 +1489,9 @@ export interface WaiveInstalmentRequest {
 export interface PaymentIntentCreate {
   amount: number
   instalment_label?: string | null
+  allocations?: PaymentAllocation[] | null
+  /** Pay in this currency (e.g. AED); `amount` stays in the bill's currency. */
+  currency?: string | null
   /** What the payer chose. Offline methods make the intent a reference to quote. */
   method?: GatewayMethod | null
 }
@@ -1190,7 +1509,12 @@ export interface PaymentIntentOut {
   checkout_url?: string | null
   idempotency_key?: string | null
   instalment_label?: string | null
+  allocations?: PaymentAllocation[] | null
   requested_method?: GatewayMethod | string | null
+  /** Set when the payment goes through Razorpay: open Checkout with it. */
+  checkout?: RazorpayCheckout | null
+  /** What is actually charged, in the payer's currency. */
+  charge?: PaymentQuote | null
   /** LMS or TUITION — which biller the invoice belongs to. */
   program?: string | null
   invoice_number?: string | null
@@ -1893,6 +2217,25 @@ export interface LeaveApply {
   reason?: string | null
   contact_during_leave?: string | null
   attachments?: LeaveAttachment[]
+  /** The classes that need a substitute, each with the teacher the applicant chose. */
+  cover_plan?: CoverPlanItem[]
+}
+
+/** One class a leave takes away, and who covers it. Applied to the leave's days on approval. */
+export interface CoverPlanItem {
+  timetable_entry_id: number
+  substitute_teacher_id: number | null
+  /** Filled in on the way out. */
+  substitute_teacher_name?: string | null
+}
+
+/** A period of an approved leave's plan that could not be covered, and why. */
+export interface CoverGap {
+  date: ApiDate
+  class_name?: string | null
+  subject_name?: string | null
+  start_time?: string | null
+  reason: string
 }
 
 export interface LeaveDecision {
@@ -1906,6 +2249,7 @@ export interface LeaveDecision {
 /** What the applicant was timetabled to take, snapshotted at application time. */
 export interface AffectedPeriod {
   date: ApiDate
+  timetable_entry_id?: number | null
   class_id?: number | null
   class_name?: string | null
   subject_name?: string | null
@@ -1916,6 +2260,10 @@ export interface AffectedPeriod {
 export interface LeaveRequestOut {
   id: number
   teacher_id: number
+  /** Timetable periods (by entry id) marked as needing a substitute. */
+  cover_entry_ids?: number[]
+  cover_plan?: CoverPlanItem[]
+  cover_gaps?: CoverGap[]
   teacher_name?: string | null
   employee_id?: string | null
   leave_type: LeaveType

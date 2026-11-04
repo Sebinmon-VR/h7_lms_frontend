@@ -1,4 +1,6 @@
 import {
+  BookOpen,
+  ChevronRight,
   Clock,
   Lock,
   Mail,
@@ -10,6 +12,7 @@ import {
   Ticket,
 } from 'lucide-react'
 import * as React from 'react'
+import { Link } from 'react-router-dom'
 
 import type {
   SupportContactOut,
@@ -517,6 +520,21 @@ export default function SupportPage() {
           ) : undefined
         }
       />
+
+      {/* Most questions are answered in the guide; it is one press away before anyone writes in. */}
+      <Link
+        to="/guide"
+        className="mb-5 flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 p-4 transition-colors hover:bg-primary/10"
+      >
+        <BookOpen className="size-5 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">User Guide</p>
+          <p className="text-xs text-muted-foreground">
+            Step-by-step help for every part of the LMS, with videos. Try it before raising a ticket.
+          </p>
+        </div>
+        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+      </Link>
 
       {isAdmin && queue.data && (
         <div className="mb-5 grid gap-3 sm:grid-cols-4">

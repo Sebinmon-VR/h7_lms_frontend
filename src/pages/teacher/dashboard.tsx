@@ -13,6 +13,8 @@ import {
 import * as React from 'react'
 import { Link } from 'react-router-dom'
 
+import { TeacherExamsToday } from '@/components/domain/teacher-exams-today'
+
 import type { ClassRoomAccessOut, PendingTopicOut, ScheduledPeriod } from '@/api/types'
 import { useAuth } from '@/providers/auth-provider'
 import { useMyClassRooms } from '@/queries/classes.queries'
@@ -342,6 +344,8 @@ export default function TeacherDashboardPage() {
 
   return (
     <>
+      {!isAdmin && <TeacherExamsToday examPath={(id) => `/teacher/exams/${id}`} />}
+
       <HeroHeader
         eyebrow="Teaching"
         title={`${greeting()}, ${user?.full_name?.trim().split(/\s+/)[0] ?? 'there'}`}

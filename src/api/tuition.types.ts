@@ -1413,6 +1413,8 @@ export interface ProgramSettingsUpdate {
   school_contact_phone?: string | null
   school_address?: string | null
   school_website_url?: string | null
+  /** Office addresses emailed when a fee payment is received, comma-separated. */
+  fee_alert_emails?: string | null
   school_logo_url?: string | null
   web_app_url?: string | null
   mobile_app_url?: string | null

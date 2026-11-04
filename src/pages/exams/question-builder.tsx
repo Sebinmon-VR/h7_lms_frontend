@@ -751,7 +751,7 @@ export function QuestionBuilder({
           title={exam.mode === 'OFFLINE' ? 'No question form' : 'No questions yet'}
           description={
             exam.mode === 'OFFLINE'
-              ? 'An offline exam can run entirely from an uploaded question paper. Add questions here only if you want students to answer a form as well.'
+              ? 'An Upload paper exam can run entirely from its uploaded question paper. Add questions here only if you want students to answer a form as well.'
               : 'Add the first question. Objective questions with a key are marked automatically when a script is handed in.'
           }
           action={

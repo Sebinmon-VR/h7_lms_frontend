@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  ClipboardPen,
   Eye,
   EyeOff,
   FileBadge,
@@ -20,6 +21,7 @@ import {
   useDeleteReportCard,
   useExams,
   useGenerateReportCards,
+  usePaperMarks,
   useReportCard,
   useReportCards,
   useUpdateReportCard,
@@ -46,7 +48,7 @@ import { Input, Textarea } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
-import { PrintReportCardButton, ReportCardTile, ReportCardView } from '@/components/domain/report-card'
+import { PrintReportCardButton, ReportCardTile, ReportCardView, withRowTotals } from '@/components/domain/report-card'
 import { EmptyState, ErrorState, NoResults } from '@/components/feedback/states'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field } from '@/components/forms/field'
@@ -86,6 +88,7 @@ function GenerateDialog({
   onOpenChange: (open: boolean) => void
   onDone: (batch: ReportCardBatch) => void
 }) {
+  const scope = useExamScope()
   const catalogue = useExamCatalogue()
   const examsQuery = useExams(open)
   const generate = useGenerateReportCards()
@@ -109,6 +112,17 @@ function GenerateDialog({
     if (catalogue.leadableClasses.length === 1) setClassId(String(catalogue.leadableClasses[0].id))
     setTitle((t) => t || `Term Report Card ${new Date().getFullYear()}`)
   }, [open, catalogue.leadableClasses])
+
+  // Paper exams count by the date they were written, whatever the published-only rule says:
+  // there is no release step for them, the card is how they reach the student.
+  const paperQuery = usePaperMarks(open && classId ? Number(classId) : null)
+  const paperExams = React.useMemo(
+    () =>
+      (paperQuery.data?.sheets ?? []).filter(
+        (s) => s.conducted_on && (!fromDate || s.conducted_on >= fromDate) && (!toDate || s.conducted_on <= toDate),
+      ),
+    [paperQuery.data, fromDate, toDate],
+  )
 
   // What the request would count, so a card with nothing on it is caught before the round trip.
   const candidateExams = React.useMemo(() => {
@@ -192,23 +206,48 @@ function GenerateDialog({
             </Field>
           </div>
 
-          {classId && !examsQuery.isPending && (
+          {classId && !examsQuery.isPending && !paperQuery.isPending && (
             <div
               className={cn(
                 'flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-xs',
-                candidateExams.length === 0 ? 'border-danger/30 bg-danger/8 text-danger' : 'border-border bg-surface text-muted-foreground',
+                candidateExams.length + paperExams.length === 0
+                  ? 'border-danger/30 bg-danger/8 text-danger'
+                  : 'border-border bg-surface text-muted-foreground',
               )}
             >
-              {candidateExams.length === 0 ? <TriangleAlert className="mt-0.5 size-3.5 shrink-0" /> : <Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary" />}
+              {candidateExams.length + paperExams.length === 0 ? (
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+              ) : (
+                <Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary" />
+              )}
               <span>
-                {candidateExams.length === 0
-                  ? publishedOnly
-                    ? 'No exams in this class have published results in that period, so every card would be empty. Publish results first, or turn off the published-only rule to preview.'
-                    : 'No exams in this class fall in that period.'
-                  : `${candidateExams.length} exam${candidateExams.length === 1 ? '' : 's'} will be counted: ${candidateExams
-                      .slice(0, 4)
-                      .map((e) => e.title)
-                      .join(', ')}${candidateExams.length > 4 ? '…' : ''}`}
+                {candidateExams.length + paperExams.length === 0 ? (
+                  <>
+                    {publishedOnly
+                      ? 'No exams in this class have published results in that period, and no offline exam marks have been entered for it, so every card would be empty. '
+                      : 'No exams in this class fall in that period. '}
+                    For an exam held offline, enter the marks under{' '}
+                    <Link to={`${scope.paperMarksPath}?class=${classId}`} className="font-medium underline">
+                      Offline exam marks
+                    </Link>{' '}
+                    first.
+                  </>
+                ) : (
+                  [
+                    candidateExams.length > 0 &&
+                      `${candidateExams.length} exam${candidateExams.length === 1 ? '' : 's'} held in the LMS: ${candidateExams
+                        .slice(0, 4)
+                        .map((e) => e.title)
+                        .join(', ')}${candidateExams.length > 4 ? '…' : ''}.`,
+                    paperExams.length > 0 &&
+                      `${paperExams.length} held offline: ${paperExams
+                        .slice(0, 4)
+                        .map((s) => s.exam_name)
+                        .join(', ')}${paperExams.length > 4 ? '…' : ''}.`,
+                  ]
+                    .filter(Boolean)
+                    .join(' ') + ' These will be counted.'
+                )}
               </span>
             </div>
           )}
@@ -312,11 +351,29 @@ export default function ReportCardsPage() {
             : 'Consolidated results for the classes you lead, one card per student.'
         }
         actions={
-          <Button variant="primary" icon={<Plus />} disabled={!canIssue || catalogue.isPending} onClick={() => setGenerating(true)}>
-            Issue report cards
-          </Button>
+          <>
+            {canIssue && (
+              <Button asChild variant="outline">
+                <Link to={scope.paperMarksPath}>
+                  <ClipboardPen className="size-4" />
+                  Offline exam marks
+                </Link>
+              </Button>
+            )}
+            <Button variant="primary" icon={<Plus />} disabled={!canIssue || catalogue.isPending} onClick={() => setGenerating(true)}>
+              Issue report cards
+            </Button>
+          </>
         }
       />
+
+      {canIssue && (
+        <p className="mb-5 rounded-md border border-border bg-card px-4 py-2.5 text-sm text-muted-foreground">
+          Exam held offline, not in the LMS? Enter its marks under{' '}
+          <span className="font-medium text-foreground">Offline exam marks</span> first, then issue the report cards. Exams held
+          in the LMS are counted on their own once their results are published.
+        </p>
+      )}
 
       {!catalogue.isPending && !canIssue && !scope.isAdmin && (
         <div className="mb-5 flex items-start gap-3 rounded-xl border border-info/30 bg-info/8 p-4 text-sm">
@@ -359,7 +416,7 @@ export default function ReportCardsPage() {
           title="No report cards yet"
           description={
             canIssue
-              ? 'Issue the first set once some exam results have been published. Cards start unreleased so you can read them first.'
+              ? 'Issue the first set once exam results are published, or once the marks for an offline exam are entered. Cards start unreleased so you can read them first.'
               : 'Report cards for the classes you lead will appear here once they are issued.'
           }
           action={
@@ -410,7 +467,7 @@ export default function ReportCardsPage() {
             grouped.map(([key, list]) => {
               const first = list[0]
               const released = list.filter((c) => c.is_published).length
-              const average = list.reduce((sum, c) => sum + c.overall_percentage, 0) / list.length
+              const average = list.reduce((sum, c) => sum + withRowTotals(c).overall_percentage, 0) / list.length
               return (
                 <section key={key}>
                   <div className="mb-2.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -494,7 +551,7 @@ function RemarksDialog({
       <DialogContent size="md">
         <DialogHeader>
           <DialogTitle>Remarks</DialogTitle>
-          <DialogDescription>The marks are a snapshot and cannot be edited here. Correct the script and re-issue the card instead.</DialogDescription>
+          <DialogDescription>The marks are a snapshot and cannot be edited here. Correct the marks (the exam script, or the offline exam marks) and re-issue the card instead.</DialogDescription>
         </DialogHeader>
         <DialogBody className="space-y-5">
           <Field id="rc-edit-title" label="Title">

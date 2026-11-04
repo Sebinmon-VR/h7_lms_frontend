@@ -5,7 +5,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMyReportCard, useMyReportCards } from '@/queries/exam.queries'
 import { formatPercent } from '@/lib/format'
 import { Skeleton } from '@/components/ui/skeleton'
-import { PrintReportCardButton, ReportCardTile, ReportCardView } from '@/components/domain/report-card'
+import { PrintReportCardButton, ReportCardTile, ReportCardView, withRowTotals } from '@/components/domain/report-card'
 import { Appear, Stagger } from '@/components/fun/motion'
 import { FunEmpty, FunPageHeader, FunStat } from '@/components/fun/fun-ui'
 import { ErrorState } from '@/components/feedback/states'
@@ -71,9 +71,9 @@ export default function StudentReportCardsPage() {
         <div className="space-y-5">
           {latest && (
             <div className="grid gap-3 sm:grid-cols-3">
-              <FunStat value={formatPercent(latest.overall_percentage, 0)} label="Latest overall" hint={latest.title} emoji="⭐" tone={3} />
+              <FunStat value={withRowTotals(latest).exams_counted > 0 ? formatPercent(withRowTotals(latest).overall_percentage, 0) : '—'} label="Latest overall" hint={latest.title} emoji="⭐" tone={3} />
               <FunStat
-                value={latest.overall_grade ?? '—'}
+                value={withRowTotals(latest).overall_grade ?? '—'}
                 label="Latest grade"
                 hint={latest.overall_grade ? 'Across every subject' : 'No letter grade on this card'}
                 emoji="🏅"

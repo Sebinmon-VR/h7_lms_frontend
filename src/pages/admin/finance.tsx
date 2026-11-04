@@ -10,6 +10,7 @@ import {
   Pencil,
   Percent,
   Plus,
+  ListChecks,
   Receipt,
   Settings2,
   Trash2,
@@ -100,6 +101,7 @@ import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { PageHeader } from '@/components/layout/page-header'
 import { FinanceInvoicesTab } from './finance-invoices'
 import { FinanceReportsTab } from './finance-reports'
+import { FinanceBulkTab } from './finance-bulk'
 import { FinanceCurrenciesTab } from './finance-currencies'
 
 /**
@@ -1932,6 +1934,10 @@ export default function AdminFinancePage() {
             <Receipt className="size-4" />
             Invoices
           </TabsTrigger>
+          <TabsTrigger value="bulk">
+            <ListChecks className="size-4" />
+            Bulk billing
+          </TabsTrigger>
           <TabsTrigger value="reports">
             <BarChart3 className="size-4" />
             Reports
@@ -1964,6 +1970,9 @@ export default function AdminFinancePage() {
 
         <TabsContent value="invoices">
           <FinanceInvoicesTab academicYearId={academicYearId} />
+        </TabsContent>
+        <TabsContent value="bulk">
+          <FinanceBulkTab academicYearId={academicYearId} />
         </TabsContent>
         <TabsContent value="reports">
           <FinanceReportsTab

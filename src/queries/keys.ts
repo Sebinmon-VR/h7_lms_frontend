@@ -156,9 +156,9 @@ export const qk = {
     root: ['student'] as const,
     myClasses: () => ['student', 'my-classes'] as const,
     attendance: () => ['student', 'attendance'] as const,
-    topics: () => ['student', 'topics'] as const,
+    topics: (classId?: number) => ['student', 'topics', classId ?? 'all'] as const,
     meetings: () => ['student', 'meetings'] as const,
-    materials: () => ['student', 'materials'] as const,
+    materials: (classId?: number) => ['student', 'materials', classId ?? 'all'] as const,
     grades: () => ['student', 'grades'] as const,
     timetable: () => ['student', 'timetable'] as const,
     timetableDay: (onDate?: string) => ['student', 'timetable', 'day', onDate ?? 'today'] as const,
@@ -190,6 +190,7 @@ export const qk = {
       ['exams', 'submissions', examId, studentId] as const,
     reportCards: () => ['exams', 'report-cards'] as const,
     reportCard: (cardId: string) => ['exams', 'report-cards', cardId] as const,
+    paperMarks: (classId: number) => ['exams', 'paper-marks', classId] as const,
   },
   /**
    * The online tuition product.
@@ -496,6 +497,8 @@ export const qk = {
     invoicesRoot: () => ['finance', 'invoices'] as const,
     invoice: (invoiceId: string) => ['finance', 'invoice', invoiceId] as const,
     intents: (invoiceId: string) => ['finance', 'invoice', invoiceId, 'intents'] as const,
+    receipt: (invoiceId: string, index: number) =>
+      ['finance', 'invoice', invoiceId, 'receipt', index] as const,
 
     /** The signed-in student's own fees. */
     myFees: (program: Program, currency?: string) =>
@@ -509,6 +512,15 @@ export const qk = {
       ['finance', 'reports', 'students', academicYearId ?? 'current', classId ?? 'ALL', status ?? 'ALL'] as const,
     reportDues: (academicYearId?: number, classId?: number) =>
       ['finance', 'reports', 'dues', academicYearId ?? 'current', classId ?? 'ALL'] as const,
+    /** One bulk billing run (or preview), polled until it finishes. */
+    bulkBilling: (jobId: string) => ['finance', 'bulk-billing', jobId] as const,
+    reportTransactions: (
+      from: string, to: string, academicYearId?: number, classId?: number, method?: string, status?: string,
+    ) =>
+      [
+        'finance', 'reports', 'transactions', from, to,
+        academicYearId ?? 'ALL', classId ?? 'ALL', method ?? 'ALL', status ?? 'ALL',
+      ] as const,
     reportCollections: (
       from: string, to: string, academicYearId?: number, classId?: number, method?: string, headId?: number,
     ) =>
@@ -585,9 +597,14 @@ export const qk = {
     submissionsRoot: () => ['homework', 'submissions'] as const,
   },
 
+  cover: {
+    root: ['cover'] as const,
+    day: (day: string, scope: 'admin' | 'mine') => ['cover', 'day', scope, day] as const,
+  },
   leave: {
     root: ['leave'] as const,
     mine: (status?: string) => ['leave', 'mine', status ?? 'ALL'] as const,
+    affected: (start: string, end: string) => ['leave', 'affected', start, end] as const,
     mineRoot: () => ['leave', 'mine'] as const,
     myBalance: (academicYearId?: number) =>
       ['leave', 'my-balance', academicYearId ?? 'current'] as const,

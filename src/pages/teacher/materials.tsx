@@ -63,6 +63,8 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { FreeformBadge } from '@/components/domain/badges'
+import { ClassChips } from '@/components/domain/class-chips'
+import { CourseTabs } from '@/components/domain/course-tabs'
 import { FileTypeIcon } from '@/components/domain/file-type-icon'
 import { LinkSourceField, LinkTypeIcon, YouTubePreview } from '@/components/domain/link-preview'
 import { FiledBy } from '@/components/domain/filed-by'
@@ -745,6 +747,7 @@ export default function TeacherMaterialsPage() {
   const [deleting, setDeleting] = React.useState<StudyMaterialOut | null>(null)
   const [keepFile, setKeepFile] = React.useState(false)
   const [view, setView] = React.useState<'grid' | 'list'>('grid')
+  const [classFilter, setClassFilter] = React.useState<string | null>(null)
   const [subjectFilter, setSubjectFilter] = React.useState<string | null>(null)
 
   // Default back to a full delete every time the dialog opens; leaving an
@@ -759,15 +762,27 @@ export default function TeacherMaterialsPage() {
     [materialsQuery.data],
   )
 
-  const subjectOptions = React.useMemo(() => {
+  const classOptions = React.useMemo(() => {
     const map = new Map<string, string>()
-    for (const m of materials) map.set(String(m.subject_id), subjectName(m))
+    for (const m of materials) map.set(String(m.class_id), m.class_room?.name ?? `Class ${m.class_id}`)
     return [...map.entries()].map(([value, label]) => ({ value, label }))
   }, [materials])
 
+  /** One class's materials at a time; the subject chips then cover only that class. */
+  const inClass = React.useMemo(
+    () => (classFilter ? materials.filter((m) => String(m.class_id) === classFilter) : materials),
+    [materials, classFilter],
+  )
+
+  const subjectOptions = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const m of inClass) map.set(String(m.subject_id), subjectName(m))
+    return [...map.entries()].map(([value, label]) => ({ value, label }))
+  }, [inClass])
+
   const filtered = React.useMemo(
-    () => (subjectFilter ? materials.filter((m) => String(m.subject_id) === subjectFilter) : materials),
-    [materials, subjectFilter],
+    () => (subjectFilter ? inClass.filter((m) => String(m.subject_id) === subjectFilter) : inClass),
+    [inClass, subjectFilter],
   )
 
   if (isAdmin) {
@@ -782,7 +797,7 @@ export default function TeacherMaterialsPage() {
   return (
     <>
       <PageHeader
-        title="Materials"
+        title="Lessons & Materials"
         description="Notes, books, worksheets and links shared with your classes."
         actions={
           <>
@@ -806,6 +821,18 @@ export default function TeacherMaterialsPage() {
           </>
         }
       >
+        {classOptions.length > 1 && (
+          <ClassChips
+            allowAll
+            label="Class"
+            options={classOptions}
+            value={classFilter}
+            onChange={(value) => {
+              setClassFilter(value)
+              setSubjectFilter(null)
+            }}
+          />
+        )}
         {subjectOptions.length > 1 && (
           <div className="flex flex-wrap gap-2">
             <button
@@ -838,6 +865,8 @@ export default function TeacherMaterialsPage() {
           </div>
         )}
       </PageHeader>
+
+      <CourseTabs active="materials" lessonsTo="/teacher/topics" materialsTo="/teacher/materials" />
 
       <QueryBoundary
         query={materialsQuery}

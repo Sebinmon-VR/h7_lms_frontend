@@ -8,7 +8,15 @@ import {
 } from 'lucide-react'
 import * as React from 'react'
 
-import type { LeaveDayPart, LeaveRequestOut, LeaveStatus, LeaveType } from '@/api/types'
+import type {
+  AffectedPeriod,
+  TeacherSummaryOut,
+  LeaveDayPart,
+  LeaveRequestOut,
+  LeaveStatus,
+  LeaveType,
+  ScheduledPeriod,
+} from '@/api/types'
 import {
   useApplyForLeave,
   useDecideLeave,
@@ -18,7 +26,9 @@ import {
   useMyLeaveBalance,
   useWithdrawLeave,
 } from '@/queries/academics.queries'
-import { useTeachingStaff } from '@/queries/admin.queries'
+import { useCoverDay, useCoverMutations, useCoverStaff } from '@/queries/cover.queries'
+import { useAffectedPeriods } from '@/queries/academics.queries'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useAuth } from '@/providers/auth-provider'
 import { formatDate, todayApiDate } from '@/lib/datetime'
 import { countLabel } from '@/lib/format'
@@ -44,7 +54,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
   DialogBody,
@@ -73,6 +82,111 @@ import { PageHeader } from '@/components/layout/page-header'
 
 // =================================================================== applying
 
+/**
+ * The classes this leave takes away, one row each. Ticked rows need a substitute, and the
+ * applicant can choose who takes each one. The choice applies to the leave's own days once it
+ * is approved; until then the timetable is unchanged.
+ */
+function CoverClasses({
+  periods,
+  loading,
+  value,
+  onChange,
+  substitutes,
+  onSubstituteChange,
+  staff,
+  selfId,
+}: {
+  periods: AffectedPeriod[]
+  loading: boolean
+  value: number[]
+  onChange: (ids: number[]) => void
+  substitutes: Record<number, string>
+  onSubstituteChange: (entryId: number, teacherId: string) => void
+  staff: TeacherSummaryOut[]
+  selfId: number | undefined
+}) {
+  const groups = React.useMemo(() => {
+    const map = new Map<number, { id: number; label: string; count: number }>()
+    for (const period of periods) {
+      if (period.timetable_entry_id == null) continue
+      const existing = map.get(period.timetable_entry_id)
+      if (existing) {
+        existing.count += 1
+      } else {
+        map.set(period.timetable_entry_id, {
+          id: period.timetable_entry_id,
+          label: `${period.class_name ?? 'Class'} · ${period.subject_name ?? 'Period'}`,
+          count: 1,
+        })
+      }
+    }
+    return [...map.values()]
+  }, [periods])
+
+  const options = staff.filter((t) => t.id !== selfId)
+
+  if (loading) return <Skeleton className="h-16 w-full rounded-xl" />
+  if (groups.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        You have no periods on these dates, so there is nothing to cover.
+      </p>
+    )
+  }
+
+  return (
+    <fieldset className="space-y-2">
+      <legend className="text-sm font-medium">Classes that need a substitute</legend>
+      <p className="text-xs text-muted-foreground">
+        Choose who takes each class while you are away. Untick a class that needs no cover. The
+        substitute takes over only on your leave days, once the leave is approved.
+      </p>
+      {groups.map((group) => {
+        const ticked = value.includes(group.id)
+        return (
+          <div
+            key={group.id}
+            className="flex flex-col gap-3 rounded-lg border border-border p-3 text-sm sm:flex-row sm:items-center"
+          >
+            <label className="flex flex-1 items-center gap-3">
+              <Checkbox
+                checked={ticked}
+                onCheckedChange={(checked) =>
+                  onChange(
+                    checked === true
+                      ? [...value, group.id]
+                      : value.filter((id) => id !== group.id),
+                  )
+                }
+              />
+              <span className="flex-1">{group.label}</span>
+              <span className="text-xs text-muted-foreground">{countLabel(group.count, 'period')}</span>
+            </label>
+            {ticked && (
+              <Select
+                value={substitutes[group.id] || undefined}
+                onValueChange={(v) => onSubstituteChange(group.id, v)}
+              >
+                <SelectTrigger className="sm:w-52" aria-label={`Who covers ${group.label}`}>
+                  <SelectValue placeholder="Choose substitute" />
+                </SelectTrigger>
+                <SelectContent>
+                  {options.map((teacher) => (
+                    <SelectItem key={teacher.id} value={String(teacher.id)}>
+                      {teacher.full_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+        )
+      })}
+    </fieldset>
+  )
+}
+
 function ApplyDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const apply = useApplyForLeave()
   const [leaveType, setLeaveType] = React.useState<LeaveType>('CASUAL')
@@ -81,7 +195,11 @@ function ApplyDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: 
   const [endDate, setEndDate] = React.useState(todayApiDate())
   const [reason, setReason] = React.useState('')
   const [contact, setContact] = React.useState('')
+  const [coverIds, setCoverIds] = React.useState<number[]>([])
+  const [substitutes, setSubstitutes] = React.useState<Record<number, string>>({})
   const [error, setError] = React.useState<string | null>(null)
+  const { role, user } = useAuth()
+  const { staff } = useCoverStaff(role === 'ADMIN')
 
   React.useEffect(() => {
     if (!open) return
@@ -91,6 +209,8 @@ function ApplyDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: 
     setEndDate(todayApiDate())
     setReason('')
     setContact('')
+    setCoverIds([])
+    setSubstitutes({})
     setError(null)
   }, [open])
 
@@ -103,6 +223,17 @@ function ApplyDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: 
   React.useEffect(() => {
     if (halfDay) setEndDate(startDate)
   }, [halfDay, startDate])
+
+  // Every class the teacher has in these dates starts ticked; they untick what needs no cover.
+  const coverEnd = halfDay ? startDate : endDate
+  const affected = useAffectedPeriods(startDate, coverEnd, open)
+  React.useEffect(() => {
+    const ids = new Set<number>()
+    for (const period of affected.data ?? []) {
+      if (period.timetable_entry_id != null) ids.add(period.timetable_entry_id)
+    }
+    setCoverIds([...ids])
+  }, [affected.data])
 
   const submit = async () => {
     if (endDate < startDate) {
@@ -118,6 +249,10 @@ function ApplyDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: 
         day_part: dayPart,
         reason: reason.trim() || null,
         contact_during_leave: contact.trim() || null,
+        cover_plan: coverIds.map((id) => ({
+          timetable_entry_id: id,
+          substitute_teacher_id: substitutes[id] ? Number(substitutes[id]) : null,
+        })),
       })
       onOpenChange(false)
     } catch (err) {
@@ -213,6 +348,19 @@ function ApplyDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: 
               onChange={(e) => setContact(e.target.value)}
             />
           </Field>
+
+          <CoverClasses
+            periods={affected.data ?? []}
+            loading={affected.isPending && !!startDate}
+            value={coverIds}
+            onChange={setCoverIds}
+            substitutes={substitutes}
+            onSubstituteChange={(entryId, teacherId) =>
+              setSubstitutes((prev) => ({ ...prev, [entryId]: teacherId }))
+            }
+            staff={staff}
+            selfId={user?.id}
+          />
         </DialogBody>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -298,11 +446,39 @@ function RequestCard({
             </p>
           )}
 
-          {request.substitute_teacher_name && (
-            <p className="mt-2 flex items-center gap-1.5 text-xs text-success">
-              <UserCheck className="size-3.5" />
-              {request.substitute_teacher_name} is covering
-            </p>
+          {(request.cover_plan?.length ?? 0) > 0 && (
+            <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+              {request.cover_plan!.map((item) => {
+                const period = request.affected_periods.find(
+                  (p) => p.timetable_entry_id === item.timetable_entry_id,
+                )
+                const label = `${period?.class_name ?? 'Class'} · ${period?.subject_name ?? 'Period'}`
+                return (
+                  <li key={item.timetable_entry_id} className="flex items-center gap-1.5">
+                    <UserCheck className="size-3.5" />
+                    {label}:{' '}
+                    {item.substitute_teacher_name ? (
+                      <span className="font-medium text-foreground">{item.substitute_teacher_name}</span>
+                    ) : (
+                      'nobody chosen yet'
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+
+          {(request.cover_gaps?.length ?? 0) > 0 && (
+            <div className="mt-2 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2 text-xs">
+              <p className="font-medium">Still needs a substitute:</p>
+              <ul className="mt-1 space-y-0.5 text-muted-foreground">
+                {request.cover_gaps!.map((gap, i) => (
+                  <li key={i}>
+                    {formatDate(gap.date)} · {gap.class_name ?? 'Class'} — {gap.reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
 
@@ -326,14 +502,11 @@ function DecideDialog({
   onClose: () => void
 }) {
   const decide = useDecideLeave()
-  const staff = useTeachingStaff(!!request && approve)
   const [note, setNote] = React.useState('')
-  const [substitute, setSubstitute] = React.useState('')
   const [error, setError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     setNote('')
-    setSubstitute('')
     setError(null)
   }, [request, approve])
 
@@ -352,7 +525,6 @@ function DecideDialog({
         body: {
           approve,
           note: note.trim() || null,
-          substitute_teacher_id: substitute ? Number(substitute) : null,
         },
       })
       onClose()
@@ -360,8 +532,6 @@ function DecideDialog({
       setError((err as { message?: string })?.message ?? 'Could not record the decision.')
     }
   }
-
-  const uncovered = (request?.affected_periods.length ?? 0) > 0 && !substitute
 
   return (
     <Dialog open={!!request} onOpenChange={(v) => !v && onClose()}>
@@ -379,40 +549,6 @@ function DecideDialog({
         </DialogHeader>
         <DialogBody className="space-y-5">
           <FormError message={error} />
-
-          {approve && (
-            <Field
-              id="substitute"
-              label="Who covers"
-              hint="Optional, but the periods stay uncovered without it."
-            >
-              <Select
-                value={substitute || 'NONE'}
-                onValueChange={(v) => setSubstitute(v === 'NONE' ? '' : v)}
-              >
-                <SelectTrigger id="substitute">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="NONE">Nobody yet</SelectItem>
-                  {(staff.data ?? [])
-                    .filter((t) => t.id !== request?.teacher_id)
-                    .map((teacher) => (
-                      <SelectItem key={teacher.id} value={String(teacher.id)}>
-                        {teacher.full_name}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          )}
-
-          {approve && uncovered && (
-            <p className="rounded-lg border border-warning/30 bg-warning/8 px-3 py-2 text-xs text-muted-foreground">
-              Nobody is named, so those periods will have no teacher. You can approve anyway
-              and name a substitute later.
-            </p>
-          )}
 
           <Field id="decision_note" label="Note" required={!approve}>
             <Textarea
@@ -646,12 +782,236 @@ function QueueTab() {
 }
 
 /** The daily cover sheet: who is away today, and what they were taking. */
-function CoverTab() {
-  const [day, setDay] = React.useState(todayApiDate())
-  const away = useLeaveOnDay(day)
+/** One period on the day: who has it, and whether a substitute takes it on this date. */
+function PeriodCoverRow({
+  period,
+  isAdmin,
+  onArrange,
+}: {
+  period: ScheduledPeriod
+  isAdmin: boolean
+  onArrange: (period: ScheduledPeriod) => void
+}) {
+  const { clear } = useCoverMutations(isAdmin)
+  const sub = period.entry.substitution
+  const originalName = sub?.original_teacher?.full_name ?? period.entry.teacher?.full_name ?? 'Nobody yet'
+  const coveredBy = sub?.substitute_teacher?.full_name
+  const className = period.entry.class_room?.name ?? 'Class'
+  const subjectName = period.entry.subject?.name ?? 'Period'
+  const time = new Date(period.starts_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-3 rounded-xl border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <p className="font-semibold">
+          {className} · {subjectName}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          {time} · {originalName}
+          {coveredBy ? (
+            <>
+              {' '}
+              → <span className="font-medium text-primary">{coveredBy} is covering</span>
+            </>
+          ) : null}
+        </p>
+      </div>
+
+      {sub ? (
+        <Button
+          variant="outline"
+          loading={clear.isPending}
+          onClick={() => clear.mutate({ entryId: period.entry.id, day: period.on_date })}
+        >
+          <Undo2 />
+          Take the cover back
+        </Button>
+      ) : (
+        <Button variant="outline" onClick={() => onArrange(period)}>
+          <UserCheck />
+          Arrange substitute
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The substitute form: one period, one date, one teacher. Separate from the leave form, because
+ * a substitute is not always for leave - a trip, a meeting, an exam duty. Only the chosen date
+ * changes; every other day keeps the usual timetable.
+ */
+function SubstituteDialog({
+  open,
+  onOpenChange,
+  isAdmin,
+  preset,
+}: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  isAdmin: boolean
+  preset: { day: string; entryId: number } | null
+}) {
+  const [day, setDay] = React.useState(todayApiDate())
+  const [entryId, setEntryId] = React.useState('')
+  const [substitute, setSubstitute] = React.useState('')
+  const [note, setNote] = React.useState('')
+  const [error, setError] = React.useState<string | null>(null)
+  const { assign } = useCoverMutations(isAdmin)
+  const { staff } = useCoverStaff(isAdmin)
+
+  React.useEffect(() => {
+    if (!open) return
+    setDay(preset?.day ?? todayApiDate())
+    setEntryId(preset ? String(preset.entryId) : '')
+    setSubstitute('')
+    setNote('')
+    setError(null)
+  }, [open, preset])
+
+  const periods = useCoverDay(day, isAdmin, open)
+  const openPeriods = (periods.data ?? []).filter((p) => !p.entry.substitution)
+  const chosen = openPeriods.find((p) => String(p.entry.id) === entryId)
+  const options = staff.filter((t) => t.id !== chosen?.entry.teacher_id)
+
+  const label = (p: ScheduledPeriod) => {
+    const time = new Date(p.starts_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    const parts = [time, p.entry.class_room?.name ?? 'Class', p.entry.subject?.name ?? 'Period']
+    if (isAdmin && p.entry.teacher?.full_name) parts.push(p.entry.teacher.full_name)
+    return parts.join(' · ')
+  }
+
+  const submit = async () => {
+    if (!chosen || !substitute) {
+      setError('Choose a period and the teacher who will take it.')
+      return
+    }
+    setError(null)
+    try {
+      await assign.mutateAsync({
+        timetable_entry_id: chosen.entry.id,
+        on_date: day,
+        substitute_teacher_id: Number(substitute),
+        note: note.trim() || null,
+      })
+      onOpenChange(false)
+    } catch (err) {
+      setError((err as { message?: string })?.message ?? 'Could not set the substitute.')
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Arrange a substitute</DialogTitle>
+          <DialogDescription>
+            Another teacher takes the period on this date only. Every other day keeps the usual
+            timetable, for the students and for you.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="space-y-5">
+          <FormError message={error} />
+
+          <Field id="sub_day" label="Date" required>
+            <Input
+              id="sub_day"
+              type="date"
+              className="max-w-xs"
+              value={day}
+              onChange={(e) => {
+                setDay(e.target.value)
+                setEntryId('')
+              }}
+            />
+          </Field>
+
+          <Field
+            id="sub_period"
+            label="Period"
+            required
+            hint={
+              !periods.isPending && openPeriods.length === 0
+                ? isAdmin
+                  ? 'Nothing left to cover on this day.'
+                  : 'You have no periods left to cover on this day.'
+                : undefined
+            }
+          >
+            <Select
+              value={entryId || undefined}
+              onValueChange={(v) => {
+                setEntryId(v)
+                setSubstitute('')
+              }}
+              disabled={openPeriods.length === 0}
+            >
+              <SelectTrigger id="sub_period">
+                <SelectValue placeholder="Choose a period" />
+              </SelectTrigger>
+              <SelectContent>
+                {openPeriods.map((p) => (
+                  <SelectItem key={p.entry.id} value={String(p.entry.id)}>
+                    {label(p)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field id="sub_teacher" label="Substitute teacher" required>
+            <Select
+              value={substitute || undefined}
+              onValueChange={setSubstitute}
+              disabled={!chosen}
+            >
+              <SelectTrigger id="sub_teacher">
+                <SelectValue placeholder={chosen ? 'Choose a teacher' : 'Choose a period first'} />
+              </SelectTrigger>
+              <SelectContent>
+                {options.map((teacher) => (
+                  <SelectItem key={teacher.id} value={String(teacher.id)}>
+                    {teacher.full_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field id="sub_note" label="Note" hint="Optional — for example, what the class should work on.">
+            <Textarea id="sub_note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+          </Field>
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={submit} loading={assign.isPending}>
+            Set substitute
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
+ * Who is away on a day, and who takes each of its periods. A substitute applies to that date
+ * only; the timetable is unchanged for every other day.
+ */
+function AwayAndCover({
+  isAdmin,
+  onArrange,
+}: {
+  isAdmin: boolean
+  onArrange: (period: ScheduledPeriod) => void
+}) {
+  const [day, setDay] = React.useState(todayApiDate())
+  const away = useLeaveOnDay(day)
+  const periods = useCoverDay(day, isAdmin)
+
+  return (
+    <div className="space-y-6">
       <Field id="cover_day" label="Date">
         <Input
           id="cover_day"
@@ -662,77 +1022,123 @@ function CoverTab() {
         />
       </Field>
 
-      <QueryBoundary
-        query={away}
-        loading={<Skeleton className="h-32 w-full rounded-xl" />}
-        isEmpty={(rows) => rows.length === 0}
-        empty={
-          <EmptyState
-            icon={<CalendarOff />}
-            title="Everybody is in"
-            description={`No approved leave on ${formatDate(day)}.`}
-          />
-        }
-      >
-        {(rows) => (
-          <div className="space-y-3">
-            {rows.map((request) => (
-              <RequestCard key={request.id} request={request} />
-            ))}
-          </div>
-        )}
-      </QueryBoundary>
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold">Away on {formatDate(day)}</h3>
+        <QueryBoundary
+          query={away}
+          loading={<Skeleton className="h-32 w-full rounded-xl" />}
+          isEmpty={(rows) => rows.length === 0}
+          empty={
+            <EmptyState
+              icon={<CalendarOff />}
+              title="Everybody is in"
+              description={`No approved leave on ${formatDate(day)}.`}
+            />
+          }
+        >
+          {(rows) => (
+            <div className="space-y-3">
+              {rows.map((request) => (
+                <RequestCard key={request.id} request={request} />
+              ))}
+            </div>
+          )}
+        </QueryBoundary>
+      </div>
+
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold">
+          {isAdmin ? 'Periods' : 'Your periods'} on {formatDate(day)}
+        </h3>
+        <QueryBoundary
+          query={periods}
+          loading={<Skeleton className="h-32 w-full rounded-xl" />}
+          isEmpty={(rows) => rows.length === 0}
+          empty={
+            <EmptyState
+              icon={<CalendarOff />}
+              title="No periods"
+              description={isAdmin ? 'Nothing is timetabled on this day.' : 'You have no periods on this day.'}
+            />
+          }
+        >
+          {(rows) => (
+            <div className="space-y-3">
+              {rows.map((period) => (
+                <PeriodCoverRow
+                  key={period.entry.id}
+                  period={period}
+                  isAdmin={isAdmin}
+                  onArrange={onArrange}
+                />
+              ))}
+            </div>
+          )}
+        </QueryBoundary>
+      </div>
     </div>
   )
 }
 
+/**
+ * Leave and substitutes on one page, with a form for each: applying for leave, and arranging a
+ * substitute (with or without leave). Nothing is hidden behind a tab.
+ */
 export default function LeavePage() {
   const { role } = useAuth()
   const isAdmin = role === 'ADMIN'
+  const [subOpen, setSubOpen] = React.useState(false)
+  const [preset, setPreset] = React.useState<{ day: string; entryId: number } | null>(null)
 
-  // An admin opens this to decide, a teacher to apply — so the first tab
-  // differs rather than both landing on the same list.
+  const arrange = (period?: ScheduledPeriod) => {
+    setPreset(period ? { day: period.on_date, entryId: period.entry.id } : null)
+    setSubOpen(true)
+  }
+
   return (
-    <div>
+    <div className="space-y-10">
       <PageHeader
-        title={isAdmin ? 'Staff leave' : 'My leave'}
+        title="Leave & substitutes"
         description={
           isAdmin
-            ? 'Requests to decide, and who is away on a given day. Each request carries the periods it leaves uncovered.'
-            : 'Apply for leave and see what you have taken.'
+            ? 'Requests to decide, who is away on a day, and who takes each period.'
+            : 'Apply for leave, and arrange a substitute for any of your periods — for leave or for anything else.'
+        }
+        actions={
+          <Button variant="outline" onClick={() => arrange()}>
+            <UserCheck />
+            Arrange a substitute
+          </Button>
         }
       />
 
-      <Tabs defaultValue={isAdmin ? 'queue' : 'mine'}>
-        <TabsList>
-          {isAdmin && (
-            <TabsTrigger value="queue">
-              <CheckCircle2 className="size-4" />
-              To decide
-            </TabsTrigger>
-          )}
-          <TabsTrigger value="mine">
-            <PlaneTakeoff className="size-4" />
-            My requests
-          </TabsTrigger>
-          <TabsTrigger value="cover">
-            <CalendarOff className="size-4" />
-            Who is away
-          </TabsTrigger>
-        </TabsList>
+      {isAdmin && (
+        <section className="space-y-4">
+          <h2 className="flex items-center gap-2 text-base font-semibold">
+            <CheckCircle2 className="size-4" />
+            To decide
+          </h2>
+          <QueueTab />
+        </section>
+      )}
 
-        {isAdmin && (
-          <TabsContent value="queue">
-            <QueueTab />
-          </TabsContent>
-        )}
-        <TabsContent value="mine">
-          <MyLeaveTab />
-        </TabsContent>
-        <TabsContent value="cover">
-          <CoverTab />
-        </TabsContent>
-      </Tabs>
+      <section className="space-y-4">
+        <h2 className="flex items-center gap-2 text-base font-semibold">
+          <PlaneTakeoff className="size-4" />
+          My leave
+        </h2>
+        <MyLeaveTab />
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="flex items-center gap-2 text-base font-semibold">
+          <UserCheck className="size-4" />
+          Substitutes by day
+        </h2>
+        <AwayAndCover isAdmin={isAdmin} onArrange={arrange} />
+      </section>
+
+      <SubstituteDialog open={subOpen} onOpenChange={setSubOpen} isAdmin={isAdmin} preset={preset} />
     </div>
   )
 }

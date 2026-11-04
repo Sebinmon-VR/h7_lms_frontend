@@ -245,6 +245,16 @@ function invalidateLeave(qc: QueryClient) {
   void qc.invalidateQueries({ queryKey: qk.leave.root })
 }
 
+/** The periods a leave would take across these dates, for the form to offer as cover. */
+export function useAffectedPeriods(start: string, end: string, enabled = true) {
+  return useQuery({
+    queryKey: qk.leave.affected(start, end),
+    queryFn: () => leaveApi.affected(start, end),
+    staleTime: STALE.transactional,
+    enabled: enabled && !!start && !!end && end >= start,
+  })
+}
+
 export function useApplyForLeave() {
   const qc = useQueryClient()
   return useMutation({
