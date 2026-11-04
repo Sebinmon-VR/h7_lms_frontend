@@ -19,6 +19,7 @@ import {
 import {
   ArrowDown,
   ArrowUp,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
@@ -94,6 +95,26 @@ export interface DataTableProps<T> {
     /** Rows that cannot be selected, e.g. ones the user does not own. */
     isSelectable?: (row: T) => boolean
   }
+
+  /**
+   * Splits the rows into labelled, foldable groups (students by class, say).
+   * Rows are ordered by group first, so a page holds whole groups wherever it
+   * can; a group that runs across a page break carries its full count on both
+   * pages. Sorting and filtering still apply, within each group.
+   */
+  /**
+   * Drops the rounded, bordered panel around the table: rules above and below
+   * only, so the list sits on the page like a ledger instead of in a box.
+   */
+  flat?: boolean
+
+  groupBy?: {
+    key: (row: T) => string
+    /** Order of the groups; alphabetical by key when omitted. */
+    compare?: (a: string, b: string) => number
+    /** The group heading. Defaults to the key and a row count. */
+    label?: (key: string, count: number) => React.ReactNode
+  }
 }
 
 const PAGE_SIZES = [10, 25, 50, 100]
@@ -119,6 +140,8 @@ export function DataTable<T>({
   renderCard,
   searchParamKey,
   bulkActions,
+  flat = false,
+  groupBy,
 }: DataTableProps<T>) {
   const [sorting, setSorting] = React.useState<SortingState>(initialSorting)
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
@@ -137,6 +160,7 @@ export function DataTable<T>({
     pageIndex: 0,
     pageSize,
   }))
+  const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => new Set())
   const [searchParams, setSearchParams] = useSearchParams()
 
   // Seed from the URL so a deep link arrives pre-filtered.
@@ -227,6 +251,28 @@ export function DataTable<T>({
     return [selectColumn, ...columns]
   }, [columns, bulkActions])
 
+  const groupCompare = React.useMemo(
+    () => groupBy?.compare ?? ((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true })),
+    [groupBy],
+  )
+
+  // Grouped tables page through rows already ordered by group, so a group's
+  // rows sit together instead of being scattered across pages by the sort.
+  const sortedRowModel = React.useMemo(() => {
+    const base = getSortedRowModel<T>()
+    if (!groupBy) return base
+    return (t: TanstackTable<T>) => {
+      const inner = base(t)
+      return () => {
+        const sorted = inner()
+        const rowsByGroup = [...sorted.rows].sort((a, b) =>
+          groupCompare(groupBy.key(a.original), groupBy.key(b.original)),
+        )
+        return { ...sorted, rows: rowsByGroup }
+      }
+    }
+  }, [groupBy, groupCompare])
+
   const table = useReactTable({
     data: filteredBySearch,
     columns: resolvedColumns,
@@ -243,7 +289,7 @@ export function DataTable<T>({
     // identity, which is not the same thing as the data having changed.
     autoResetPageIndex: false,
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
+    getSortedRowModel: sortedRowModel,
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getFacetedRowModel: getFacetedRowModel(),
@@ -282,6 +328,41 @@ export function DataTable<T>({
   const visibleRows = table.getRowModel().rows
   const totalFiltered = table.getFilteredRowModel().rows.length
 
+  // Group sizes across every page, so a heading says how big the class is,
+  // not how much of it happens to fit on this page.
+  const prePaged = table.getPrePaginationRowModel().rows
+  const groupTotals = React.useMemo(() => {
+    const totals = new Map<string, number>()
+    if (!groupBy) return totals
+    for (const row of prePaged) {
+      const key = groupBy.key(row.original)
+      totals.set(key, (totals.get(key) ?? 0) + 1)
+    }
+    return totals
+  }, [groupBy, prePaged])
+
+  // The rows on this page, split at each change of group. Order is already
+  // group-first (see `sortedRowModel` above).
+  const groups = React.useMemo(() => {
+    if (!groupBy) return null
+    const out: { key: string; rows: typeof visibleRows }[] = []
+    for (const row of visibleRows) {
+      const key = groupBy.key(row.original)
+      const last = out[out.length - 1]
+      if (last && last.key === key) last.rows.push(row)
+      else out.push({ key, rows: [row] })
+    }
+    return out
+  }, [groupBy, visibleRows])
+
+  const toggleGroup = (key: string) =>
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+
   /**
    * The two resets the automatic one was standing in for, now that they are
    * driven by what actually changed rather than by array identity.
@@ -302,6 +383,23 @@ export function DataTable<T>({
       prev.pageIndex <= lastPageIndex ? prev : { ...prev, pageIndex: lastPageIndex },
     )
   }, [lastPageIndex])
+
+  const renderRow = (row: (typeof visibleRows)[number]) => (
+    <TableRow
+      key={row.id}
+      interactive={!!onRowClick}
+      onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+    >
+      {row.getVisibleCells().map((cell) => {
+        const meta = cell.column.columnDef.meta as { align?: 'left' | 'center' | 'right' } | undefined
+        return (
+          <TableCell key={cell.id} align={meta?.align}>
+            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+          </TableCell>
+        )
+      })}
+    </TableRow>
+  )
 
   if (error && !data) {
     return <ErrorState error={error} onRetry={onRetry} className={className} />
@@ -391,7 +489,7 @@ export function DataTable<T>({
       {/* --------------------------------------------------------- table */}
       <div
         className={cn(
-          'overflow-hidden rounded-xl border border-border bg-card',
+          flat ? 'overflow-hidden border-y border-border' : 'overflow-hidden rounded-xl border border-border bg-card',
           renderCard && 'hidden md:block',
         )}
       >
@@ -454,23 +552,59 @@ export function DataTable<T>({
                     <NoResults onClear={hasFilters ? clearFilters : undefined} />
                   </TableCell>
                 </TableRow>
-              ) : (
-                visibleRows.map((row) => (
-                  <TableRow
-                    key={row.id}
-                    interactive={!!onRowClick}
-                    onClick={onRowClick ? () => onRowClick(row.original) : undefined}
-                  >
-                    {row.getVisibleCells().map((cell) => {
-                      const meta = cell.column.columnDef.meta as { align?: 'left' | 'center' | 'right' } | undefined
-                      return (
-                        <TableCell key={cell.id} align={meta?.align}>
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+              ) : groups ? (
+                groups.map((group) => {
+                  const collapsed = collapsedGroups.has(group.key)
+                  const selectable = group.rows.filter((r) => r.getCanSelect())
+                  const allSelected = selectable.length > 0 && selectable.every((r) => r.getIsSelected())
+                  const someSelected = selectable.some((r) => r.getIsSelected())
+                  return (
+                    <React.Fragment key={`group-${group.key}`}>
+                      <TableRow className="bg-muted/50 hover:bg-muted/70">
+                        <TableCell colSpan={resolvedColumns.length} className="py-2">
+                          <div className="flex items-center gap-3">
+                            {bulkActions && (
+                              <Checkbox
+                                checked={allSelected ? true : someSelected ? 'indeterminate' : false}
+                                disabled={selectable.length === 0}
+                                onCheckedChange={(v) => selectable.forEach((r) => r.toggleSelected(v === true))}
+                                aria-label={`Select every row in ${group.key}`}
+                              />
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => toggleGroup(group.key)}
+                              aria-expanded={!collapsed}
+                              className="flex flex-1 items-center gap-2 text-left"
+                            >
+                              <ChevronDown
+                                className={cn('size-4 shrink-0 text-muted-foreground transition-transform', collapsed && '-rotate-90')}
+                              />
+                              {groupBy?.label ? (
+                                groupBy.label(group.key, groupTotals.get(group.key) ?? group.rows.length)
+                              ) : (
+                                <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
+                                  {group.key}
+                                  <span className="ml-2 font-medium normal-case tracking-normal text-muted-foreground">
+                                    {groupTotals.get(group.key) ?? group.rows.length}
+                                  </span>
+                                </span>
+                              )}
+                              {(groupTotals.get(group.key) ?? 0) > group.rows.length && (
+                                <span className="text-2xs text-muted-foreground">
+                                  {group.rows.length} on this page
+                                </span>
+                              )}
+                            </button>
+                          </div>
                         </TableCell>
-                      )
-                    })}
-                  </TableRow>
-                ))
+                      </TableRow>
+                      {!collapsed && group.rows.map(renderRow)}
+                    </React.Fragment>
+                  )
+                })
+              ) : (
+                visibleRows.map(renderRow)
               )}
             </TableBody>
           </Table>
@@ -483,6 +617,23 @@ export function DataTable<T>({
       )}
     </div>
   )
+}
+
+/**
+ * Zero-based page indexes to show as buttons: the first, the last, and the
+ * current one with a neighbour each side; `null` marks a gap. Seven pages or
+ * fewer show them all.
+ */
+function pageNumbers(current: number, count: number): (number | null)[] {
+  if (count <= 7) return Array.from({ length: Math.max(1, count) }, (_, i) => i)
+  const wanted = new Set([0, count - 1, current - 1, current, current + 1].filter((n) => n >= 0 && n < count))
+  const sorted = [...wanted].sort((a, b) => a - b)
+  const out: (number | null)[] = []
+  sorted.forEach((n, i) => {
+    if (i > 0 && n - sorted[i - 1] > 1) out.push(null)
+    out.push(n)
+  })
+  return out
 }
 
 function DataTablePagination<T>({
@@ -545,9 +696,25 @@ function DataTablePagination<T>({
           >
             <ChevronLeft />
           </Button>
-          <span className="px-2 tabular-nums">
-            {pageIndex + 1} / {Math.max(1, table.getPageCount())}
-          </span>
+          {pageNumbers(pageIndex, table.getPageCount()).map((n, i) =>
+            n === null ? (
+              <span key={`gap-${i}`} className="px-1 text-muted-foreground" aria-hidden>
+                …
+              </span>
+            ) : (
+              <Button
+                key={n}
+                variant={n === pageIndex ? 'solid' : 'ghost'}
+                size="icon-sm"
+                className="tabular-nums"
+                onClick={() => table.setPageIndex(n)}
+                aria-label={`Page ${n + 1}`}
+                aria-current={n === pageIndex ? 'page' : undefined}
+              >
+                {n + 1}
+              </Button>
+            ),
+          )}
           <Button
             variant="outline"
             size="icon-sm"

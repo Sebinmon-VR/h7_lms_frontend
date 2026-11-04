@@ -85,6 +85,26 @@ export const adminApi = {
   /** Merge semantics — only the keys sent are written. */
   updateUser: (userId: number, body: UserUpdate) => put<UserOut>(`/admin/users/${userId}`, body),
 
+  /** A JPG, PNG or WEBP of at most 5 MB, already cropped; replaces any earlier photo. */
+  uploadUserPhoto: (userId: number, photo: Blob, filename = 'photo.jpg') => {
+    const form = new FormData()
+    form.append('file', photo, filename)
+    return post<UserOut>(`/admin/users/${userId}/photo`, form, { timeout: 60_000 })
+  },
+
+  /** Takes the photo off, so their initials show again. */
+  removeUserPhoto: (userId: number) => delWithBody<UserOut>(`/admin/users/${userId}/photo`),
+
+  /**
+   * A picture the browser cannot draw (iPhone HEIC, TIFF…) back as a JPG it
+   * can. Nothing is stored; the page crops the result and uploads that.
+   */
+  previewUserPhoto: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return post<Blob>('/admin/users/photo/preview', form, { responseType: 'blob', timeout: 60_000 })
+  },
+
   /**
    * Soft delete — sets `is_active: false`, blocks sign-in and revokes every
    * session. History keeps resolving, and `reactivateUser`

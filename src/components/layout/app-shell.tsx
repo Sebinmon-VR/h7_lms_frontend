@@ -60,7 +60,7 @@ export function AppShell() {
       </div>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="w-64 p-0" hideClose>
+        <SheetContent side="left" className="w-60 p-0" hideClose>
           <Sidebar onNavigate={() => setMobileOpen(false)} />
         </SheetContent>
       </Sheet>

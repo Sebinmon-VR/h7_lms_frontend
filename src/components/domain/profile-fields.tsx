@@ -44,6 +44,11 @@ const GENDERS: { value: Gender; label: string }[] = [
   { value: 'UNDISCLOSED', label: 'Prefer not to say' },
 ]
 
+/** The in-page anchor for a section, shared with the form's section index. */
+export function sectionAnchor(title: string): string {
+  return `section-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`
+}
+
 function Section({
   title,
   hint,
@@ -72,17 +77,19 @@ function Section({
 
   if (flat) {
     return (
-      /* A rank below the FormSection heading it nests under: uppercase and
-         small, so "Profile detail > Address" reads as two levels rather than
-         as two competing titles of the same weight. */
-      <section className="space-y-4">
-        <div className="flex items-baseline gap-2">
-          <h3 className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {title}
-          </h3>
-          <span className="h-px flex-1 bg-border" aria-hidden />
+      /* `data-nav-section` lets the edit page build its tabs from whatever
+         sections the role actually renders. */
+      <section id={sectionAnchor(title)} data-nav-section={title} className="scroll-mt-28 space-y-5">
+        <div className="border-b border-border pb-3">
+          <h3 className="text-base font-semibold text-foreground">{title}</h3>
+          {hint && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{hint}</p>}
+          {!!filled && (
+            <p className="mt-1 text-2xs font-medium text-muted-foreground">
+              {filled} field{filled === 1 ? '' : 's'} filled
+            </p>
+          )}
         </div>
-        <div className="space-y-5">{children}</div>
+        <div className="min-w-0 space-y-5">{children}</div>
       </section>
     )
   }
@@ -356,13 +363,15 @@ export function ProfileFieldsSection({
             </Select>
           </div>
         </div>
-        <TextField
-          id="pf-photo"
-          label="Photo URL"
-          value={value.photo_url}
-          onChange={set('photo_url')}
-          placeholder="https://…"
-        />
+        {!(flat && mode === 'edit') && (
+          <TextField
+            id="pf-photo"
+            label="Photo URL"
+            value={value.photo_url}
+            onChange={set('photo_url')}
+            placeholder="https://…"
+          />
+        )}
       </Section>
 
       <Section flat={flat} title="Address" filled={countFilled(value, ADDRESS_KEYS)}>

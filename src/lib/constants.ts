@@ -107,6 +107,7 @@ export const STORAGE_KEYS = {
   session: 'h7lms.session',
   theme: 'h7lms.theme',
   sidebar: 'h7lms.sidebar',
+  sidebarSections: 'h7lms.sidebarSections',
   lastSeenMaterials: 'h7lms.lastSeenMaterials',
 } as const
 

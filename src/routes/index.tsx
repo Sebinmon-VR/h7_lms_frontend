@@ -25,6 +25,7 @@ const AdminUsers = lazy(() => import('@/pages/admin/users'))
 // Create and edit live on their own routes: a user record is the widest thing
 // this app stores, and a modal cannot hold it without collapsing most of it.
 const AdminUserForm = lazy(() => import('@/pages/admin/user-form'))
+const AdminUserProfile = lazy(() => import('@/pages/admin/user-profile'))
 const AdminClasses = lazy(() => import('@/pages/admin/classes'))
 const AdminSubjects = lazy(() => import('@/pages/admin/subjects'))
 const AdminMappings = lazy(() => import('@/pages/admin/assignments'))
@@ -236,9 +237,13 @@ export function AppRoutes() {
 
             <Route element={<RequireRole allow={['ADMIN']} />}>
               <Route path="/admin" element={<AdminDashboard />} />
-              <Route path="/admin/users" element={<AdminUsers />} />
+              <Route path="/admin/users" element={<AdminUsers key="all" />} />
+              <Route path="/admin/students" element={<AdminUsers key="students" scope="students" />} />
+              <Route path="/admin/teachers" element={<AdminUsers key="teachers" scope="teachers" />} />
+              <Route path="/admin/staff" element={<AdminUsers key="staff" scope="staff" />} />
               <Route path="/admin/users/new" element={<AdminUserForm />} />
               <Route path="/admin/users/:userId/edit" element={<AdminUserForm />} />
+              <Route path="/admin/users/:userId" element={<AdminUserProfile />} />
               <Route path="/admin/classes" element={<AdminClasses />} />
               <Route path="/admin/subjects" element={<AdminSubjects />} />
               <Route path="/admin/mappings" element={<AdminMappings />} />

@@ -4,6 +4,7 @@ import {
   BarChart3,
   Bell,
   BookOpen,
+  Briefcase,
   CalendarCheck,
   CalendarClock,
   CalendarDays,
@@ -32,6 +33,7 @@ import {
   NotebookPen,
   PlaneTakeoff,
   Plug,
+  Presentation,
   Radio,
   Receipt,
   Settings2,
@@ -62,48 +64,74 @@ export interface NavSection {
   items: NavItem[]
 }
 
+/**
+ * Grouped by the job the office is doing rather than by when each screen was
+ * built: everything about getting a student in sits under Admissions,
+ * everything that happens in a lesson under Classroom, and so on. The sidebar
+ * folds each group, so related screens stay together without a long list.
+ */
 const ADMIN_NAV: NavSection[] = [
   {
-    heading: 'Overview',
+    heading: 'Main',
     items: [
       { to: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true, description: 'System overview and alerts' },
-      { to: '/admin/reports', label: 'Reports', icon: BarChart3, description: 'Teacher activity and student performance' },
+      { to: '/admin/reports', label: 'Reports & Analytics', icon: BarChart3, description: 'Teacher activity and student performance' },
     ],
   },
   {
-    heading: 'People',
+    heading: 'Admissions',
     items: [
-      { to: '/admin/users', label: 'Users', icon: Users, description: 'Accounts and roles' },
       {
         to: '/admin/admission-requests',
-        label: 'Admission Requests',
+        label: 'Applications',
         icon: Inbox,
         description: 'Applications from the website: review, admit in one step, or decline',
       },
       {
+        to: '/admin/admissions',
+        label: 'Academic Sessions',
+        icon: BadgeCheck,
+        description: 'Session years and the categories students are admitted under',
+      },
+    ],
+  },
+  {
+    heading: 'User Management',
+    items: [
+      { to: '/admin/students', label: 'Students', icon: Backpack, description: 'Student accounts, session years and sign-in' },
+      { to: '/admin/teachers', label: 'Teachers', icon: Presentation, description: 'Teachers and class teachers' },
+      { to: '/admin/staff', label: 'Staff', icon: Briefcase, description: 'Administrators and office staff' },
+      { to: '/admin/users', label: 'All Users', icon: Users, description: 'Every account and role in one list' },
+      {
         to: '/admin/families',
-        label: 'Families',
+        label: 'Parents & Guardians',
         icon: UsersRound,
         description: 'Households for sibling billing, and the parent logins that reach them',
+      },
+      {
+        to: '/admin/leave',
+        label: 'Leave Management',
+        icon: PlaneTakeoff,
+        description: 'Applications to decide, balances, and who is away today',
       },
     ],
   },
   {
     heading: 'Academics',
     items: [
-      { to: '/admin/classes', label: 'Classes', icon: Layers, description: 'Class sections' },
+      { to: '/admin/classes', label: 'Classes & Sections', icon: Layers, description: 'Class sections' },
       { to: '/admin/subjects', label: 'Subjects', icon: BookOpen, description: 'Subject catalogue' },
       {
-        to: '/admin/mappings',
-        label: 'Teacher Mappings',
-        icon: Link2,
-        description: 'Subject mappings and class teachers',
-      },
-      {
         to: '/admin/enrollments',
-        label: 'Enrollments',
+        label: 'Student Enrollment',
         icon: GraduationCap,
         description: 'Enroll students into classes',
+      },
+      {
+        to: '/admin/mappings',
+        label: 'Teacher Allocation',
+        icon: Link2,
+        description: 'Subject mappings and class teachers',
       },
       {
         to: '/admin/timetable',
@@ -111,20 +139,49 @@ const ADMIN_NAV: NavSection[] = [
         icon: CalendarRange,
         description: 'Weekly periods for every class',
       },
+    ],
+  },
+  {
+    heading: 'Online Learning',
+    items: [
       {
-        to: '/admin/admissions',
-        label: 'Admissions',
-        icon: BadgeCheck,
-        description: 'Session years and the categories students are admitted under',
+        to: '/admin/live-classes',
+        label: 'Live Class Monitor',
+        icon: Radio,
+        description: 'Every class room right now: who is teaching, who has come in, and a way in',
+      },
+      {
+        to: '/admin/meetings',
+        label: 'Virtual Meetings',
+        icon: Video,
+        description: 'Live sessions across every teacher',
+      },
+      {
+        to: '/admin/extra-classes',
+        label: 'Additional Classes',
+        icon: CalendarPlus,
+        description: 'Approve requests for classes outside the timetable, then schedule them',
+      },
+      {
+        to: '/admin/materials',
+        label: 'Study Materials',
+        icon: Library,
+        description: 'Every uploaded file, and where it is stored',
+      },
+      {
+        to: '/admin/recordings',
+        label: 'Class Recordings',
+        icon: Disc,
+        description: 'Where recorded classes were filed, and what is holding one up',
       },
     ],
   },
   {
-    heading: 'Assessment',
+    heading: 'Examinations',
     items: [
       {
         to: '/admin/exams',
-        label: 'Exams',
+        label: 'Exam Management',
         icon: ClipboardCheck,
         description: 'Every exam set by any teacher, and the marking behind it',
       },
@@ -134,66 +191,49 @@ const ADMIN_NAV: NavSection[] = [
         icon: FileBadge,
         description: 'Consolidated results per student, per class',
       },
-    ],
-  },
-  {
-    heading: 'Content',
-    items: [
       {
-        to: '/admin/live-classes',
-        label: 'Live Classes',
-        icon: Radio,
-        description: 'Every class room right now: who is teaching, who has come in, and a way in',
-      },
-      {
-        to: '/admin/meetings',
-        label: 'Meetings',
-        icon: Video,
-        description: 'Live sessions across every teacher',
-      },
-      {
-        to: '/admin/materials',
-        label: 'Materials',
-        icon: Library,
-        description: 'Every uploaded file, and where it is stored',
+        to: '/admin/oversight',
+        label: 'Academic Monitoring',
+        icon: ClipboardList,
+        description: 'Exam and homework cadence, per-student counts, and parent digests',
       },
     ],
   },
   {
-    heading: 'Arena',
+    heading: 'Gamification',
     items: [
       {
         to: '/admin/arena/syllabus',
-        label: 'Chapters & Questions',
+        label: 'Question Bank',
         icon: ListChecks,
         description: 'Each class and subject’s chapters, and the quiz questions students battle on',
       },
       {
         to: '/admin/arena/lab',
-        label: 'Lab Experiments',
+        label: 'Virtual Labs',
         icon: FlaskConical,
         description: 'Set virtual chemistry experiments for a class and see the results',
       },
       {
         to: '/admin/arena/global',
-        label: 'Global Challenges',
+        label: 'Challenges',
         icon: Globe,
         description: 'The school-wide question pool and the challenges built on it',
       },
       {
         to: '/admin/arena/leaderboards',
-        label: 'Arena Leaderboards',
+        label: 'Leaderboards',
         icon: Trophy,
         description: 'Class and global standings',
       },
     ],
   },
   {
-    heading: 'Money',
+    heading: 'Finance',
     items: [
       {
         to: '/admin/finance',
-        label: 'Fees & Invoices',
+        label: 'Fee Management',
         icon: Coins,
         description: 'Fee heads, structures, instalments, concessions and what each student owes',
       },
@@ -209,42 +249,25 @@ const ADMIN_NAV: NavSection[] = [
         description: 'Write, schedule and publish notices, and see who has read them',
       },
       {
+        to: '/admin/reminders',
+        label: 'Email Reminders',
+        icon: Bell,
+        description: 'Class reminder emails and delivery log',
+      },
+      {
         to: '/admin/support',
-        label: 'Support',
+        label: 'Helpdesk',
         icon: LifeBuoy,
         description: 'The ticket queue and the contact details people are given',
       },
     ],
   },
   {
-    heading: 'Staff & scheduling',
-    items: [
-      {
-        to: '/admin/extra-classes',
-        label: 'Extra Classes',
-        icon: CalendarPlus,
-        description: 'Approve requests for classes outside the timetable, then schedule them',
-      },
-      {
-        to: '/admin/leave',
-        label: 'Staff Leave',
-        icon: PlaneTakeoff,
-        description: 'Applications to decide, balances, and who is away today',
-      },
-      {
-        to: '/admin/oversight',
-        label: 'Oversight',
-        icon: ClipboardList,
-        description: 'Exam and homework cadence, per-student counts, and parent digests',
-      },
-    ],
-  },
-  {
-    heading: 'System',
+    heading: 'Settings',
     items: [
       {
         to: '/admin/settings',
-        label: 'School Settings',
+        label: 'General Settings',
         icon: Settings2,
         description: 'Admission and staff number formats, the live-class clock, and library access',
       },
@@ -253,18 +276,6 @@ const ADMIN_NAV: NavSection[] = [
         label: 'Integrations',
         icon: Plug,
         description: 'Storage, live classes and email health',
-      },
-      {
-        to: '/admin/reminders',
-        label: 'Reminders',
-        icon: Bell,
-        description: 'Class reminder emails and delivery log',
-      },
-      {
-        to: '/admin/recordings',
-        label: 'Recordings',
-        icon: Disc,
-        description: 'Where recorded classes were filed, and what is holding one up',
       },
     ],
   },
@@ -488,48 +499,48 @@ const SHARED_TUITION_NAV: NavSection = {
  */
 const ADMIN_TUITION_NAV: NavSection[] = [
   {
-    heading: 'Online tuition',
+    heading: 'Online Tuition',
     items: [
       {
         to: '/admin/tuition',
-        label: 'Overview',
+        label: 'Dashboard',
         icon: LayoutDashboard,
         end: true,
         description: 'Attendance, hours taught and what needs fixing',
       },
       {
         to: '/admin/tuition/enrollments',
-        label: 'Arrangements',
+        label: 'Tutor Assignments',
         icon: GraduationCap,
         description: 'Who teaches which student, for which subject',
       },
       {
         to: '/admin/tuition/subjects',
-        label: 'Student Subjects',
+        label: 'Subject Enrollment',
         icon: BookOpen,
         description: 'Add or drop a subject for one student, and see whether its classes run',
       },
       {
         to: '/admin/tuition/schedule',
-        label: 'Schedule',
+        label: 'Class Schedule',
         icon: CalendarClock,
         description: 'Weekly class times, clashes and generated classes',
       },
       {
         to: '/admin/tuition/sessions',
-        label: 'Classes',
+        label: 'Tuition Sessions',
         icon: Video,
         description: 'Every class, live or finished',
       },
       {
         to: '/admin/tuition/fees',
-        label: 'Fees & Invoices',
+        label: 'Fee Management',
         icon: Receipt,
         description: 'Class packages, billing runs and payments',
       },
       {
         to: '/admin/tuition/admissions',
-        label: 'Admissions',
+        label: 'Academic Sessions',
         icon: BadgeCheck,
         description: 'Tuition session years and the categories students are admitted under',
       },
@@ -541,13 +552,13 @@ const ADMIN_TUITION_NAV: NavSection[] = [
       },
       {
         to: '/tuition/library',
-        label: 'Library',
+        label: 'Resource Library',
         icon: Library,
         description: 'Shared books, notes and recordings, and uploads awaiting approval',
       },
       {
         to: '/admin/tuition/access',
-        label: 'People & Access',
+        label: 'User Access',
         icon: ShieldCheck,
         description: 'Add tuition students and tutors, and grant access to existing accounts',
       },

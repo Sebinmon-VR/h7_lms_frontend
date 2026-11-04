@@ -17,11 +17,13 @@ import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { z } from 'zod'
 
-import type { CredentialsIssued, Program, UserOut, UserProfileFields } from '@/api/types'
+import type { Program, UserOut, UserProfileFields, UserRole } from '@/api/types'
 import { ApiError } from '@/api/errors'
 import {
+  useClassTeachers,
   useDeactivateUser,
-  useGenerateCredentials,
+  useEnrollments,
+  useMappings,
   usePermanentlyDeleteUser,
   usePresenceMap,
   useReactivateUser,
@@ -30,7 +32,8 @@ import {
 } from '@/queries/admin.queries'
 import { useAcademicYears } from '@/queries/admissions.queries'
 import { ALL_ROLES, ROLE_LABEL, isTeachingRole } from '@/lib/constants'
-import { formatDateTime, formatRelative } from '@/lib/datetime'
+import { cn } from '@/lib/cn'
+import { formatDate, formatDateTime, formatRelative } from '@/lib/datetime'
 import { PROGRAM_LABEL } from '@/lib/tuition'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -58,9 +61,8 @@ import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field } from '@/components/forms/field'
 import { EmptyState } from '@/components/feedback/states'
 import { PageHeader } from '@/components/layout/page-header'
-import { CredentialsModal } from './credentials-modal'
+import { GenerateCredentialsDialog } from './generate-credentials'
 import { ImportUsersDialog } from './import-users'
-import { UserDetailSheet } from './user-detail'
 
 // -------------------------------------------------------------- create form
 
@@ -224,9 +226,53 @@ export function profileOf(user: UserOut): UserProfileFields {
   return profile
 }
 
-export default function AdminUsersPage() {
+/**
+ * The same screen narrowed to one kind of account, for the Students, Teachers
+ * and Staff menu entries. One page rather than three copies, so bulk actions,
+ * credentials and imports behave identically wherever the office starts from.
+ */
+export type UserScope = 'students' | 'teachers' | 'staff'
+
+const USER_SCOPES: Record<
+  UserScope,
+  { title: string; description: string; roles: UserRole[]; newRole: 'STUDENT' | 'TEACHER' | 'ADMIN'; add: string; empty: string }
+> = {
+  students: {
+    title: 'Students',
+    description: 'Every student account, with its session year, class and sign-in status.',
+    roles: ['STUDENT'],
+    newRole: 'STUDENT',
+    add: 'Add student',
+    empty: 'No students yet',
+  },
+  teachers: {
+    title: 'Teachers',
+    description: 'Teachers and class teachers. Class teachers lead a class as well as teaching subjects.',
+    roles: ['TEACHER', 'CLASS_TEACHER'],
+    newRole: 'TEACHER',
+    add: 'Add teacher',
+    empty: 'No teachers yet',
+  },
+  staff: {
+    title: 'Staff',
+    description: 'Administrators and office staff who run the school on this system.',
+    roles: ['ADMIN'],
+    newRole: 'ADMIN',
+    add: 'Add staff',
+    empty: 'No staff accounts yet',
+  },
+}
+
+export default function AdminUsersPage({ scope }: { scope?: UserScope } = {}) {
   const navigate = useNavigate()
   const usersQuery = useUsers()
+  const scoped = scope ? USER_SCOPES[scope] : null
+  const scopedUsers = React.useMemo(
+    () => (scoped ? usersQuery.data?.filter((u) => scoped.roles.includes(u.role)) : usersQuery.data),
+    [usersQuery.data, scoped],
+  )
+  const roleOptions = scoped ? scoped.roles : ALL_ROLES
+  const newUserPath = scoped ? `/admin/users/new?role=${scoped.newRole}` : '/admin/users/new'
   // Who is online right now: the green-or-red dot on every avatar below.
   const presence = usePresenceMap()
   const deactivateUser = useDeactivateUser()
@@ -269,7 +315,6 @@ export default function AdminUsersPage() {
       setErasing(null)
     }
   }
-  const [viewing, setViewing] = React.useState<UserOut | null>(null)
   const [bulkDeactivate, setBulkDeactivate] = React.useState<UserOut[] | null>(null)
   const bulk = useBatchRunner<number>()
 
@@ -285,15 +330,7 @@ export default function AdminUsersPage() {
   const yearRunner = useBatchRunner<{ userId: number; yearId: number }>()
   const academicYears = useAcademicYears({ withCounts: false })
 
-  const generateCredentials = useGenerateCredentials()
   const [issuingFor, setIssuingFor] = React.useState<UserOut | null>(null)
-  const [sendEmail, setSendEmail] = React.useState(true)
-
-  /**
-   * Held in component state only. This is the one copy of the password in the
-   * app and it dies with the modal — it is never cached, logged, or persisted.
-   */
-  const [issued, setIssued] = React.useState<CredentialsIssued | null>(null)
 
   /**
    * Which users have had credentials issued during THIS session.
@@ -305,31 +342,6 @@ export default function AdminUsersPage() {
    * localStorage entry would claim credentials exist when they may not.
    */
   const [issuedIds, setIssuedIds] = React.useState<Set<number>>(() => new Set())
-
-  React.useEffect(() => {
-    if (issuingFor) setSendEmail(true)
-  }, [issuingFor])
-
-  const runGenerate = async () => {
-    if (!issuingFor) return
-    try {
-      const result = await generateCredentials.mutateAsync({
-        userId: issuingFor.id,
-        options: { send_email: sendEmail },
-      })
-      setIssuedIds((prev) => new Set(prev).add(result.user_id))
-      setIssuingFor(null)
-      setIssued(result)
-    } catch (error) {
-      const apiError = error instanceof ApiError ? error : null
-      toast.error(
-        apiError?.status === 503
-          ? 'The sign-in service could not be reached. Nothing was changed — try again.'
-          : (apiError?.message ?? 'Could not generate credentials.'),
-      )
-      setIssuingFor(null)
-    }
-  }
 
   const columns = React.useMemo<ColumnDef<UserOut, unknown>[]>(
     () => [
@@ -437,7 +449,7 @@ export default function AdminUsersPage() {
                     <KeyRound />
                     Generate credentials
                   </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => setViewing(user)}>
+                  <DropdownMenuItem onSelect={() => navigate(`/admin/users/${user.id}`)}>
                     <Eye />
                     View details
                   </DropdownMenuItem>
@@ -469,11 +481,199 @@ export default function AdminUsersPage() {
         },
       },
     ],
-    [reactivateUser, onErase, presence],
+    [reactivateUser, onErase, presence, navigate],
   )
 
+
+  // ---------------------------------------------------------------------------
+  // Students / Teachers / Staff: a directory laid out for that kind of person,
+  // with the columns the office looks people up by, and a summary strip.
+  // ---------------------------------------------------------------------------
+  const enrollmentsQuery = useEnrollments(scope === 'students')
+  const mappingsQuery = useMappings(scope === 'teachers')
+  const classTeachersQuery = useClassTeachers(scope === 'teachers')
+
+  /** A student's class is their first enrollment — the one their portal uses. */
+  const classOf = React.useMemo(() => {
+    const map = new Map<number, string>()
+    for (const e of enrollmentsQuery.data ?? []) if (!map.has(e.student.id)) map.set(e.student.id, e.class_room.name)
+    return map
+  }, [enrollmentsQuery.data])
+
+  const subjectsOf = React.useMemo(() => {
+    const map = new Map<number, Set<string>>()
+    for (const m of mappingsQuery.data ?? []) {
+      const set = map.get(m.teacher.id) ?? new Set<string>()
+      set.add(m.subject.name)
+      map.set(m.teacher.id, set)
+    }
+    return map
+  }, [mappingsQuery.data])
+
+  const leadsOf = React.useMemo(() => {
+    const map = new Map<number, string[]>()
+    for (const m of classTeachersQuery.data ?? []) map.set(m.teacher.id, [...(map.get(m.teacher.id) ?? []), m.class_room.name])
+    return map
+  }, [classTeachersQuery.data])
+
+  const scopedColumns = React.useMemo<ColumnDef<UserOut, unknown>[] | null>(() => {
+    if (!scope) return null
+    const byId = (id: string) => columns.find((c) => c.id === id) as ColumnDef<UserOut, unknown>
+    const name = (header: string): ColumnDef<UserOut, unknown> => ({ ...byId('name'), header })
+    const dash = <span className="text-muted-foreground/50">—</span>
+    const text = (
+      id: string,
+      header: string,
+      get: (u: UserOut) => string | null | undefined,
+      mono = false,
+    ): ColumnDef<UserOut, unknown> => ({
+      id,
+      header,
+      accessorFn: (row) => get(row) ?? '',
+      cell: ({ getValue }) => {
+        const value = getValue() as string
+        return value ? (
+          <span className={cn('whitespace-nowrap text-sm', mono && 'font-mono text-xs text-foreground/80')}>{value}</span>
+        ) : (
+          dash
+        )
+      },
+    })
+
+    if (scope === 'students') {
+      return [
+        name('Student'),
+        text('admission_number', 'Admission no.', (u) => u.admission_number, true),
+        text('roll_number', 'Roll no.', (u) => u.roll_number, true),
+        {
+          id: 'guardian',
+          header: 'Guardian',
+          accessorFn: (row) => row.guardian_name ?? '',
+          cell: ({ row }) =>
+            row.original.guardian_name || row.original.guardian_phone ? (
+              <div className="min-w-0 leading-tight">
+                <p className="truncate text-sm">{row.original.guardian_name ?? '—'}</p>
+                {row.original.guardian_phone && (
+                  <p className="truncate text-xs text-muted-foreground">{row.original.guardian_phone}</p>
+                )}
+              </div>
+            ) : (
+              dash
+            ),
+        },
+        byId('status'),
+        byId('actions'),
+      ]
+    }
+
+    if (scope === 'teachers') {
+      return [
+        name('Teacher'),
+        text('employee_id', 'Employee ID', (u) => u.employee_id, true),
+        { ...byId('role'), header: 'Type' },
+        {
+          id: 'subjects',
+          header: 'Subjects',
+          accessorFn: (row) => subjectsOf.get(row.id)?.size ?? 0,
+          cell: ({ row }) => {
+            const list = [...(subjectsOf.get(row.original.id) ?? [])]
+            if (list.length === 0) {
+              return (
+                <Badge tone="warning" size="sm">
+                  Not mapped
+                </Badge>
+              )
+            }
+            return (
+              <span className="text-sm">
+                {list.slice(0, 2).join(', ')}
+                {list.length > 2 && <span className="text-muted-foreground"> +{list.length - 2}</span>}
+              </span>
+            )
+          },
+        },
+        text('leads', 'Class teacher of', (u) => (leadsOf.get(u.id) ?? []).join(', ')),
+        text('phone', 'Phone', (u) => u.phone),
+        byId('status'),
+        byId('actions'),
+      ]
+    }
+
+    return [
+      name('Staff member'),
+      text('employee_id', 'Employee ID', (u) => u.employee_id, true),
+      text('phone', 'Phone', (u) => u.phone),
+      text('date_of_joining', 'Joined', (u) => (u.date_of_joining ? formatDate(u.date_of_joining) : null)),
+      byId('status'),
+      byId('actions'),
+    ]
+  }, [scope, columns, classOf, subjectsOf, leadsOf])
+
+
+  /**
+   * Students under their class, teachers and staff under their designation.
+   * Unplaced people sort last, where they read as a to-do rather than noise.
+   */
+  const NOT_ENROLLED = 'Not enrolled'
+  const NO_DESIGNATION = 'Designation not set'
+  const groupBy = React.useMemo(() => {
+    if (!scope) return undefined
+    const lastKey = scope === 'students' ? NOT_ENROLLED : NO_DESIGNATION
+    const noun = scope === 'students' ? 'student' : scope === 'teachers' ? 'teacher' : 'member'
+    return {
+      key: (u: UserOut) =>
+        scope === 'students' ? (classOf.get(u.id) ?? NOT_ENROLLED) : u.designation?.trim() || NO_DESIGNATION,
+      compare: (a: string, b: string) =>
+        a === lastKey ? 1 : b === lastKey ? -1 : a.localeCompare(b, undefined, { numeric: true }),
+      label: (key: string, count: number) => (
+        <span className="flex items-center gap-2">
+          <span
+            className={cn(
+              'text-xs font-semibold uppercase tracking-wider',
+              key === lastKey ? 'text-warning' : 'text-foreground',
+            )}
+          >
+            {key}
+          </span>
+          <span className="rounded-full bg-background px-2 py-px text-2xs font-medium tabular-nums text-muted-foreground ring-1 ring-border">
+            {count} {noun}
+            {count === 1 ? '' : 's'}
+          </span>
+        </span>
+      ),
+    }
+  }, [scope, classOf])
+
+  /** The figures across the top of a Students / Teachers / Staff page. */
+  const summary = React.useMemo(() => {
+    if (!scope) return []
+    const list = scopedUsers ?? []
+    const active = list.filter((u) => u.is_active).length
+    const online = list.filter((u) => presence.byId.get(u.id)?.is_online).length
+    const figures: { label: string; value: number; tone?: 'success' | 'warning' | 'muted' }[] = [
+      { label: 'Total', value: list.length },
+      { label: 'Active', value: active, tone: 'success' },
+      { label: 'Online now', value: online, tone: 'success' },
+    ]
+    if (scope === 'students') {
+      figures.push({
+        label: 'Not enrolled',
+        value: list.filter((u) => u.is_active && !classOf.has(u.id)).length,
+        tone: 'warning',
+      })
+    }
+    if (scope === 'teachers') {
+      figures.push(
+        { label: 'Class teachers', value: list.filter((u) => u.role === 'CLASS_TEACHER').length },
+        { label: 'Not mapped', value: list.filter((u) => u.is_active && !subjectsOf.has(u.id)).length, tone: 'warning' },
+      )
+    }
+    figures.push({ label: 'Inactive', value: list.length - active, tone: 'muted' })
+    return figures
+  }, [scope, scopedUsers, presence.byId, classOf, subjectsOf])
+
   const counts = React.useMemo(() => {
-    const users = usersQuery.data ?? []
+    const users = scopedUsers ?? []
     return {
       total: users.length,
       admins: users.filter((u) => u.role === 'ADMIN').length,
@@ -485,52 +685,77 @@ export default function AdminUsersPage() {
       inactive: users.filter((u) => !u.is_active).length,
       demo: users.filter((u) => u.is_active && u.is_demo).length,
     }
-  }, [usersQuery.data])
+  }, [scopedUsers])
 
   return (
     <>
       <PageHeader
-        title="Users"
-        description="Every account in the system. Accounts are deactivated rather than deleted, so records that reference them stay intact."
+        title={scoped?.title ?? 'Users'}
+        description={
+          scoped?.description ??
+          'Every account in the system. Accounts are deactivated rather than deleted, so records that reference them stay intact.'
+        }
         actions={
           <>
             <Button variant="outline" icon={<Upload />} onClick={() => setImportOpen(true)}>
               Import CSV
             </Button>
             <Button asChild variant="primary" icon={<UserPlus />}>
-              <Link to="/admin/users/new">Add user</Link>
+              <Link to={newUserPath}>{scoped?.add ?? 'Add user'}</Link>
             </Button>
           </>
         }
       >
-        <div className="flex flex-wrap gap-2">
-          <Badge tone="neutral">{counts.total} total</Badge>
-          <Badge tone={presence.onlineCount > 0 ? 'success' : 'neutral'} dot={presence.onlineCount > 0}>
-            {presence.onlineCount} online now
-          </Badge>
-          <Badge tone="primary">
-            <ShieldCheck />
-            {counts.admins} admins
-          </Badge>
-          <Badge tone="info">{counts.teachers} teachers</Badge>
-          {counts.classTeachers > 0 && (
-            <Badge tone="warning">{counts.classTeachers} lead a class</Badge>
-          )}
-          <Badge tone="accent">{counts.students} students</Badge>
-          {counts.demo > 0 && <Badge tone="primary">{counts.demo} demo</Badge>}
-          {counts.inactive > 0 && <Badge tone="warning">{counts.inactive} inactive</Badge>}
-        </div>
+        {scope ? (
+          <div className="grid grid-cols-2 border-y border-border sm:grid-cols-3 lg:flex lg:divide-x lg:divide-border">
+            {summary.map((f) => (
+              <div key={f.label} className="px-5 py-3 first:pl-0 lg:min-w-36">
+                <p className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">{f.label}</p>
+                <p
+                  className={cn(
+                    'mt-1 text-2xl font-semibold leading-none tabular-nums',
+                    f.tone === 'success' && 'text-success',
+                    f.tone === 'warning' && (f.value > 0 ? 'text-warning' : 'text-foreground'),
+                    f.tone === 'muted' && 'text-muted-foreground',
+                  )}
+                >
+                  {f.value}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            <Badge tone="neutral">{counts.total} total</Badge>
+            <Badge tone={presence.onlineCount > 0 ? 'success' : 'neutral'} dot={presence.onlineCount > 0}>
+              {presence.onlineCount} online now
+            </Badge>
+            <Badge tone="primary">
+              <ShieldCheck />
+              {counts.admins} admins
+            </Badge>
+            <Badge tone="info">{counts.teachers} teachers</Badge>
+            {counts.classTeachers > 0 && (
+              <Badge tone="warning">{counts.classTeachers} lead a class</Badge>
+            )}
+            <Badge tone="accent">{counts.students} students</Badge>
+            {counts.demo > 0 && <Badge tone="primary">{counts.demo} demo</Badge>}
+            {counts.inactive > 0 && <Badge tone="warning">{counts.inactive} inactive</Badge>}
+          </div>
+        )}
       </PageHeader>
 
       <DataTable
-        columns={columns}
-        data={usersQuery.data}
+        columns={scopedColumns ?? columns}
+        data={scopedUsers}
+        groupBy={groupBy}
+        flat
         isLoading={usersQuery.isPending}
         error={usersQuery.error}
         onRetry={() => usersQuery.refetch()}
         getRowId={(row) => String(row.id)}
-        onRowClick={(row) => setViewing(row)}
-        searchPlaceholder="Search name or email…"
+        onRowClick={(row) => navigate(`/admin/users/${row.id}`)}
+        searchPlaceholder={scope ? 'Search name, email, ID or phone…' : 'Search name or email…'}
         searchParamKey="q"
         bulkActions={{
           // Already-inactive accounts have nothing to deactivate, so keeping
@@ -568,16 +793,28 @@ export default function AdminUsersPage() {
             )
           },
         }}
-        searchValues={(row) => [row.full_name, row.email, row.role]}
+        searchValues={(row) => [
+          row.full_name,
+          row.email,
+          row.role,
+          row.admission_number ?? '',
+          row.employee_id ?? '',
+          row.phone ?? '',
+        ]}
         initialSorting={[{ id: 'name', desc: false }]}
         facets={[
-          {
-            columnId: 'role',
-            label: 'Role',
-            // ALL_ROLES, not ROLES — a filter has to offer the roles that
-            // exist, including the one only the backend assigns.
-            options: ALL_ROLES.map((role) => ({ value: role, label: ROLE_LABEL[role] })),
-          },
+          // ALL_ROLES, not ROLES — a filter has to offer the roles that
+          // exist, including the one only the backend assigns. A page
+          // narrowed to one role has nothing to filter by.
+          ...(roleOptions.length > 1
+            ? [
+                {
+                  columnId: 'role',
+                  label: 'Role',
+                  options: roleOptions.map((role) => ({ value: role, label: ROLE_LABEL[role] })),
+                },
+              ]
+            : []),
           {
             columnId: 'status',
             label: 'Status',
@@ -603,11 +840,11 @@ export default function AdminUsersPage() {
         }}
         emptyState={
           <EmptyState
-            title="No users yet"
+            title={scoped?.empty ?? 'No users yet'}
             description="Create the first teacher or student account to get started."
             action={
               <Button asChild variant="primary" icon={<UserPlus />}>
-                <Link to="/admin/users/new">Add user</Link>
+                <Link to={newUserPath}>{scoped?.add ?? 'Add user'}</Link>
               </Button>
             }
           />
@@ -616,49 +853,12 @@ export default function AdminUsersPage() {
 
       <ImportUsersDialog open={importOpen} onOpenChange={setImportOpen} />
 
-      <ConfirmDialog
-        open={!!issuingFor}
-        onOpenChange={(v) => !v && !generateCredentials.isPending && setIssuingFor(null)}
-        title={`Generate credentials for ${issuingFor?.full_name ?? 'this user'}?`}
-        description={
-          issuingFor && issuedIds.has(issuingFor.id)
-            ? 'This replaces the password issued earlier. The current one stops working immediately and they are signed out everywhere.'
-            : 'A new password is created and emailed to them. If they already have one, it stops working immediately and they are signed out everywhere.'
-        }
-        confirmLabel="Generate"
-        loading={generateCredentials.isPending}
-        onConfirm={runGenerate}
-      >
-        <div className="space-y-3">
-          <div className="rounded-lg border border-border px-3 py-2.5">
-            <p className="text-xs text-muted-foreground">Will be sent to</p>
-            <p className="mt-0.5 truncate font-mono text-sm">{issuingFor?.email}</p>
-          </div>
-
-          <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5">
-            <Checkbox
-              checked={sendEmail}
-              onCheckedChange={(v) => setSendEmail(v === true)}
-              className="mt-0.5"
-            />
-            <span className="text-sm">
-              <span className="font-medium">Email the credentials</span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">
-                Turn this off if their mailbox does not exist yet — you will still see the password
-                once and can pass it on yourself.
-              </span>
-            </span>
-          </label>
-
-          {issuingFor && !issuingFor.is_active && (
-            <p className="rounded-lg border border-info/30 bg-info/8 px-3 py-2 text-xs">
-              This account is deactivated. Issuing credentials reactivates it.
-            </p>
-          )}
-        </div>
-      </ConfirmDialog>
-
-      <CredentialsModal credentials={issued} onClose={() => setIssued(null)} />
+      <GenerateCredentialsDialog
+        user={issuingFor}
+        reissue={!!issuingFor && issuedIds.has(issuingFor.id)}
+        onClose={() => setIssuingFor(null)}
+        onIssued={(id) => setIssuedIds((prev) => new Set(prev).add(id))}
+      />
 
       <ConfirmDialog
         open={!!bulkDeactivate}
@@ -768,22 +968,6 @@ export default function AdminUsersPage() {
         </div>
       </ConfirmDialog>
 
-      <UserDetailSheet
-        user={viewing}
-        onClose={() => setViewing(null)}
-        onEdit={(user) => {
-          setViewing(null)
-          navigate(`/admin/users/${user.id}/edit`)
-        }}
-        onDeactivate={(user) => {
-          setViewing(null)
-          setDeactivating(user)
-        }}
-        onGenerateCredentials={(user) => {
-          setViewing(null)
-          setIssuingFor(user)
-        }}
-      />
 
       <ConfirmDialog
         open={!!deactivating}
