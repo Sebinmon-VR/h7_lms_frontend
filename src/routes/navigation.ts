@@ -341,7 +341,7 @@ const TEACHER_NAV: NavSection[] = [
         to: '/teacher/report-cards',
         label: 'Report Cards',
         icon: FileBadge,
-        description: 'Enter paper exam marks and issue term cards for the classes you lead',
+        description: 'Enter offline exam marks and issue term cards for the classes you lead',
       },
     ],
   },

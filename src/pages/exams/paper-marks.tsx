@@ -556,8 +556,8 @@ export default function PaperMarksPage() {
   return (
     <div>
       <PageHeader
-        title="Paper exam marks"
-        description="Marks for exams written on paper in school. Enter them here and they count on the class’s report cards."
+        title="Offline exam marks"
+        description="Marks for exams held offline, written on paper in school rather than in the LMS. Enter them here and they count on the class’s report cards."
         actions={
           <Button asChild variant="outline">
             <Link to={scope.reportCardsPath}>
@@ -570,7 +570,7 @@ export default function PaperMarksPage() {
 
       {!catalogue.isPending && classes.length === 0 ? (
         <div className="flex items-start gap-3 rounded-md border border-info/30 bg-info/8 p-4 text-sm text-muted-foreground">
-          Marks for paper exams are entered by a class’s class teacher, and you do not lead a class. Ask an administrator
+          Marks for offline exams are entered by a class’s class teacher, and you do not lead a class. Ask an administrator
           to assign you.
         </div>
       ) : (

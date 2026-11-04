@@ -224,11 +224,11 @@ function GenerateDialog({
                 {candidateExams.length + paperExams.length === 0 ? (
                   <>
                     {publishedOnly
-                      ? 'No exams in this class have published results in that period, and no paper exam marks have been entered for it, so every card would be empty. '
+                      ? 'No exams in this class have published results in that period, and no offline exam marks have been entered for it, so every card would be empty. '
                       : 'No exams in this class fall in that period. '}
-                    For an exam written on paper, enter the marks under{' '}
+                    For an exam held offline, enter the marks under{' '}
                     <Link to={`${scope.paperMarksPath}?class=${classId}`} className="font-medium underline">
-                      Paper exam marks
+                      Offline exam marks
                     </Link>{' '}
                     first.
                   </>
@@ -240,7 +240,7 @@ function GenerateDialog({
                         .map((e) => e.title)
                         .join(', ')}${candidateExams.length > 4 ? '…' : ''}.`,
                     paperExams.length > 0 &&
-                      `${paperExams.length} written on paper: ${paperExams
+                      `${paperExams.length} held offline: ${paperExams
                         .slice(0, 4)
                         .map((s) => s.exam_name)
                         .join(', ')}${paperExams.length > 4 ? '…' : ''}.`,
@@ -356,7 +356,7 @@ export default function ReportCardsPage() {
               <Button asChild variant="outline">
                 <Link to={scope.paperMarksPath}>
                   <ClipboardPen className="size-4" />
-                  Paper exam marks
+                  Offline exam marks
                 </Link>
               </Button>
             )}
@@ -369,8 +369,8 @@ export default function ReportCardsPage() {
 
       {canIssue && (
         <p className="mb-5 rounded-md border border-border bg-card px-4 py-2.5 text-sm text-muted-foreground">
-          Exam written on paper in school? Enter its marks under{' '}
-          <span className="font-medium text-foreground">Paper exam marks</span> first, then issue the report cards. Exams held
+          Exam held offline, not in the LMS? Enter its marks under{' '}
+          <span className="font-medium text-foreground">Offline exam marks</span> first, then issue the report cards. Exams held
           in the LMS are counted on their own once their results are published.
         </p>
       )}
@@ -416,7 +416,7 @@ export default function ReportCardsPage() {
           title="No report cards yet"
           description={
             canIssue
-              ? 'Issue the first set once exam results are published, or once the marks for a paper exam are entered. Cards start unreleased so you can read them first.'
+              ? 'Issue the first set once exam results are published, or once the marks for an offline exam are entered. Cards start unreleased so you can read them first.'
               : 'Report cards for the classes you lead will appear here once they are issued.'
           }
           action={
@@ -551,7 +551,7 @@ function RemarksDialog({
       <DialogContent size="md">
         <DialogHeader>
           <DialogTitle>Remarks</DialogTitle>
-          <DialogDescription>The marks are a snapshot and cannot be edited here. Correct the marks (the exam script, or the paper exam marks) and re-issue the card instead.</DialogDescription>
+          <DialogDescription>The marks are a snapshot and cannot be edited here. Correct the marks (the exam script, or the offline exam marks) and re-issue the card instead.</DialogDescription>
         </DialogHeader>
         <DialogBody className="space-y-5">
           <Field id="rc-edit-title" label="Title">

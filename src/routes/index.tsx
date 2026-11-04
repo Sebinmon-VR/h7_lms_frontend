@@ -325,7 +325,7 @@ export function AppRoutes() {
                 <Route path="/teacher/meetings" element={<TeacherMeetings />} />
                 <Route path="/teacher/materials" element={<TeacherMaterials />} />
                 <Route path="/teacher/recordings" element={<TeacherRecordings />} />
-                {/* The gradebook was replaced by paper exam marks under Report Cards. */}
+                {/* The gradebook was replaced by offline exam marks under Report Cards. */}
                 <Route path="/teacher/gradebook" element={<Navigate to="/teacher/report-cards/paper-marks" replace />} />
                 <Route path="/teacher/insights" element={<TeacherInsights />} />
                 <Route path="/teacher/timetable" element={<TeacherTimetable />} />

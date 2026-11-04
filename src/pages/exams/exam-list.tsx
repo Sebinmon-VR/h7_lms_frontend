@@ -311,7 +311,7 @@ export default function ExamListPage() {
                 options={[
                   { value: 'ALL', label: 'Any' },
                   { value: 'ONLINE', label: 'Online' },
-                  { value: 'OFFLINE', label: 'Offline' },
+                  { value: 'OFFLINE', label: 'Upload paper' },
                 ]}
               />
             </div>

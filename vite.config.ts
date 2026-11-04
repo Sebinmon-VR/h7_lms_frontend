@@ -2,14 +2,18 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath, URL } from 'node:url'
 
-const BACKEND = process.env.VITE_BACKEND_ORIGIN || 'http://127.0.0.1:8000'
-
 export default defineConfig(({ command, mode }) => {
   // `loadEnv` reads the .env files *and* matching `process.env` entries, which
   // is how CI supplies these. Checked here rather than in `src/lib/env.ts`
   // because only this file runs in Node at build time — a throw in app code
   // would not fail the build, it would just white-screen the browser.
   const env = loadEnv(mode, process.cwd(), 'VITE_')
+
+  // Where the dev server proxies /api, /uploads and /files. Read through
+  // `loadEnv`, not `process.env`: Vite does not copy .env files into
+  // `process.env` before evaluating this file, so a value set only in .env
+  // would be silently ignored and the proxy would always hit localhost.
+  const BACKEND = (env.VITE_BACKEND_ORIGIN ?? '').trim() || 'http://127.0.0.1:8000'
   if (command === 'build') {
     const apiBase = (env.VITE_API_BASE ?? '').trim()
     const hint =

@@ -105,7 +105,7 @@ function LedClasses() {
                 <Button asChild variant="outline" size="sm">
                   <Link to={`/teacher/report-cards/paper-marks?class=${mapping.class_room.id}`}>
                     <FileText className="size-4" />
-                    Exam marks
+                    Offline exam marks
                   </Link>
                 </Button>
               </div>

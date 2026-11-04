@@ -168,10 +168,10 @@ export const TEACHER_GUIDE: GuidePart[] = [
       ...TEACHER_EXAM_TOPICS,
       {
         id: 'teacher-paper-marks',
-        title: 'Paper exam marks',
-        summary: 'Enter the marks of an exam written on paper in school, so they count on the report cards.',
+        title: 'Offline exam marks',
+        summary: 'Enter the marks of an exam held offline (written on paper in school, not in the LMS), so they count on the report cards.',
         steps: [
-          'Open **Report Cards** and press **Paper exam marks**.',
+          'Open **Report Cards** and press **Offline exam marks**.',
           'Choose the **Class**. The exams already entered are listed; press **Open** to change one, or fill in the empty sheet for a new exam.',
           'Enter the **Exam** name (it is printed on the report card) and the **Date written**.',
           'Under **Subjects in this exam**, tick the subjects the exam had. Every subject taught in the class starts ticked; untick the rest, or add a subject not taught in the class.',
@@ -191,7 +191,7 @@ export const TEACHER_GUIDE: GuidePart[] = [
         title: 'Report cards',
         summary: 'Issue term report cards for a class you lead, read them, then release them to students.',
         steps: [
-          'If the exam was written on paper, enter its marks first under **Paper exam marks**.',
+          'If the exam was held offline, enter its marks first under **Offline exam marks**.',
           'Open **Report Cards** and press **Issue report cards**.',
           'Choose the **Class** and enter a **Title**, such as Term 1 Report Card 2026. Set **Exams from** and **Exams until**.',
           'Choose the options (published results only, attendance, rank in the class). Leave **Release to students now** off so you can check first.',
