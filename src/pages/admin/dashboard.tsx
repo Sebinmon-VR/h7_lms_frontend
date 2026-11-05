@@ -53,7 +53,7 @@ const QUICK_ACTIONS = [
   { to: '/admin/users', label: 'Add a user', icon: UserPlus },
   { to: '/admin/classes', label: 'Create a class', icon: Layers },
   { to: '/admin/mappings', label: 'Map a teacher', icon: Link2 },
-  { to: '/admin/enrollments', label: 'Enroll students', icon: GraduationCap },
+  { to: '/admin/classes', label: 'Enroll students', icon: GraduationCap },
 ]
 
 /*
@@ -493,7 +493,7 @@ const TONE_DOT: Record<string, string> = {
   neutral: 'bg-muted-foreground/50',
 }
 
-/** Applications still in play, by the step they are at. */
+/** Enquiries still in play, by the step they are at. */
 function AdmissionsOverview({ className }: { className?: string }) {
   const summary = useAdmissionRequestSummary()
   const data = summary.data
@@ -505,10 +505,10 @@ function AdmissionsOverview({ className }: { className?: string }) {
   return (
     <Section
       className={className}
-      title="Admission requests"
+      title="Enquiries"
       icon={Inbox}
       iconClassName="text-primary"
-      description="Applications still in progress."
+      description="Admission enquiries still in progress"
       actions={<SectionLink to="/admin/admission-requests">Open</SectionLink>}
     >
       {summary.isPending ? (
@@ -609,7 +609,7 @@ export default function AdminDashboardPage() {
     {
       label: 'Students with no class',
       items: alerts.studentsWithoutEnrollment,
-      to: '/admin/enrollments',
+      to: '/admin/classes',
       cta: 'Enroll them',
     },
     {

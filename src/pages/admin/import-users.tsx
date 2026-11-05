@@ -78,7 +78,7 @@ function judgeRow(
       role: 'STUDENT',
       error:
         roleRaw === 'CLASS_TEACHER'
-          ? 'Import as TEACHER — “class teacher” is granted by assigning a class under Teacher Mappings'
+          ? 'Import as TEACHER — “class teacher” is granted by assigning a class under Subjects & Teachers'
           : `Unknown role “${roleRaw}” — use ADMIN, TEACHER or STUDENT`,
       warning: null,
     }

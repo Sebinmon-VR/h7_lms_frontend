@@ -28,10 +28,8 @@ const AdminUserForm = lazy(() => import('@/pages/admin/user-form'))
 const AdminUserProfile = lazy(() => import('@/pages/admin/user-profile'))
 const AdminClasses = lazy(() => import('@/pages/admin/classes'))
 const AdminSubjects = lazy(() => import('@/pages/admin/subjects'))
-const AdminMappings = lazy(() => import('@/pages/admin/assignments'))
 const AdminMappingNew = lazy(() => import('@/pages/admin/mapping-new'))
 const AdminClassTeacherNew = lazy(() => import('@/pages/admin/class-teacher-new'))
-const AdminEnrollments = lazy(() => import('@/pages/admin/enrollments'))
 const AdminReports = lazy(() => import('@/pages/admin/reports'))
 const AdminMeetings = lazy(() => import('@/pages/admin/meetings'))
 const AdminMaterials = lazy(() => import('@/pages/admin/materials'))
@@ -49,7 +47,6 @@ const AdminAdmissions = lazy(() => import('@/pages/admin/admissions'))
 const AdminAdmissionRequests = lazy(() => import('@/pages/admin/admission-requests'))
 // The live board: every class room right now, with a way in and its activity log.
 const AdminLiveClasses = lazy(() => import('@/pages/admin/live-classes'))
-const AdminFamilies = lazy(() => import('@/pages/admin/families'))
 const AdminFinance = lazy(() => import('@/pages/admin/finance'))
 const AdminFeeCollection = lazy(() => import('@/pages/admin/fee-collection'))
 const AdminNotices = lazy(() => import('@/pages/admin/notices'))
@@ -251,7 +248,8 @@ export function AppRoutes() {
               <Route path="/admin/users/:userId" element={<AdminUserProfile />} />
               <Route path="/admin/classes" element={<AdminClasses />} />
               <Route path="/admin/subjects" element={<AdminSubjects />} />
-              <Route path="/admin/mappings" element={<AdminMappings />} />
+              {/* Teacher allocation now lives on Subjects & Teachers. */}
+              <Route path="/admin/mappings" element={<Navigate to="/admin/subjects" replace />} />
               {/* Both mapping forms own a route rather than a dialog: they
                   explain what an assignment grants and preview it before it is
                   made, which needs more room than a modal has. */}
@@ -261,8 +259,9 @@ export function AppRoutes() {
                 element={<AdminClassTeacherNew />}
               />
               {/* Older label; keep the URL working. */}
-              <Route path="/admin/assignments" element={<Navigate to="/admin/mappings" replace />} />
-              <Route path="/admin/enrollments" element={<AdminEnrollments />} />
+              <Route path="/admin/assignments" element={<Navigate to="/admin/subjects" replace />} />
+              {/* Enrollment now lives on each class, under Classes & Students. */}
+              <Route path="/admin/enrollments" element={<Navigate to="/admin/classes" replace />} />
               <Route path="/admin/reports" element={<AdminReports />} />
               <Route path="/admin/meetings" element={<AdminMeetings />} />
               <Route path="/admin/live-classes" element={<AdminLiveClasses />} />
@@ -279,7 +278,6 @@ export function AppRoutes() {
               {/* Its own path rather than /admin/admissions/requests, so the
                   Admissions sidebar entry does not also light up for it. */}
               <Route path="/admin/admission-requests" element={<AdminAdmissionRequests />} />
-              <Route path="/admin/families" element={<AdminFamilies />} />
               <Route path="/admin/finance" element={<AdminFinance />} />
               {/* Not under /admin/finance, so the two sidebar entries light up separately. */}
               <Route path="/admin/fee-collection" element={<AdminFeeCollection />} />

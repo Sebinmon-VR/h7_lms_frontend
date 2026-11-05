@@ -1780,7 +1780,7 @@ function DiscountsTab({ academicYearId, currency }: { academicYearId: number | n
         <p className="max-w-2xl text-sm text-muted-foreground">
           A sibling concession counts children in a recorded household; a multi-registration
           one counts subjects a single student takes at once. They are different rules — record
-          households under <strong>Families</strong> for the first to have anything to count.
+          siblings on each student's <strong>Parents &amp; Siblings</strong> tab for the first to have anything to count.
         </p>
         <Button
           onClick={() => {

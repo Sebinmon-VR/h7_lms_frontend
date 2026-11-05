@@ -1,11 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { ArrowLeft, ChevronLeft, ChevronRight, FlaskConical, IdCard, Save, ShieldCheck, UserPlus } from 'lucide-react'
 import * as React from 'react'
+import { toast } from 'sonner'
 import { useForm } from 'react-hook-form'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import type { Program, UserOut, UserProfileFields } from '@/api/types'
-import { useCreateUser, useUpdateUser, useUsers } from '@/queries/admin.queries'
+import { useCreateEnrollment, useCreateUser, useUpdateUser, useUsers } from '@/queries/admin.queries'
 import { ROLES, ROLE_LABEL } from '@/lib/constants'
 import { cn } from '@/lib/cn'
 import { formatDateTime } from '@/lib/datetime'
@@ -26,6 +27,7 @@ import { FormActions, FormPage, FormSection } from '@/components/forms/form-page
 import { ActiveBadge, RoleBadge } from '@/components/domain/badges'
 import { ProfileFieldsSection, sectionAnchor } from '@/components/domain/profile-fields'
 import { PhotoField } from '@/components/domain/photo-field'
+import { StudentFamily } from './student-family'
 import {
   DemoAccessFields,
   DemoBadge,
@@ -122,6 +124,10 @@ function CreateUserForm() {
   // teacher" opens a teacher form rather than a student one.
   const [searchParams] = useSearchParams()
   const presetRole = createSchema.shape.role.safeParse(searchParams.get('role'))
+  // Opened from a class ("Open the full form"): enroll the new student there
+  // and go back to that class.
+  const presetClassId = Number(searchParams.get('class_id')) || null
+  const createEnrollment = useCreateEnrollment()
   const [profile, setProfile] = React.useState<UserProfileFields>({})
   const [overrideEmail, setOverrideEmail] = React.useState(false)
   const [demoAccess, setDemoAccess] = React.useState<DemoAccessValue>(() => demoAccessOf())
@@ -155,6 +161,15 @@ function CreateUserForm() {
         email: overrideEmail && email ? email : null,
         password: null,
       })
+      if (presetClassId && isStudent) {
+        try {
+          await createEnrollment.mutateAsync({ student_id: created.id, class_id: presetClassId })
+        } catch {
+          toast.warning('The student was created but not enrolled. Enroll them from the class.')
+        }
+        navigate(`/admin/classes?class=${presetClassId}`)
+        return
+      }
       // Back to the list the form was opened from, where the new account shows.
       const listPath = presetRole.success
         ? { STUDENT: '/admin/students', TEACHER: '/admin/teachers', ADMIN: '/admin/staff' }[values.role]
@@ -213,7 +228,7 @@ function CreateUserForm() {
             value={role}
             // Narrower than UserRole: a new account cannot be created as a
             // CLASS_TEACHER or a PARENT — the backend derives the first from
-            // class assignments and mints the second on the Families screen.
+            // class assignments and mints the second from a student's Parents & Siblings tab.
             onValueChange={(v) =>
               form.setValue('role', v as CreateValues['role'], { shouldValidate: true })
             }
@@ -663,8 +678,8 @@ function EditUserForm({ user }: { user: UserOut }) {
 
                 {user.role === 'PARENT' && (
                   <p className="rounded-lg border border-info/30 bg-info/8 px-3.5 py-3 text-xs leading-relaxed text-muted-foreground sm:col-span-2">
-                    This is a guardian's login. What they can see is decided per child on{' '}
-                    <strong>Families → Parent accounts</strong>, not here.
+                    This is a guardian's login. Which children they can see is set on each child's{' '}
+                    <strong>Parents &amp; Siblings</strong> tab, not here.
                   </p>
                 )}
 
@@ -684,6 +699,16 @@ function EditUserForm({ user }: { user: UserOut }) {
               onChange={(patch) => setProfile((prev) => ({ ...prev, ...patch }))}
               mode="edit"
               layout="page"
+              familySlot={
+                // Parents and siblings save as they change, not with Save
+                // changes: each is its own link or household on the server.
+                user.role === 'STUDENT' ? (
+                  <div className="space-y-1 border-t border-border pt-5">
+                    <p className="text-xs text-muted-foreground">Parent logins and siblings below are saved straight away</p>
+                    <StudentFamily student={user} hideGuardian />
+                  </div>
+                ) : undefined
+              }
             />
 
             {role === 'STUDENT' && (

@@ -88,7 +88,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   aria-expanded={open}
                   aria-controls={listId}
                   className={cn(
-                    'group flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-2xs font-semibold uppercase tracking-wider transition-colors hover:bg-muted/60',
+                    'group flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors hover:bg-muted/60',
                     active ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
                   )}
                 >

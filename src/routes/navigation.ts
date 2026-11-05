@@ -29,7 +29,6 @@ import {
   Library,
   LineChart,
   ListChecks,
-  Link2,
   Megaphone,
   NotebookPen,
   PlaneTakeoff,
@@ -43,7 +42,6 @@ import {
   ShieldCheck,
   UserRound,
   Users,
-  UsersRound,
   Video,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -87,13 +85,13 @@ const ADMIN_NAV: NavSection[] = [
     items: [
       {
         to: '/admin/admission-requests',
-        label: 'Applications',
+        label: 'Enquiries',
         icon: Inbox,
-        description: 'Applications from the website: review, admit in one step, or decline',
+        description: 'Admission enquiries from the website: review, collect documents and fee, admit',
       },
       {
         to: '/admin/admissions',
-        label: 'Academic Sessions',
+        label: 'Academic Years',
         icon: BadgeCheck,
         description: 'Session years and the categories students are admitted under',
       },
@@ -107,12 +105,6 @@ const ADMIN_NAV: NavSection[] = [
       { to: '/admin/staff', label: 'Staff', icon: Briefcase, description: 'Administrators and office staff' },
       { to: '/admin/users', label: 'All Users', icon: Users, description: 'Every account and role in one list' },
       {
-        to: '/admin/families',
-        label: 'Parents & Guardians',
-        icon: UsersRound,
-        description: 'Households for sibling billing, and the parent logins that reach them',
-      },
-      {
         to: '/admin/leave',
         label: 'Leave & Substitutes',
         icon: PlaneTakeoff,
@@ -123,19 +115,19 @@ const ADMIN_NAV: NavSection[] = [
   {
     heading: 'Academics',
     items: [
-      { to: '/admin/classes', label: 'Classes & Sections', icon: Layers, description: 'Class sections' },
-      { to: '/admin/subjects', label: 'Subjects', icon: BookOpen, description: 'Subject catalogue' },
       {
-        to: '/admin/enrollments',
-        label: 'Student Enrollment',
-        icon: GraduationCap,
-        description: 'Enroll students into classes',
+        to: '/admin/classes',
+        label: 'Classes & Students',
+        icon: Layers,
+        description: 'Class sections, their students and enrollment',
+        alsoActiveFor: ['/admin/enrollments'],
       },
       {
-        to: '/admin/mappings',
-        label: 'Teacher Allocation',
-        icon: Link2,
-        description: 'Subject mappings and class teachers',
+        to: '/admin/subjects',
+        label: 'Subjects & Teachers',
+        icon: BookOpen,
+        description: 'Subjects, teacher allocation and class teachers',
+        alsoActiveFor: ['/admin/mappings'],
       },
       {
         to: '/admin/timetable',
@@ -569,7 +561,7 @@ const ADMIN_TUITION_NAV: NavSection[] = [
       },
       {
         to: '/admin/tuition/admissions',
-        label: 'Academic Sessions',
+        label: 'Academic Years',
         icon: BadgeCheck,
         description: 'Tuition session years and the categories students are admitted under',
       },

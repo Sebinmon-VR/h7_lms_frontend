@@ -20,7 +20,7 @@ import { RoleBadge } from '@/components/domain/badges'
 import { Field } from '@/components/forms/field'
 import { FormActions, FormPage, FormSection } from '@/components/forms/form-page'
 
-const BACK_TO = '/admin/mappings'
+const BACK_TO = '/admin/subjects'
 
 export default function AdminMappingNewPage() {
   const navigate = useNavigate()
@@ -93,7 +93,7 @@ export default function AdminMappingNewPage() {
       title="Map a teacher to a subject"
       description="Gives one teacher one subject in one class. This is what lets them take the register, log topics, post materials and enter marks for that pairing."
       backTo={BACK_TO}
-      backLabel="Teacher Mappings"
+      backLabel="Subjects & Teachers"
       aside={
         <Card className="p-5">
           <h2 className="text-sm font-semibold">Summary</h2>

@@ -7,6 +7,7 @@ import {
   CalendarClock,
   Check,
   CheckCircle2,
+  ChevronRight,
   Copy,
   ExternalLink,
   Eye,
@@ -27,7 +28,6 @@ import {
   SearchCheck,
   Send,
   Trash2,
-  UserRoundPlus,
   X,
   XCircle,
 } from 'lucide-react'
@@ -66,6 +66,7 @@ import {
   useReviewAdmissionPayment,
   useSetAdmissionRequestStatus,
 } from '@/queries/admission-requests.queries'
+import { cn } from '@/lib/cn'
 import { formatDate, formatDateTime, formatRelative, parseApiDate } from '@/lib/datetime'
 import { countLabel } from '@/lib/format'
 import { formatFileSize, resolveFileUrl } from '@/lib/files'
@@ -125,8 +126,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { DataTable } from '@/components/data/data-table'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field, FormError } from '@/components/forms/field'
-import { EmptyState } from '@/components/feedback/states'
-import { PageHeader } from '@/components/layout/page-header'
+import { Figure, Figures, TabStrip, TONE_FILL, TONE_TEXT, WorkspaceHeader, type Tone } from '@/components/layout/workspace'
 
 /**
  * The office's inbox for the website's admission form.
@@ -2627,6 +2627,16 @@ const FILTER_LABEL: Record<Filter, string> = {
   ALL: 'All',
 }
 
+/** The colour each filter carries, on its tab and wherever its count appears. */
+const FILTER_TONE: Record<Filter, Tone | undefined> = {
+  ACTION: 'primary',
+  PROGRESS: 'info',
+  WAITLISTED: 'warning',
+  ADMITTED: 'success',
+  REJECTED: 'neutral',
+  ALL: undefined,
+}
+
 /** Which statuses each chip shows. ALL is every row, whatever its status. */
 const FILTER_STATUSES: Record<Exclude<Filter, 'ALL'>, AdmissionRequestStatus[]> = {
   ACTION: ACTION_REQUEST_STATUSES,
@@ -2889,24 +2899,43 @@ export function AdmissionRequestsBoard({ board }: { board: Program }) {
     [actions],
   )
 
-  const filterOptions = FILTERS.map((value) => ({
-    value,
-    label: (
-      <>
-        {FILTER_LABEL[value]}
-        <span className="ml-1 text-xs text-muted-foreground">{counts[value]}</span>
-      </>
-    ),
-  }))
+  // ------------------------------------------------ figures for the head
+  const now = Date.now()
+  const DAY = 24 * 60 * 60 * 1000
+  const submittedAt = (r: AdmissionRequestOut) => (r.submitted_at ? new Date(r.submitted_at).getTime() : now)
+  const newThisWeek = rows.filter((r) => now - submittedAt(r) < 7 * DAY).length
+  const actionRows = rows.filter((r) => FILTER_STATUSES.ACTION.includes(r.status))
+  const oldestAction = actionRows.reduce<AdmissionRequestOut | null>(
+    (oldest, r) => (!oldest || submittedAt(r) < submittedAt(oldest) ? r : oldest),
+    null,
+  )
+  const oldestDays = oldestAction ? Math.floor((now - submittedAt(oldestAction)) / DAY) : 0
+  const decided = counts.ADMITTED + counts.REJECTED
+  const admitRate = decided > 0 ? Math.round((counts.ADMITTED / decided) * 100) : null
+
+  /**
+   * Where open enquiries stand, left to right. Each stage counts the
+   * statuses inside it; waitlisted and declined sit apart, off the line.
+   */
+  const by = (statuses: AdmissionRequestStatus[]) => rows.filter((r) => statuses.includes(r.status)).length
+  const stages: { label: string; count: number; tone: Tone }[] = [
+    { label: 'New and in review', count: by(['NEW', 'UNDER_REVIEW']), tone: 'primary' },
+    { label: 'Documents', count: by(['DOCUMENTS_REQUESTED', 'DOCUMENTS_SUBMITTED', 'DOCUMENTS_VERIFIED']), tone: 'info' },
+    { label: 'Admission fee', count: by(['PAYMENT_REQUESTED', 'PAYMENT_SUBMITTED', 'PAYMENT_VERIFIED']), tone: 'warning' },
+    { label: 'Admitted', count: counts.ADMITTED, tone: 'success' },
+  ]
+  const stageTotal = stages.reduce((n, s) => n + s.count, 0)
 
   return (
-    <>
-      <PageHeader
-        title="Admission Requests"
-        description="Applications sent from the admission form on the school website. Select applicants, collect and verify their documents and admission fee, then admit the student in one step."
+    <div className="space-y-6">
+      <WorkspaceHeader
+        title="Enquiries"
+        description="Admission enquiries from the school website, from first contact to an enrolled student"
+        icon={Inbox}
         actions={
           <Button
             variant="outline"
+            size="sm"
             icon={<RefreshCw />}
             loading={requests.isFetching && !requests.isPending}
             onClick={() => requests.refetch()}
@@ -2914,84 +2943,145 @@ export function AdmissionRequestsBoard({ board }: { board: Program }) {
             Refresh
           </Button>
         }
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge tone="primary">
-            <Inbox />
-            {countLabel(counts.ACTION, 'needs', 'need')} action
-          </Badge>
-          {counts.NEW > 0 && <Badge tone="primary">{countLabel(counts.NEW, 'new request')}</Badge>}
-          <Badge tone="info">{counts.PROGRESS} in progress</Badge>
-          <Badge tone="warning">{countLabel(counts.WAITLISTED, 'waitlisted')}</Badge>
-          <Badge tone="success">{countLabel(counts.ADMITTED, 'admitted')}</Badge>
-          <Badge tone="neutral">{counts.ALL} total</Badge>
-        </div>
-      </PageHeader>
-
-      <div className="mb-4 overflow-x-auto pb-1">
-        <Segmented
-          layoutId="admission-request-filter"
-          size="sm"
-          value={filter}
-          onChange={setFilter}
-          options={filterOptions}
-          aria-label="Filter by status"
-        />
-      </div>
-
-      <DataTable
-        columns={columns}
-        data={filtered}
-        isLoading={requests.isPending}
-        error={requests.error}
-        onRetry={() => requests.refetch()}
-        getRowId={(row) => String(row.id)}
-        onRowClick={(row) => setViewingId(row.id)}
-        initialSorting={[{ id: 'submitted', desc: true }]}
-        searchPlaceholder="Search student, reference, parent, phone or email…"
-        searchValues={(row) => [
-          row.student_full_name,
-          row.reference,
-          row.contact_name,
-          row.contact_phone,
-          row.contact_email,
-          row.class_name,
-          row.previous_school,
-          ...row.parents.flatMap((p) => [p.full_name, p.phone, p.email]),
-        ]}
-        searchParamKey="q"
-        emptyState={
-          <EmptyState
-            icon={<UserRoundPlus />}
-            title={EMPTY_COPY[filter].title}
-            description={EMPTY_COPY[filter].description}
-            action={
-              filter !== 'ALL' && counts.ALL > 0 ? (
-                <Button variant="outline" onClick={() => setFilter('ALL')}>
-                  Show all requests
-                </Button>
-              ) : undefined
-            }
+        tabs={
+          <TabStrip
+            label="Show"
+            idPrefix="enquiry-tab"
+            value={filter}
+            onChange={setFilter}
+            tabs={FILTERS.map((value) => ({
+              key: value,
+              label: FILTER_LABEL[value],
+              count: counts[value],
+              alert: value === 'ACTION',
+              tone: FILTER_TONE[value],
+            }))}
           />
         }
-        csv={{
-          filename: 'admission-requests',
-          columns: [
-            { header: 'Reference', value: (r) => r.reference },
-            { header: 'Student', value: (r) => r.student_full_name },
-            { header: 'Date of birth', value: (r) => r.date_of_birth ?? '' },
-            { header: 'Class applied', value: (r) => r.class_name ?? '' },
-            { header: 'Session', value: (r) => r.academic_year_name ?? '' },
-            { header: 'Contact', value: (r) => r.contact_name ?? '' },
-            { header: 'Phone', value: (r) => r.contact_phone ?? '' },
-            { header: 'Email', value: (r) => r.contact_email ?? '' },
-            { header: 'Status', value: (r) => REQUEST_STATUS_LABEL[r.status] ?? humanise(r.status) },
-            { header: 'Fee', value: (r) => (r.payment ? formatMoney(r.payment.amount, r.payment.currency) : '') },
-            { header: 'Fee status', value: (r) => (r.payment ? PAYMENT_STATUS[r.payment.status]?.label ?? '' : '') },
-            { header: 'Submitted', value: (r) => r.submitted_at ?? '' },
-          ],
-        }}
       />
+
+      <div className="-mt-6 space-y-6">
+        <Figures>
+          <Figure
+            label="Needs action"
+            value={String(counts.ACTION)}
+            context={counts.NEW > 0 ? `${counts.NEW} new` : 'nothing new'}
+            tone="primary"
+          />
+          <Figure label="This week" value={String(newThisWeek)} context="enquiries received" tone="info" />
+          <Figure
+            label="Waiting longest"
+            value={oldestAction ? `${oldestDays} ${oldestDays === 1 ? 'day' : 'days'}` : '—'}
+            context={oldestAction ? oldestAction.student_full_name : 'nobody waiting'}
+            alert={oldestDays >= 7}
+            tone={oldestDays >= 7 ? 'danger' : 'neutral'}
+          />
+          <Figure label="With the family" value={String(counts.PROGRESS)} context="documents or fee pending" tone="warning" />
+          <Figure
+            label="Admitted"
+            value={String(counts.ADMITTED)}
+            context={admitRate === null ? 'none decided yet' : `${admitRate}% of decided`}
+            tone="success"
+          />
+        </Figures>
+
+        {/* ------------------------------------------------------ pipeline */}
+        <section aria-label="Pipeline">
+          {/* Each stage's share of enquiries on the way through. */}
+          <div className="flex h-2 overflow-hidden rounded-full bg-muted">
+            {stageTotal > 0 &&
+              stages.map((stage) =>
+                stage.count > 0 ? (
+                  <span
+                    key={stage.label}
+                    className={TONE_FILL[stage.tone]}
+                    style={{ width: `${(stage.count / stageTotal) * 100}%` }}
+                    title={`${stage.label}: ${stage.count}`}
+                  />
+                ) : null,
+              )}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+            {stages.map((stage, i) => (
+              <React.Fragment key={stage.label}>
+                {i > 0 && <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" strokeWidth={1.5} aria-hidden />}
+                <span className="inline-flex items-center gap-2">
+                  <span className={cn('size-2 rounded-full', TONE_FILL[stage.tone])} aria-hidden />
+                  <span className={cn('text-base font-medium tabular-nums', stage.count > 0 ? TONE_TEXT[stage.tone] : 'text-muted-foreground')}>
+                    {stage.count}
+                  </span>
+                  <span className="text-sm text-muted-foreground">{stage.label}</span>
+                </span>
+              </React.Fragment>
+            ))}
+            <span className="ml-auto flex items-center gap-4 text-sm text-muted-foreground">
+              <span className="inline-flex items-center gap-2">
+                <span className={cn('size-2 rounded-full', TONE_FILL.warning)} aria-hidden />
+                <span className="font-medium tabular-nums text-foreground">{counts.WAITLISTED}</span> waitlisted
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <span className={cn('size-2 rounded-full', TONE_FILL.neutral)} aria-hidden />
+                <span className="font-medium tabular-nums text-foreground">{counts.REJECTED}</span> declined
+              </span>
+            </span>
+          </div>
+        </section>
+
+        <DataTable
+          key={filter}
+          columns={columns}
+          data={filtered}
+          isLoading={requests.isPending}
+          error={requests.error}
+          onRetry={() => requests.refetch()}
+          getRowId={(row) => String(row.id)}
+          onRowClick={(row) => setViewingId(row.id)}
+          initialSorting={[{ id: 'submitted', desc: true }]}
+          searchPlaceholder="Search name, reference, parent or phone"
+          searchValues={(row) => [
+            row.student_full_name,
+            row.reference,
+            row.contact_name,
+            row.contact_phone,
+            row.contact_email,
+            row.class_name,
+            row.previous_school,
+            ...row.parents.flatMap((p) => [p.full_name, p.phone, p.email]),
+          ]}
+          searchParamKey="q"
+          pageSize={10}
+          flat
+          emptyState={
+            // Flat, on the page like the table it stands in for, not a dashed box.
+            <div className="border-y border-border bg-card px-6 py-12 text-center">
+              <p className="text-base font-medium text-foreground">{EMPTY_COPY[filter].title}</p>
+              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">{EMPTY_COPY[filter].description}</p>
+              {filter !== 'ALL' && counts.ALL > 0 && (
+                <Button variant="outline" size="sm" className="mt-4" onClick={() => setFilter('ALL')}>
+                  Show all {counts.ALL}
+                </Button>
+              )}
+            </div>
+          }
+          csv={{
+            filename: 'enquiries',
+            columns: [
+              { header: 'Reference', value: (r) => r.reference },
+              { header: 'Student', value: (r) => r.student_full_name },
+              { header: 'Date of birth', value: (r) => r.date_of_birth ?? '' },
+              { header: 'Class applied', value: (r) => r.class_name ?? '' },
+              { header: 'Session', value: (r) => r.academic_year_name ?? '' },
+              { header: 'Contact', value: (r) => r.contact_name ?? '' },
+              { header: 'Phone', value: (r) => r.contact_phone ?? '' },
+              { header: 'Email', value: (r) => r.contact_email ?? '' },
+              { header: 'Status', value: (r) => REQUEST_STATUS_LABEL[r.status] ?? humanise(r.status) },
+              { header: 'Fee', value: (r) => (r.payment ? formatMoney(r.payment.amount, r.payment.currency) : '') },
+              { header: 'Fee status', value: (r) => (r.payment ? PAYMENT_STATUS[r.payment.status]?.label ?? '' : '') },
+              { header: 'Submitted', value: (r) => r.submitted_at ?? '' },
+            ],
+          }}
+        />
+      </div>
 
       <RequestDetailSheet
         request={viewing}
@@ -3056,7 +3146,7 @@ export function AdmissionRequestsBoard({ board }: { board: Program }) {
           }
         }}
       />
-    </>
+    </div>
   )
 }
 

@@ -50,12 +50,6 @@ export function StatCard({
         onClick={onClick}
         className="relative overflow-hidden p-5"
       >
-        {/* Soft brand wash in the corner, one per card. */}
-        <div
-          className="pointer-events-none absolute -right-6 -top-10 size-24 rounded-full opacity-40 blur-2xl"
-          style={{ background: 'radial-gradient(circle, hsl(var(--primary) / 0.5), transparent 70%)' }}
-          aria-hidden
-        />
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>

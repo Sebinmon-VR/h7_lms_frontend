@@ -4,7 +4,7 @@ export function Logo({ className, size = 32 }: { className?: string; size?: numb
   return (
     <span
       className={cn(
-        'inline-flex shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent font-bold text-white shadow-sm',
+        'inline-flex shrink-0 items-center justify-center rounded-lg bg-primary font-semibold text-primary-foreground',
         className,
       )}
       style={{ width: size, height: size, fontSize: size * 0.42 }}

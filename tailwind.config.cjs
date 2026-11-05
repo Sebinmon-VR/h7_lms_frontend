@@ -102,7 +102,7 @@ module.exports = {
         md: '0 4px 12px -2px hsl(var(--shadow-color) / 0.10), 0 2px 6px -2px hsl(var(--shadow-color) / 0.06)',
         lg: '0 12px 28px -6px hsl(var(--shadow-color) / 0.14), 0 4px 10px -4px hsl(var(--shadow-color) / 0.08)',
         xl: '0 24px 48px -12px hsl(var(--shadow-color) / 0.20)',
-        glow: '0 0 0 1px hsl(var(--primary) / 0.18), 0 8px 30px -8px hsl(var(--primary) / 0.45)',
+        glow: '0 0 0 1px hsl(var(--primary) / 0.25)',
       },
       keyframes: {
         'fade-in': {

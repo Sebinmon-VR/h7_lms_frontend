@@ -1,16 +1,20 @@
 import type { ColumnDef } from '@tanstack/react-table'
 import {
+  Backpack,
+  Briefcase,
   CalendarRange,
   Eye,
   KeyRound,
   MoreHorizontal,
   Pencil,
-  ShieldCheck,
+  Presentation,
   Trash2,
   Upload,
   UserCheck,
   UserPlus,
   UserX,
+  Users,
+  type LucideIcon,
 } from 'lucide-react'
 import * as React from 'react'
 import { Link, useNavigate } from 'react-router-dom'
@@ -59,8 +63,7 @@ import { UserCell } from '@/components/domain/user-cell'
 import { BatchProgress, useBatchRunner } from '@/components/feedback/batch-progress'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field } from '@/components/forms/field'
-import { EmptyState } from '@/components/feedback/states'
-import { PageHeader } from '@/components/layout/page-header'
+import { Figure, Figures, TabStrip, WorkspaceHeader, type Tone } from '@/components/layout/workspace'
 import { GenerateCredentialsDialog } from './generate-credentials'
 import { ImportUsersDialog } from './import-users'
 
@@ -202,7 +205,7 @@ export const editSchema = z.object({
   // opening their row and pressing Save would silently change it.
   //
   // CLASS_TEACHER is granted and revoked by assigning classes on Teacher
-  // Mappings. PARENT is granted by creating the account on Families, which
+  // Mappings. PARENT is granted by creating the account from a student's Parents & Siblings tab, which
   // mints the login and its links to children together — a parent with no
   // links can see nothing, so the role on its own is never what anyone wants.
   role: z.enum(['ADMIN', 'CLASS_TEACHER', 'TEACHER', 'STUDENT', 'PARENT']),
@@ -234,6 +237,24 @@ export function profileOf(user: UserOut): UserProfileFields {
  * credentials and imports behave identically wherever the office starts from.
  */
 export type UserScope = 'students' | 'teachers' | 'staff'
+
+/** The tabs on All Users: each kind of account, plus the deactivated ones. */
+type RoleTab = 'all' | 'students' | 'teaching' | 'staff' | 'parents' | 'inactive'
+
+const ROLE_TABS: { key: RoleTab; label: string; tone?: Tone; test: (u: UserOut) => boolean }[] = [
+  { key: 'all', label: 'All', test: () => true },
+  { key: 'students', label: 'Students', tone: 'primary', test: (u) => u.role === 'STUDENT' },
+  { key: 'teaching', label: 'Teachers', tone: 'info', test: (u) => isTeachingRole(u.role) },
+  { key: 'staff', label: 'Staff', tone: 'success', test: (u) => u.role === 'ADMIN' },
+  { key: 'parents', label: 'Parents', tone: 'warning', test: (u) => u.role === 'PARENT' },
+  { key: 'inactive', label: 'Inactive', tone: 'neutral', test: (u) => !u.is_active },
+]
+
+const SCOPE_ICON: Record<UserScope, LucideIcon> = {
+  students: Backpack,
+  teachers: Presentation,
+  staff: Briefcase,
+}
 
 const USER_SCOPES: Record<
   UserScope,
@@ -283,6 +304,7 @@ export default function AdminUsersPage({ scope }: { scope?: UserScope } = {}) {
   // its own instance for the single-user save.
   const bulkUpdateUser = useUpdateUser()
   const [importOpen, setImportOpen] = React.useState(false)
+  const [roleTab, setRoleTab] = React.useState<RoleTab>('all')
   const [deactivating, setDeactivating] = React.useState<UserOut | null>(null)
 
   /**
@@ -690,67 +712,69 @@ export default function AdminUsersPage({ scope }: { scope?: UserScope } = {}) {
     }
   }, [scopedUsers])
 
+  const all = scopedUsers ?? []
+  const shown = scope ? scopedUsers : all.filter(ROLE_TABS.find((t) => t.key === roleTab)!.test)
+  const onlineNow = all.filter((u) => presence.byId.get(u.id)?.is_online).length
+
   return (
-    <>
-      <PageHeader
-        title={scoped?.title ?? 'Users'}
+    <div className="space-y-6">
+      <WorkspaceHeader
+        title={scoped?.title ?? 'All Users'}
         description={
           scoped?.description ??
-          'Every account in the system. Accounts are deactivated rather than deleted, so records that reference them stay intact.'
+          'Every account in the school: students, teachers, staff and parents. Accounts are deactivated rather than deleted, so their records stay'
         }
+        icon={scope ? SCOPE_ICON[scope] : Users}
         actions={
           <>
-            <Button variant="outline" icon={<Upload />} onClick={() => setImportOpen(true)}>
+            <Button variant="outline" size="sm" icon={<Upload />} onClick={() => setImportOpen(true)}>
               Import CSV
             </Button>
-            <Button asChild variant="primary" icon={<UserPlus />}>
+            <Button asChild size="sm" icon={<UserPlus />}>
               <Link to={newUserPath}>{scoped?.add ?? 'Add user'}</Link>
             </Button>
           </>
         }
-      >
+        tabs={
+          scope ? undefined : (
+            <TabStrip
+              label="Accounts"
+              idPrefix="users-tab"
+              value={roleTab}
+              onChange={setRoleTab}
+              tabs={ROLE_TABS.map((t) => ({ key: t.key, label: t.label, tone: t.tone, count: all.filter(t.test).length }))}
+            />
+          )
+        }
+      />
+
+      <div id="users-tab-panel" role={scope ? undefined : 'tabpanel'} className="-mt-6 space-y-6">
         {scope ? (
-          <div className="grid grid-cols-2 border-y border-border sm:grid-cols-3 lg:flex lg:divide-x lg:divide-border">
+          <Figures>
             {summary.map((f) => (
-              <div key={f.label} className="px-5 py-3 first:pl-0 lg:min-w-36">
-                <p className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">{f.label}</p>
-                <p
-                  className={cn(
-                    'mt-1 text-2xl font-semibold leading-none tabular-nums',
-                    f.tone === 'success' && 'text-success',
-                    f.tone === 'warning' && (f.value > 0 ? 'text-warning' : 'text-foreground'),
-                    f.tone === 'muted' && 'text-muted-foreground',
-                  )}
-                >
-                  {f.value}
-                </p>
-              </div>
+              <Figure
+                key={f.label}
+                label={f.label}
+                value={String(f.value)}
+                alert={f.tone === 'warning' && f.value > 0}
+                tone={f.tone === 'success' ? 'success' : f.tone === 'warning' ? 'warning' : f.tone === 'muted' ? 'neutral' : 'primary'}
+              />
             ))}
-          </div>
+          </Figures>
         ) : (
-          <div className="flex flex-wrap gap-2">
-            <Badge tone="neutral">{counts.total} total</Badge>
-            <Badge tone={presence.onlineCount > 0 ? 'success' : 'neutral'} dot={presence.onlineCount > 0}>
-              {presence.onlineCount} online now
-            </Badge>
-            <Badge tone="primary">
-              <ShieldCheck />
-              {counts.admins} admins
-            </Badge>
-            <Badge tone="info">{counts.teachers} teachers</Badge>
-            {counts.classTeachers > 0 && (
-              <Badge tone="warning">{counts.classTeachers} lead a class</Badge>
-            )}
-            <Badge tone="accent">{counts.students} students</Badge>
-            {counts.demo > 0 && <Badge tone="primary">{counts.demo} demo</Badge>}
-            {counts.inactive > 0 && <Badge tone="warning">{counts.inactive} inactive</Badge>}
-          </div>
+          <Figures>
+            <Figure label="Total accounts" value={String(counts.total)} context={`${counts.students} students · ${counts.teachers} teachers`} tone="primary" />
+            <Figure label="Active" value={String(counts.total - counts.inactive)} context="can sign in" tone="success" />
+            <Figure label="Online now" value={String(onlineNow)} context="signed in recently" tone="info" />
+            <Figure label="Demo accounts" value={String(counts.demo)} context="trial logins" tone="warning" />
+            <Figure label="Inactive" value={String(counts.inactive)} context="cannot sign in" tone="neutral" />
+          </Figures>
         )}
-      </PageHeader>
 
       <DataTable
+        key={scope ?? roleTab}
         columns={scopedColumns ?? columns}
-        data={scopedUsers}
+        data={shown}
         groupBy={groupBy}
         flat
         isLoading={usersQuery.isPending}
@@ -809,7 +833,7 @@ export default function AdminUsersPage({ scope }: { scope?: UserScope } = {}) {
           // ALL_ROLES, not ROLES — a filter has to offer the roles that
           // exist, including the one only the backend assigns. A page
           // narrowed to one role has nothing to filter by.
-          ...(roleOptions.length > 1
+          ...(scope && roleOptions.length > 1
             ? [
                 {
                   columnId: 'role',
@@ -842,17 +866,19 @@ export default function AdminUsersPage({ scope }: { scope?: UserScope } = {}) {
           ],
         }}
         emptyState={
-          <EmptyState
-            title={scoped?.empty ?? 'No users yet'}
-            description="Create the first teacher or student account to get started."
-            action={
-              <Button asChild variant="primary" icon={<UserPlus />}>
-                <Link to={newUserPath}>{scoped?.add ?? 'Add user'}</Link>
-              </Button>
-            }
-          />
+          // Flat, on the page like the table it stands in for.
+          <div className="border-y border-border bg-card px-6 py-12 text-center">
+            <p className="text-base font-medium text-foreground">
+              {scope ? (scoped?.empty ?? 'No users yet') : roleTab === 'all' ? 'No users yet' : `No ${ROLE_TABS.find((t) => t.key === roleTab)!.label.toLowerCase()} accounts`}
+            </p>
+            <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Create an account, or import several from a CSV file</p>
+            <Button asChild size="sm" icon={<UserPlus />} className="mt-4">
+              <Link to={newUserPath}>{scoped?.add ?? 'Add user'}</Link>
+            </Button>
+          </div>
         }
       />
+      </div>
 
       <ImportUsersDialog open={importOpen} onOpenChange={setImportOpen} />
 
@@ -1027,6 +1053,6 @@ export default function AdminUsersPage({ scope }: { scope?: UserScope } = {}) {
           </p>
         )}
       </ConfirmDialog>
-    </>
+    </div>
   )
 }

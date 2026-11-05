@@ -220,7 +220,7 @@ export function CommandPalette({
                     icon={<GraduationCap className="size-4" />}
                     hint={enrollment.class_room.code}
                     onSelect={() =>
-                      run(() => navigate(searchLink('/admin/enrollments', enrollment.student.email)))
+                      run(() => navigate(searchLink('/admin/classes', enrollment.student.email)))
                     }
                   />
                 ))}

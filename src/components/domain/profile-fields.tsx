@@ -235,6 +235,11 @@ export interface ProfileFieldsProps {
    * full profile fits in a modal.
    */
   layout?: 'dialog' | 'page'
+  /**
+   * Rendered under the guardian fields, in the same Family section: the
+   * student's parent logins and siblings, on a form for an existing student.
+   */
+  familySlot?: React.ReactNode
 }
 
 /** Counts fields with a meaningful value, for the section badges. */
@@ -259,11 +264,8 @@ const ADDRESS_KEYS: (keyof UserProfileFields)[] = [
   'postal_code',
   'country',
 ]
-const STUDENT_KEYS: (keyof UserProfileFields)[] = [
-  'admission_number',
-  'roll_number',
-  'admission_date',
-  'blood_group',
+const STUDENT_KEYS: (keyof UserProfileFields)[] = ['admission_number', 'roll_number', 'admission_date', 'blood_group']
+const GUARDIAN_KEYS: (keyof UserProfileFields)[] = [
   'guardian_name',
   'guardian_phone',
   'guardian_email',
@@ -292,6 +294,7 @@ export function ProfileFieldsSection({
   onChange,
   mode,
   layout = 'dialog',
+  familySlot,
 }: ProfileFieldsProps) {
   const flat = layout === 'page'
 
@@ -535,8 +538,8 @@ export function ProfileFieldsSection({
       {isStudent && (
         <Section
           flat={flat}
-          title="Admission and guardian"
-          hint="Student detail"
+          title="Admission"
+          hint="Admission and roll numbers"
           filled={countFilled(value, STUDENT_KEYS)}
         >
           <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
@@ -569,6 +572,14 @@ export function ProfileFieldsSection({
               placeholder="O+"
             />
           </div>
+        </Section>
+      )}
+
+      {/* The guardian on record, then (on an existing student) the parent
+          logins and siblings: one place for everything about the family. */}
+      {isStudent && (
+        <Section flat={flat} title="Parents & Siblings" hint="Guardian, parent logins and siblings" filled={countFilled(value, GUARDIAN_KEYS)}>
+          {familySlot && <h4 className="text-sm font-medium text-foreground">Guardian</h4>}
           <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
             <TextField
               id="pf-guardian"
@@ -597,6 +608,7 @@ export function ProfileFieldsSection({
               onChange={set('guardian_email')}
             />
           </div>
+          {familySlot}
         </Section>
       )}
 

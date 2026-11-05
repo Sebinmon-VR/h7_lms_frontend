@@ -11,7 +11,7 @@ export const Card = React.forwardRef<
       'rounded-xl border border-border shadow-sm',
       glass ? 'glass' : 'bg-card',
       interactive &&
-        'cursor-pointer transition-all duration-200 ease-spring hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-lg',
+        'cursor-pointer transition-colors duration-150 ease-spring hover:border-primary/40',
       className,
     )}
     {...props}

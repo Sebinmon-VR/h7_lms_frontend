@@ -489,7 +489,7 @@ export function DataTable<T>({
       {/* --------------------------------------------------------- table */}
       <div
         className={cn(
-          flat ? 'overflow-hidden border-y border-border' : 'overflow-hidden rounded-xl border border-border bg-card',
+          flat ? 'overflow-hidden border-y border-border bg-card' : 'overflow-hidden rounded-xl border border-border bg-card',
           renderCard && 'hidden md:block',
         )}
       >

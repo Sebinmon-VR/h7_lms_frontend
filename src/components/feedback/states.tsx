@@ -117,7 +117,7 @@ export function AdminScopeNotice({ area }: { area: 'teacher' | 'student' }) {
         <p className="font-medium text-foreground">You are signed in as an administrator</p>
         <p className="mt-0.5 text-muted-foreground">
           {area === 'teacher'
-            ? 'Teacher pages only show records belonging to the signed-in teacher — plus, for a class teacher, the classes they lead. An administrator has neither. Use Admin → Teacher Mappings to see who teaches what and who leads each class.'
+            ? 'Teacher pages only show records belonging to the signed-in teacher — plus, for a class teacher, the classes they lead. An administrator has neither. Use Admin → Subjects & Teachers to see who teaches what and who leads each class.'
             : 'Student pages only show records for the signed-in student, and an administrator has no enrollment. Use Admin → Enrollments to review student data.'}
         </p>
       </div>

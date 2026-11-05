@@ -39,6 +39,7 @@ import { DemoBadge } from '@/components/domain/demo-account'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { EmptyState, ErrorState } from '@/components/feedback/states'
 import { GenerateCredentialsDialog } from './generate-credentials'
+import { StudentFamily } from './student-family'
 
 /** The list a person belongs on, so "back" returns to where they are filed. */
 export function userListPath(user: Pick<UserOut, 'role'>): { to: string; label: string } {
@@ -123,12 +124,12 @@ function addressOf(user: UserOut): string | null {
   return parts.length > 0 ? parts.join(', ') : null
 }
 
-type TabKey = 'profile' | 'admission' | 'guardian' | 'class' | 'employment' | 'teaching' | 'account'
+type TabKey = 'profile' | 'admission' | 'family' | 'class' | 'employment' | 'teaching' | 'account'
 
 const TAB_LABEL: Record<TabKey, string> = {
   profile: 'Profile',
   admission: 'Admission',
-  guardian: 'Guardian',
+  family: 'Parents & Siblings',
   class: 'Class',
   employment: 'Employment',
   teaching: 'Teaching',
@@ -204,7 +205,7 @@ export default function AdminUserProfilePage() {
 
   // The tabs a person of this kind has, in reading order.
   const tabKeys: TabKey[] = isStudent
-    ? ['profile', 'admission', 'guardian', 'class', 'account']
+    ? ['profile', 'admission', 'family', 'class', 'account']
     : teacher
       ? ['profile', 'employment', 'teaching', 'account']
       : ['profile', 'employment', 'account']
@@ -429,22 +430,13 @@ export default function AdminUserProfilePage() {
             </>
           )}
 
-          {tab === 'guardian' && (
-            <Block title="Guardian">
-              <Fields>
-                <Item label="Name" value={user.guardian_name} />
-                <Item label="Relation" value={user.guardian_relation} />
-                <Item label="Phone" value={user.guardian_phone} />
-                <Item label="Email" value={user.guardian_email} />
-              </Fields>
-            </Block>
-          )}
+          {tab === 'family' && <StudentFamily student={user} />}
 
           {tab === 'class' && (
             <Block
               title="Enrollment"
               action={
-                <Link to="/admin/enrollments" className="text-xs font-semibold text-primary hover:underline">
+                <Link to="/admin/classes" className="text-xs font-semibold text-primary hover:underline">
                   Manage enrollments
                 </Link>
               }

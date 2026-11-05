@@ -30,7 +30,7 @@ import { RoleBadge } from '@/components/domain/badges'
 import { Field } from '@/components/forms/field'
 import { FormActions, FormPage, FormSection } from '@/components/forms/form-page'
 
-const BACK_TO = '/admin/mappings?tab=class-teachers'
+const BACK_TO = '/admin/subjects'
 
 /** What the assignment actually grants, spelled out rather than implied. */
 const GRANTS = [
@@ -128,7 +128,7 @@ export default function AdminClassTeacherNewPage() {
       title="Assign a class teacher"
       description="Makes one teacher answerable for a whole class, rather than for a single subject in it. This is the broadest assignment in the system — everything below explains exactly what it grants."
       backTo={BACK_TO}
-      backLabel="Teacher Mappings"
+      backLabel="Subjects & Teachers"
       aside={
         <Card className="p-5">
           <h2 className="text-sm font-semibold">Summary</h2>

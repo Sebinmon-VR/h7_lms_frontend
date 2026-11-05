@@ -1,7 +1,7 @@
-import { CalendarPlus, Eye, EyeOff, Pencil, Trash2, TriangleAlert, Upload } from 'lucide-react'
+import { CalendarRange, Plus, Trash2, TriangleAlert, Upload, X } from 'lucide-react'
 import * as React from 'react'
 
-import type { DayOfWeek, TimetableEntryCreate, TimetableEntryOut } from '@/api/types'
+import type { ClassRoomOut, DayOfWeek, TimetableEntryCreate, TimetableEntryOut } from '@/api/types'
 import { ApiError } from '@/api/errors'
 import {
   useBulkCreateTimetable,
@@ -15,22 +15,15 @@ import {
   useTeachingStaff,
 } from '@/queries/admin.queries'
 import { cn } from '@/lib/cn'
-import {
-  DAYS,
-  DAY_LABEL,
-  type ParsedRow,
-  dayOfWeekFor,
-  formatWallTime,
-  minutesOfDay,
-  parseTimetableRows,
-} from '@/lib/timetable'
+import { countLabel } from '@/lib/format'
+import { tidyName as tidy } from '@/lib/names'
+import { DAYS, DAY_LABEL, type ParsedRow, dayOfWeekFor, formatWallTime, minutesOfDay, parseTimetableRows } from '@/lib/timetable'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Combobox } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Switch } from '@/components/ui/switch'
 import {
   Dialog,
   DialogBody,
@@ -40,126 +33,117 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { ClockNote, TimetableWeek } from '@/components/domain/timetable'
-import { QueryBoundary } from '@/components/feedback/query-boundary'
-import { ConfirmDialog } from '@/components/forms/confirm-dialog'
-import { Field, FormError } from '@/components/forms/field'
-import { PageHeader } from '@/components/layout/page-header'
+import { Field } from '@/components/forms/field'
+import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
+import { Band, TabStrip, WorkspaceHeader } from '@/components/layout/workspace'
+
+/*
+ * The timetable, the way a school writes it on the wall: pick a class, and its
+ * week is one grid — days down the side, periods across the top. Click a cell
+ * to set or change its subject; the teacher comes from the subject allocation
+ * unless you pick someone else. Every class shares the same period times, so
+ * a time added for one class is a column for all of them.
+ *
+ * Times are the school's wall clock: a 09:00 period stays at 09:00 through a
+ * daylight-saving change.
+ */
+
+const COMPACT_INPUT = 'h-8 px-3 py-1 text-sm'
+
+/** Week days shown: Monday to Saturday, and Sunday only when something is on it. */
+const SCHOOL_DAYS = DAYS.filter((d) => d !== 'SUNDAY')
+
+type Slot = { start: string; end: string }
+const slotKey = (s: Slot) => `${s.start}|${s.end}`
+
+/** One colour per subject, as a stripe down the cell, so a subject reads the same all week. */
+const SUBJECT_STRIPE = [
+  'border-l-primary',
+  'border-l-info',
+  'border-l-success',
+  'border-l-warning',
+  'border-l-danger',
+  'border-l-accent',
+  'border-l-muted-foreground',
+]
+const stripeFor = (subjectId: number) => SUBJECT_STRIPE[subjectId % SUBJECT_STRIPE.length]
+
+/** Sentinel for "let the backend resolve the teacher from the allocation". */
+const MAPPED = '__mapped'
+
+// ================================================================== editor
 
 /**
- * A clash is the expected answer to a legitimate question, not a crash.
+ * The strip above the grid for the chosen cell: subject, teacher, room.
  *
- * The backend refuses a double-booking with a 409 that names the clashing
- * periods. Rather than surfacing that as a red error and making the admin
- * guess, the dialog holds it and offers to schedule anyway — which is exactly
- * what `?allow_conflicts=true` is for. Rooms are never checked, so a clash here
- * always means a class or a teacher is in two places at once.
+ * A clash is the expected answer to a legitimate question, not a crash: the
+ * backend refuses a double-booking with a 409 naming the clashing periods, and
+ * the strip offers to save anyway (`allow_conflicts`). Rooms are never checked,
+ * so a clash always means a class or a teacher is in two places at once.
  */
-function ClashNotice({ message, onOverride, busy }: { message: string; onOverride: () => void; busy?: boolean }) {
-  return (
-    <div className="rounded-lg border border-warning/40 bg-warning/8 p-3">
-      <p className="flex items-start gap-2 text-sm">
-        <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
-        <span>{message}</span>
-      </p>
-      <Button variant="outline" size="sm" className="mt-2.5" loading={busy} onClick={onOverride}>
-        Schedule it anyway
-      </Button>
-    </div>
-  )
-}
-
-const EMPTY: TimetableEntryCreate = {
-  class_id: 0,
-  subject_id: 0,
-  teacher_id: null,
-  day_of_week: 'MONDAY',
-  start_time: '09:00',
-  end_time: '09:45',
-  room: null,
-  period_label: null,
-  effective_from: null,
-  effective_to: null,
-  is_active: true,
-}
-
-function EntryDialog({
-  open,
-  onOpenChange,
-  editing,
+function CellEditor({
+  klass,
+  day,
+  slot,
+  slotIndex,
+  entry,
+  onClose,
 }: {
-  open: boolean
-  onOpenChange: (v: boolean) => void
-  editing: TimetableEntryOut | null
+  klass: ClassRoomOut
+  day: DayOfWeek
+  slot: Slot
+  slotIndex: number
+  entry: TimetableEntryOut | null
+  onClose: () => void
 }) {
-  const classesQuery = useClasses()
   const subjectsQuery = useSubjects()
   const teachersQuery = useTeachingStaff()
   const mappingsQuery = useMappings()
   const createEntry = useCreateTimetableEntry()
   const updateEntry = useUpdateTimetableEntry()
+  const deleteEntry = useDeleteTimetableEntry()
 
-  const [form, setForm] = React.useState<TimetableEntryCreate>(EMPTY)
-  const [error, setError] = React.useState<string | null>(null)
+  const [subjectId, setSubjectId] = React.useState<string | null>(entry ? String(entry.subject_id) : null)
+  const [teacherId, setTeacherId] = React.useState<string>(entry?.teacher_id ? String(entry.teacher_id) : MAPPED)
+  const [room, setRoom] = React.useState(entry?.room ?? '')
   const [clash, setClash] = React.useState<string | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
 
-  React.useEffect(() => {
-    if (!open) return
+  const classMappings = (mappingsQuery.data ?? []).filter((m) => m.class_room.id === klass.id)
+  const mapped = classMappings.find((m) => String(m.subject.id) === subjectId)?.teacher ?? null
+  const taught = new Map(classMappings.map((m) => [m.subject.id, m.teacher.full_name]))
+
+  // The class's own subjects first, each with its teacher; the rest after.
+  const subjectOptions = [...(subjectsQuery.data ?? [])]
+    .sort((a, b) => Number(!taught.has(a.id)) - Number(!taught.has(b.id)) || a.name.localeCompare(b.name))
+    .map((s) => ({
+      value: String(s.id),
+      label: tidy(s.name),
+      hint: taught.has(s.id) ? `${s.code} · ${tidy(taught.get(s.id)!)}` : `${s.code} · not allocated to this class`,
+      keywords: s.code,
+    }))
+
+  const save = async (allowConflicts: boolean) => {
+    if (!subjectId) return
     setError(null)
-    setClash(null)
-    setForm(
-      editing
-        ? {
-            class_id: editing.class_id,
-            subject_id: editing.subject_id,
-            teacher_id: editing.teacher_id,
-            day_of_week: editing.day_of_week,
-            start_time: formatWallTime(editing.start_time),
-            end_time: formatWallTime(editing.end_time),
-            room: editing.room,
-            period_label: editing.period_label,
-            effective_from: editing.effective_from,
-            effective_to: editing.effective_to,
-            is_active: editing.is_active,
-          }
-        : EMPTY,
-    )
-  }, [open, editing])
-
-  const set = <K extends keyof TimetableEntryCreate>(key: K, value: TimetableEntryCreate[K]) => {
-    setForm((prev) => ({ ...prev, [key]: value }))
-    // Any edit invalidates the clash the previous values produced.
-    setClash(null)
-  }
-
-  /**
-   * The teacher the backend would pick if `teacher_id` is left empty. Shown so
-   * "Mapped teacher" is a concrete promise rather than a shrug.
-   */
-  const mappedTeacher = React.useMemo(() => {
-    if (!form.class_id || !form.subject_id) return null
-    const mapping = (mappingsQuery.data ?? []).find(
-      (m) => m.class_room.id === form.class_id && m.subject.id === form.subject_id,
-    )
-    return mapping?.teacher ?? null
-  }, [mappingsQuery.data, form.class_id, form.subject_id])
-
-  const timesValid = minutesOfDay(form.end_time) > minutesOfDay(form.start_time)
-  const ready = !!form.class_id && !!form.subject_id && timesValid
-
-  const submit = async (allowConflicts: boolean) => {
-    if (!ready) return
-    setError(null)
+    const body: TimetableEntryCreate = {
+      class_id: klass.id,
+      subject_id: Number(subjectId),
+      teacher_id: teacherId === MAPPED ? null : Number(teacherId),
+      day_of_week: day,
+      start_time: slot.start,
+      end_time: slot.end,
+      room: room.trim() || null,
+      period_label: entry?.period_label ?? `Period ${slotIndex + 1}`,
+      effective_from: entry?.effective_from ?? null,
+      effective_to: entry?.effective_to ?? null,
+      is_active: true,
+    }
     try {
-      if (editing) {
-        await updateEntry.mutateAsync({ entryId: editing.id, body: form, allowConflicts })
-      } else {
-        await createEntry.mutateAsync({ body: form, allowConflicts })
-      }
-      onOpenChange(false)
+      if (entry) await updateEntry.mutateAsync({ entryId: entry.id, body, allowConflicts })
+      else await createEntry.mutateAsync({ body, allowConflicts })
+      onClose()
     } catch (err) {
-      // 409 is the clash path and gets its own affordance; everything else is
-      // a genuine error.
       if (err instanceof ApiError && err.status === 409) {
         setClash(err.message)
         return
@@ -171,176 +155,230 @@ function EntryDialog({
   const busy = createEntry.isPending || updateEntry.isPending
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !busy && onOpenChange(v)}>
-      <DialogContent size="lg">
-        <DialogHeader>
-          <DialogTitle>{editing ? 'Edit period' : 'Add a period'}</DialogTitle>
-          <DialogDescription>
-            A period recurs every week on this day. Times are the school&rsquo;s local clock — a
-            09:00 period stays at 09:00 through a daylight-saving change.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogBody className="space-y-5">
-          <FormError message={error} />
-          {clash && (
-            <ClashNotice message={clash} busy={busy} onOverride={() => void submit(true)} />
-          )}
+    <div className="space-y-3">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-medium text-foreground">
+            {DAY_LABEL[day]} · Period {slotIndex + 1}
+          </p>
+          <p className="text-xs tabular-nums text-muted-foreground">
+            {slot.start}–{slot.end} · {klass.name}
+          </p>
+        </div>
+        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close">
+          <X />
+        </Button>
+      </div>
 
-          <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
-            <Field id="tt-class" label="Class" required>
-              <Combobox
-                id="tt-class"
-                value={form.class_id ? String(form.class_id) : null}
-                onChange={(v) => set('class_id', Number(v))}
-                placeholder="Select a class"
-                options={(classesQuery.data ?? []).map((c) => ({
-                  value: String(c.id),
-                  label: c.name,
-                  hint: c.code,
-                }))}
-              />
-            </Field>
-            <Field id="tt-subject" label="Subject" required>
-              <Combobox
-                id="tt-subject"
-                value={form.subject_id ? String(form.subject_id) : null}
-                onChange={(v) => set('subject_id', Number(v))}
-                placeholder="Select a subject"
-                options={(subjectsQuery.data ?? []).map((s) => ({
-                  value: String(s.id),
-                  label: s.name,
-                  hint: s.code,
-                }))}
-              />
-            </Field>
-          </div>
+      <label className="block space-y-1">
+        <span className="text-xs text-muted-foreground">Subject</span>
+        <Combobox
+          value={subjectId}
+          onChange={(v) => {
+            setSubjectId(v)
+            setTeacherId(MAPPED)
+            setClash(null)
+          }}
+          options={subjectOptions}
+          placeholder="Choose a subject"
+          searchPlaceholder="Search by name or code"
+          className="h-8 w-full bg-card text-sm"
+        />
+      </label>
+      <label className="block space-y-1">
+        <span className="text-xs text-muted-foreground">Teacher</span>
+        <Combobox
+          value={teacherId}
+          onChange={(v) => {
+            setTeacherId(v)
+            setClash(null)
+          }}
+          options={[
+            { value: MAPPED, label: mapped ? tidy(mapped.full_name) : 'Teacher from allocation', hint: 'From the subject allocation' },
+            ...(teachersQuery.data ?? [])
+              .filter((t) => t.is_active && t.id !== mapped?.id)
+              .map((t) => ({ value: String(t.id), label: tidy(t.full_name), hint: t.email })),
+          ]}
+          searchPlaceholder="Search by name or email"
+          className="h-8 w-full bg-card text-sm"
+        />
+      </label>
+      <label className="block space-y-1">
+        <span className="text-xs text-muted-foreground">Room (optional)</span>
+        <Input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room 12" className={cn(COMPACT_INPUT, 'bg-card')} />
+      </label>
 
-          <Field
-            id="tt-teacher"
-            label="Teacher"
-            hint={
-              mappedTeacher
-                ? `Leave as “Mapped teacher” to use ${mappedTeacher.full_name}, who is already assigned to this subject and class.`
-                : 'Leave as “Mapped teacher” to use whoever is assigned to this subject and class.'
-            }
+      {subjectId && !mapped && teacherId === MAPPED && (
+        <p className="text-xs text-warning">Nobody is allocated this subject in {klass.name}. Pick a teacher, or allocate one under Subjects & Teachers.</p>
+      )}
+      {error && <p className="text-xs text-danger">{error}</p>}
+      {clash && (
+        <div className="space-y-2 border-l-2 border-warning bg-warning/5 px-3 py-2 text-xs">
+          <p className="flex items-start gap-2 text-foreground">
+            <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warning" />
+            {clash}
+          </p>
+          <Button variant="outline" size="xs" loading={busy} onClick={() => void save(true)}>
+            Save anyway
+          </Button>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2 border-t border-border pt-3">
+        <Button size="sm" className="flex-1" disabled={!subjectId} loading={busy && !clash} onClick={() => void save(false)}>
+          {entry ? 'Save' : 'Add period'}
+        </Button>
+        {entry && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-muted-foreground hover:text-danger"
+            loading={deleteEntry.isPending}
+            onClick={() => deleteEntry.mutate(entry.id, { onSuccess: onClose })}
           >
-            <Combobox
-              id="tt-teacher"
-              value={form.teacher_id ? String(form.teacher_id) : MAPPED}
-              onChange={(v) => set('teacher_id', v === MAPPED ? null : Number(v))}
-              options={[
-                {
-                  value: MAPPED,
-                  label: mappedTeacher ? `Mapped teacher — ${mappedTeacher.full_name}` : 'Mapped teacher',
-                  hint: 'Resolved from the teacher assignments',
-                },
-                ...(teachersQuery.data ?? [])
-                  .filter((t) => t.is_active)
-                  .map((t) => ({ value: String(t.id), label: t.full_name, hint: t.email })),
-              ]}
-            />
-          </Field>
-
-          <div className="grid gap-x-4 gap-y-5 sm:grid-cols-3">
-            <Field id="tt-day" label="Day" required>
-              <Combobox
-                id="tt-day"
-                value={form.day_of_week}
-                onChange={(v) => set('day_of_week', v as DayOfWeek)}
-                options={DAYS.map((d) => ({ value: d, label: DAY_LABEL[d] }))}
-              />
-            </Field>
-            <Field id="tt-start" label="Starts" required>
-              <Input
-                id="tt-start"
-                type="time"
-                value={form.start_time}
-                onChange={(e) => set('start_time', e.target.value)}
-              />
-            </Field>
-            <Field
-              id="tt-end"
-              label="Ends"
-              required
-              error={timesValid ? undefined : 'Must be later than the start time'}
-            >
-              <Input
-                id="tt-end"
-                type="time"
-                value={form.end_time}
-                onChange={(e) => set('end_time', e.target.value)}
-              />
-            </Field>
-          </div>
-
-          <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
-            <Field id="tt-room" label="Room" hint="Not checked for clashes — labels get reused.">
-              <Input
-                id="tt-room"
-                value={form.room ?? ''}
-                onChange={(e) => set('room', e.target.value || null)}
-                placeholder="Room 12"
-              />
-            </Field>
-            <Field id="tt-label" label="Period label">
-              <Input
-                id="tt-label"
-                value={form.period_label ?? ''}
-                onChange={(e) => set('period_label', e.target.value || null)}
-                placeholder="Period 1"
-              />
-            </Field>
-          </div>
-
-          <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
-            <Field id="tt-from" label="Applies from" hint="Defaults to today.">
-              <Input
-                id="tt-from"
-                type="date"
-                value={form.effective_from ?? ''}
-                onChange={(e) => set('effective_from', e.target.value || null)}
-              />
-            </Field>
-            <Field id="tt-to" label="Applies until" hint="Leave empty for the rest of the year.">
-              <Input
-                id="tt-to"
-                type="date"
-                value={form.effective_to ?? ''}
-                onChange={(e) => set('effective_to', e.target.value || null)}
-              />
-            </Field>
-          </div>
-
-          <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-surface p-3.5">
-            <div>
-              <p className="text-sm font-medium">Active</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Pausing keeps the period on the timetable but stops it appearing in day views and
-                reminders. Use this for a term break rather than deleting and re-creating it.
-              </p>
-            </div>
-            <Switch
-              checked={form.is_active ?? true}
-              onCheckedChange={(v) => set('is_active', v)}
-              aria-label="Active"
-            />
-          </div>
-        </DialogBody>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-            Cancel
+            <Trash2 />
+            Clear
           </Button>
-          <Button variant="primary" disabled={!ready} loading={busy} onClick={() => void submit(false)}>
-            {editing ? 'Save changes' : 'Add period'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        )}
+      </div>
+    </div>
   )
 }
 
-/** Sentinel for "let the backend resolve the teacher from the mappings". */
-const MAPPED = '__mapped'
+// ==================================================================== grid
+
+/** Minutes between two wall times, for the break rows. */
+const gapMinutes = (from: string, to: string) => minutesOfDay(to) - minutesOfDay(from)
+
+/**
+ * Periods down the side, days across the top — the way a printed timetable
+ * reads. Plain white cells with a coloured stripe per subject; a gap of ten
+ * minutes or more between periods shows as a thin break row. Clicking a cell
+ * opens its editor on the cell itself, so the grid keeps the full width.
+ */
+function WeekGrid({
+  days,
+  slots,
+  cellOf,
+  today,
+  selected,
+  onPick,
+  onClose,
+  editor,
+}: {
+  days: DayOfWeek[]
+  slots: Slot[]
+  cellOf: (day: DayOfWeek, slot: Slot) => TimetableEntryOut | null
+  today: DayOfWeek
+  selected: { day: DayOfWeek; key: string } | null
+  onPick: (day: DayOfWeek, slot: Slot, index: number) => void
+  onClose: () => void
+  editor: React.ReactNode
+}) {
+  return (
+    <table className="w-full min-w-[34rem] table-fixed border-separate border-spacing-0 text-sm">
+      <thead>
+        <tr>
+          <th className="sticky top-0 z-10 w-24 border-b border-r border-border bg-muted px-3 py-2 text-left text-xs font-medium text-muted-foreground">
+            Period
+          </th>
+          {days.map((day) => (
+            <th
+              key={day}
+              className={cn(
+                'sticky top-0 z-10 border-b border-r border-border bg-muted px-3 py-2 text-left text-xs font-medium last:border-r-0',
+                day === today ? 'text-primary' : 'text-foreground',
+              )}
+            >
+              {DAY_LABEL[day]}
+              {day === today && <span className="ml-1.5 rounded bg-primary px-1 py-px text-[9px] font-medium uppercase text-primary-foreground">Today</span>}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {slots.map((s, i) => {
+          const gap = i > 0 ? gapMinutes(slots[i - 1].end, s.start) : 0
+          return (
+            <React.Fragment key={slotKey(s)}>
+              {gap >= 10 && (
+                <tr>
+                  <td
+                    colSpan={days.length + 1}
+                    className="border-b border-border bg-muted/40 py-0.5 text-center text-[10px] uppercase tracking-wider text-muted-foreground"
+                  >
+                    Break · {gap} min
+                  </td>
+                </tr>
+              )}
+              <tr>
+                <th className="border-b border-r border-border bg-card px-3 py-1 text-left align-middle font-normal">
+                  <span className="block text-xs font-medium text-foreground">Period {i + 1}</span>
+                  <span className="block text-[10px] tabular-nums text-muted-foreground">
+                    {s.start}–{s.end}
+                  </span>
+                </th>
+                {days.map((day) => {
+                  const entry = cellOf(day, s)
+                  const active = selected?.day === day && selected.key === slotKey(s)
+                  return (
+                    <td
+                      key={day}
+                      className={cn('border-b border-r border-border p-0 last:border-r-0', day === today && 'bg-primary/[0.025]')}
+                    >
+                      <Popover open={active} onOpenChange={(v) => !v && onClose()}>
+                        <PopoverAnchor asChild>
+                          <button
+                            type="button"
+                            onClick={() => onPick(day, s, i)}
+                            className={cn(
+                              'group flex h-11 w-full min-w-0 flex-col justify-center px-3 text-left transition-colors',
+                              entry ? cn('border-l-[3px] hover:bg-muted/40', stripeFor(entry.subject_id)) : 'hover:bg-primary/5',
+                              active && 'bg-primary/10',
+                            )}
+                            aria-label={
+                              entry
+                                ? `${tidy(entry.subject?.name ?? 'Period')}, ${DAY_LABEL[day]} period ${i + 1}`
+                                : `Add a period, ${DAY_LABEL[day]} period ${i + 1}`
+                            }
+                          >
+                            {entry ? (
+                              <>
+                                <span className="truncate text-[13px] font-medium text-foreground" title={tidy(entry.subject?.name ?? 'Period')}>
+                                  {tidy(entry.subject?.name ?? 'Period')}
+                                </span>
+                                <span className="truncate text-[11px] text-muted-foreground">
+                                  {entry.teacher ? tidy(entry.teacher.full_name) : <span className="text-warning">No teacher</span>}
+                                  {entry.room ? ` · ${entry.room}` : ''}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="flex items-center gap-1 text-xs text-muted-foreground/0 transition-colors group-hover:text-primary">
+                                <Plus className="size-3.5" />
+                                Add
+                              </span>
+                            )}
+                          </button>
+                        </PopoverAnchor>
+                        {active && (
+                          <PopoverContent align="start" sideOffset={4} className="w-72 p-3">
+                            {editor}
+                          </PopoverContent>
+                        )}
+                      </Popover>
+                    </td>
+                  )
+                })}
+              </tr>
+            </React.Fragment>
+          )
+        })}
+      </tbody>
+    </table>
+  )
+}
+
+// ============================================================ bulk upload
 
 const SAMPLE = `class,subject,teacher,day,start,end,room,label
 7A,Mathematics,Anita Rahman,Monday,09:00,09:45,Room 12,Period 1
@@ -543,162 +581,176 @@ function BulkDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: b
   )
 }
 
+// ==================================================================== page
+
 export default function AdminTimetablePage() {
-  const [includeInactive, setIncludeInactive] = React.useState(false)
-  const timetableQuery = useTimetable(includeInactive)
+  const timetableQuery = useTimetable(false)
   const classesQuery = useClasses()
-  const deleteEntry = useDeleteTimetableEntry()
 
-  const [dialogOpen, setDialogOpen] = React.useState(false)
+  const classes = React.useMemo(
+    () => [...(classesQuery.data ?? [])].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
+    [classesQuery.data],
+  )
+  const [classId, setClassId] = React.useState<string | null>(null)
+  const klass = classes.find((c) => String(c.id) === classId) ?? classes[0] ?? null
+
   const [bulkOpen, setBulkOpen] = React.useState(false)
-  const [editing, setEditing] = React.useState<TimetableEntryOut | null>(null)
-  const [selected, setSelected] = React.useState<TimetableEntryOut | null>(null)
-  const [deleting, setDeleting] = React.useState<TimetableEntryOut | null>(null)
-  const [classFilter, setClassFilter] = React.useState<string | null>(null)
+  const [picked, setPicked] = React.useState<{ day: DayOfWeek; slot: Slot; index: number } | null>(null)
+  const [extraSlots, setExtraSlots] = React.useState<Slot[]>([])
+  const [addingSlot, setAddingSlot] = React.useState(false)
+  const [newStart, setNewStart] = React.useState('')
+  const [newEnd, setNewEnd] = React.useState('')
 
-  const entries = React.useMemo(() => {
-    const all = timetableQuery.data ?? []
-    return classFilter ? all.filter((e) => String(e.class_id) === classFilter) : all
-  }, [timetableQuery.data, classFilter])
+  const entries = React.useMemo(() => timetableQuery.data ?? [], [timetableQuery.data])
 
-  const openCreate = () => {
-    setEditing(null)
-    setDialogOpen(true)
-  }
+  // Period times are shared by the whole school: every start–end pair in use,
+  // plus any added here that nothing sits in yet.
+  const slots = React.useMemo(() => {
+    const map = new Map<string, Slot>()
+    for (const e of entries) {
+      const s = { start: formatWallTime(e.start_time), end: formatWallTime(e.end_time) }
+      map.set(slotKey(s), s)
+    }
+    for (const s of extraSlots) map.set(slotKey(s), s)
+    return [...map.values()].sort((a, b) => minutesOfDay(a.start) - minutesOfDay(b.start) || minutesOfDay(a.end) - minutesOfDay(b.end))
+  }, [entries, extraSlots])
 
-  const openEdit = (entry: TimetableEntryOut) => {
-    setSelected(null)
-    setEditing(entry)
-    setDialogOpen(true)
+  const classEntries = entries.filter((e) => e.class_id === klass?.id)
+  const days = classEntries.some((e) => e.day_of_week === 'SUNDAY') ? DAYS : SCHOOL_DAYS
+  const cellOf = (day: DayOfWeek, slot: Slot) =>
+    classEntries.find(
+      (e) => e.day_of_week === day && formatWallTime(e.start_time) === slot.start && formatWallTime(e.end_time) === slot.end,
+    ) ?? null
+  const empty = days.length * slots.length - classEntries.length
+  const noTeacher = classEntries.filter((e) => !e.teacher).length
+
+  const addSlot = () => {
+    if (!newStart || !newEnd || minutesOfDay(newEnd) <= minutesOfDay(newStart)) return
+    setExtraSlots((prev) => [...prev, { start: newStart, end: newEnd }])
+    setNewStart('')
+    setNewEnd('')
+    setAddingSlot(false)
   }
 
   const today = dayOfWeekFor(new Date())
+  const loading = timetableQuery.isPending || classesQuery.isPending
 
   return (
-    <>
-      <PageHeader
+    <div className="space-y-6">
+      <WorkspaceHeader
         title="Timetable"
-        description="The weekly schedule. Each period recurs until its end date passes."
+        description="Pick a class and click a period to set its subject. The teacher comes from the subject allocation"
+        icon={CalendarRange}
         actions={
-          <>
-            <Button variant="outline" icon={<Upload />} onClick={() => setBulkOpen(true)}>
-              Bulk upload
-            </Button>
-            <Button variant="primary" icon={<CalendarPlus />} onClick={openCreate}>
-              Add period
-            </Button>
-          </>
-        }
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setClassFilter(null)}
-            className={cn(
-              'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-              classFilter === null
-                ? 'border-primary bg-primary/12 text-primary'
-                : 'border-border text-muted-foreground hover:border-primary/40',
-            )}
-          >
-            All classes
-          </button>
-          {(classesQuery.data ?? []).map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => setClassFilter(String(c.id))}
-              className={cn(
-                'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-                classFilter === String(c.id)
-                  ? 'border-primary bg-primary/12 text-primary'
-                  : 'border-border text-muted-foreground hover:border-primary/40',
-              )}
-            >
-              {c.name}
-            </button>
-          ))}
-
-          <Button
-            variant="ghost"
-            size="sm"
-            className="ml-auto"
-            icon={includeInactive ? <EyeOff /> : <Eye />}
-            onClick={() => setIncludeInactive((v) => !v)}
-          >
-            {includeInactive ? 'Hide paused' : 'Show paused'}
+          <Button variant="outline" size="sm" icon={<Upload />} onClick={() => setBulkOpen(true)}>
+            Upload
           </Button>
-        </div>
-      </PageHeader>
-
-      <ClockNote scope="admin" className="mb-4" />
-
-      <QueryBoundary query={timetableQuery} loading={<Skeleton className="h-96 rounded-xl" />}>
-        {() => (
-          <TimetableWeek
-            entries={entries}
-            scope="admin"
-            today={today}
-            onSelect={setSelected}
-            emptyDescription={
-              classFilter
-                ? 'This class has no periods yet. Add one, or upload a whole week at once.'
-                : 'No periods have been added yet. Bulk upload is the quickest way to build a term.'
-            }
-          />
-        )}
-      </QueryBoundary>
-
-      <EntryDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} />
-      <BulkDialog open={bulkOpen} onOpenChange={setBulkOpen} />
-
-      {/* Clicking a period opens its actions rather than editing straight away —
-          a mis-click on a dense grid should not open a form. */}
-      <Dialog open={!!selected} onOpenChange={(v) => !v && setSelected(null)}>
-        <DialogContent size="sm">
-          <DialogHeader>
-            <DialogTitle>{selected ? selected.subject?.name ?? 'Period' : ''}</DialogTitle>
-            <DialogDescription>
-              {selected
-                ? `${DAY_LABEL[selected.day_of_week]}, ${formatWallTime(selected.start_time)}–${formatWallTime(selected.end_time)}`
-                : ''}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              icon={<Trash2 />}
-              onClick={() => {
-                setDeleting(selected)
-                setSelected(null)
-              }}
-            >
-              Remove
-            </Button>
-            <Button variant="primary" icon={<Pencil />} onClick={() => selected && openEdit(selected)}>
-              Edit period
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <ConfirmDialog
-        open={!!deleting}
-        onOpenChange={(v) => !v && setDeleting(null)}
-        title="Remove this period?"
-        description={
-          deleting
-            ? `${deleting.subject?.name ?? 'This period'} on ${DAY_LABEL[deleting.day_of_week]} at ${formatWallTime(deleting.start_time)} will be removed from the timetable. To pause it for a term instead, edit it and turn off “Active”.`
-            : undefined
         }
-        confirmLabel="Remove period"
-        destructive
-        loading={deleteEntry.isPending}
-        onConfirm={() => {
-          if (!deleting) return
-          deleteEntry.mutate(deleting.id, { onSettled: () => setDeleting(null) })
-        }}
+        tabs={
+          classes.length > 0 && (
+            <TabStrip
+              label="Classes"
+              idPrefix="tt-class"
+              value={klass ? String(klass.id) : ''}
+              onChange={(v) => {
+                setClassId(v)
+                setPicked(null)
+              }}
+              tabs={classes.map((c) => ({
+                key: String(c.id),
+                label: c.name,
+                count: entries.filter((e) => e.class_id === c.id).length,
+              }))}
+            />
+          )
+        }
       />
-    </>
+
+      <div className="-mt-6">
+        {/* ------------------------------------------------------ toolbar */}
+        <Band className="border-b border-border">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 py-2.5">
+            {klass && !loading && (
+              <span className="text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">{klass.name}</span> ·{' '}
+                {countLabel(classEntries.length, 'period')} a week
+                {empty > 0 && ` · ${empty} free`}
+                {noTeacher > 0 && <span className="text-warning"> · {noTeacher} without a teacher</span>}
+              </span>
+            )}
+            <span className="ml-auto flex items-center gap-2">
+              {addingSlot ? (
+                <form
+                  className="flex items-center gap-1.5"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    addSlot()
+                  }}
+                >
+                  <Input type="time" value={newStart} onChange={(e) => setNewStart(e.target.value)} aria-label="Starts" className={cn(COMPACT_INPUT, 'w-28')} />
+                  <span className="text-muted-foreground">–</span>
+                  <Input type="time" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} aria-label="Ends" className={cn(COMPACT_INPUT, 'w-28')} />
+                  <Button type="submit" size="sm" disabled={!newStart || !newEnd || minutesOfDay(newEnd) <= minutesOfDay(newStart)}>
+                    Add
+                  </Button>
+                  <Button type="button" variant="ghost" size="icon-sm" onClick={() => setAddingSlot(false)} aria-label="Cancel">
+                    <X />
+                  </Button>
+                </form>
+              ) : (
+                <Button variant="ghost" size="sm" onClick={() => setAddingSlot(true)}>
+                  <Plus />
+                  Period time
+                </Button>
+              )}
+            </span>
+          </div>
+        </Band>
+
+        {/* --------------------------------------------------------- grid */}
+        <Band className="border-b border-border">
+          {loading ? (
+            <Skeleton className="my-4 h-80 w-full" />
+          ) : !klass ? (
+            <p className="py-12 text-center text-sm text-muted-foreground">Add a class first, under Classes & Students</p>
+          ) : slots.length === 0 ? (
+            <div className="py-12 text-center">
+              <p className="text-sm font-medium text-foreground">No period times yet</p>
+              <p className="mt-1 text-sm text-muted-foreground">Add the first period time, for example 09:00 to 09:45, or upload a whole week</p>
+              <Button size="sm" className="mt-4" icon={<Plus />} onClick={() => setAddingSlot(true)}>
+                Period time
+              </Button>
+            </div>
+          ) : (
+            <div className="-mx-4 overflow-auto sm:-mx-6 lg:-mx-8 lg:h-[calc(100vh-17rem)] lg:min-h-[24rem]">
+              <WeekGrid
+                days={days}
+                slots={slots}
+                cellOf={cellOf}
+                today={today}
+                selected={picked ? { day: picked.day, key: slotKey(picked.slot) } : null}
+                onPick={(day, slot, index) => setPicked({ day, slot, index })}
+                onClose={() => setPicked(null)}
+                editor={
+                  picked && (
+                    <CellEditor
+                      key={`${klass.id}-${picked.day}-${slotKey(picked.slot)}`}
+                      klass={klass}
+                      day={picked.day}
+                      slot={picked.slot}
+                      slotIndex={picked.index}
+                      entry={cellOf(picked.day, picked.slot)}
+                      onClose={() => setPicked(null)}
+                    />
+                  )
+                }
+              />
+            </div>
+          )}
+        </Band>
+      </div>
+
+      <BulkDialog open={bulkOpen} onOpenChange={setBulkOpen} />
+    </div>
   )
 }

@@ -128,7 +128,7 @@ export default function ParentDashboard() {
           <EmptyState
             icon={<UsersRound />}
             title="No children linked to your account"
-            description="Your login works, but the school has not linked it to a student yet. The front office can do that from the Families screen."
+            description="Your login works, but the school has not linked it to a student yet. The front office can do that from your child's profile."
           />
         }
       >
