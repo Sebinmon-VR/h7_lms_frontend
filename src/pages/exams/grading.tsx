@@ -8,12 +8,10 @@ import {
   Hourglass,
   KeyRound,
   Lightbulb,
-  Paperclip,
   PenLine,
   RotateCcw,
   Save,
   Sparkles,
-  TriangleAlert,
   XCircle,
 } from 'lucide-react'
 import * as React from 'react'
@@ -29,7 +27,7 @@ import {
   useReopenSubmission,
 } from '@/queries/exam.queries'
 import { cn } from '@/lib/cn'
-import { formatDateTime, formatRelative } from '@/lib/datetime'
+import { formatRelative } from '@/lib/datetime'
 import {
   QUESTION_TYPE_META,
   answerMatchesKey,
@@ -47,16 +45,13 @@ import { fileKind, fileNameFromUrl } from '@/lib/files'
 import { examApi } from '@/api/exam.api'
 import { InlineFileRow } from '@/components/domain/document-viewer'
 import { formatPercent, performanceTone } from '@/lib/format'
-import { className as classLabel, subjectName } from '@/lib/select'
-import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { Input, Textarea } from '@/components/ui/input'
+import { Band } from '@/components/layout/workspace'
+import { tidyName as tidy } from '@/lib/names'
+import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { SubmissionStatusBadge } from '@/components/domain/badges'
 import { ErrorState } from '@/components/feedback/states'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { MarkingEditor } from './marking-editor'
@@ -65,11 +60,10 @@ import { useExamScope } from './exam-scope'
 /**
  * Marking one script.
  *
- * Two columns that scroll independently: what the student wrote on the
- * left, the answer key and the marks on the right. They are the same list of
- * questions in the same order, and each side can jump the other to the same
- * question, so the marker's eye never has to hunt — read the answer, glance
- * right at the key, type a mark, move on.
+ * One question at a time: the question and the student's answer, with the
+ * answer key and the marks box beside it, and every question as a numbered
+ * button along the top that turns green once it has a mark. The total, the
+ * remark and Save sit in one bar pinned to the bottom.
  *
  * Every mark the key already decided is shown as such and can be overridden;
  * the backend records which lines a person settled and which the key did.
@@ -189,14 +183,14 @@ function StudentAnswer({ question, answer }: { question: ExamQuestionOut; answer
   }
 
   if (blank) {
-    return <p className="rounded-lg border border-dashed border-border px-3 py-3 text-sm italic text-muted-foreground">No answer written.</p>
+    return <p className="text-sm italic text-muted-foreground">No answer written.</p>
   }
 
   const text = formatAnswer(question, answer?.answer) ?? ''
   return (
     <div
       className={cn(
-        'rounded-lg border border-border bg-surface/60 px-3.5 py-3 text-sm leading-relaxed',
+        'border-l-2 border-border bg-muted/30 px-3.5 py-2.5 text-sm leading-relaxed',
         type === 'LONG_ANSWER' ? 'whitespace-pre-wrap' : 'font-medium',
         type === 'NUMERIC' && 'font-mono text-base',
       )}
@@ -231,7 +225,7 @@ function KeyRow({
   const invalid = line.marks.trim() !== '' && (!Number.isFinite(marks) || marks < 0 || marks > question.marks)
 
   return (
-    <div id={`key-${question.id}`} className={cn('rounded-lg border p-3 transition-colors', invalid ? 'border-danger/50' : 'border-border/80')}>
+    <div id={`key-${question.id}`} className={cn('border-b border-l-2 py-3 pl-3 transition-colors', invalid ? 'border-l-danger' : 'border-l-transparent')}>
       <div className="flex items-center gap-2">
         <button
           type="button"
@@ -356,6 +350,9 @@ export default function GradingPage() {
   const [error, setError] = React.useState<string | null>(null)
   const [confirmReopen, setConfirmReopen] = React.useState(false)
   const [markingOpen, setMarkingOpen] = React.useState(false)
+  // One question at a time; back to the first when the marker moves to another script.
+  const [qIndex, setQIndex] = React.useState(0)
+  React.useEffect(() => setQIndex(0), [studentId])
 
   // Seed once per script (keyed by id + last update), never over live edits.
   React.useEffect(() => {
@@ -475,10 +472,10 @@ export default function GradingPage() {
     return (
       <div className="space-y-4">
         <Skeleton className="h-6 w-40" />
-        <Skeleton className="h-20 rounded-xl" />
+        <Skeleton className="h-20 w-full" />
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_28rem]">
-          <Skeleton className="h-96 rounded-xl" />
-          <Skeleton className="h-96 rounded-xl" />
+          <Skeleton className="h-96 w-full" />
+          <Skeleton className="h-96 w-full" />
         </div>
       </div>
     )
@@ -508,114 +505,197 @@ export default function GradingPage() {
     else byQuestionAttachments.set(a.question_id, [a])
   }
   const inProgress = submission.status === 'IN_PROGRESS'
+  // A paper exam with uploaded sheets is marked on the sheet itself, right here.
+  const sheetMode = !usesLines && scriptAttachments.length > 0 && !inProgress
+  const qi = Math.min(qIndex, Math.max(0, questions.length - 1))
+  const current = questions[qi] ?? null
+
+  const filesFor = (q: ExamQuestionOut): AttachmentOut[] => [
+    ...(byQuestionAttachments.get(q.id) ?? []),
+    ...(answers.get(q.id)?.attachments ?? [])
+      .filter((url) => !(byQuestionAttachments.get(q.id) ?? []).some((a) => a.file_url === url))
+      .map<AttachmentOut>((url) => ({ file_url: url, filename: null, provider: null, storage_warning: null, uploaded_at: null, question_id: q.id })),
+  ]
 
   return (
-    <>
-      <Link
-        to={`${scope.examPath(exam.id)}?tab=submissions`}
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" />
-        {exam.title}
-      </Link>
-
+    <div className="space-y-6">
       {/* ------------------------------------------------------ header */}
-      <div className="mt-3 mb-5 flex flex-col gap-3 rounded-xl border border-border bg-card p-4 lg:flex-row lg:items-center">
-        <div className="flex min-w-0 flex-1 items-center gap-3">
-          <Avatar name={studentName} size="lg" />
+      <Band className="-mt-6 border-b border-border">
+        <div className="flex flex-wrap items-center justify-between gap-3 py-4">
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="truncate text-lg font-semibold tracking-tight">{studentName}</h1>
-              <SubmissionStatusBadge status={submission.status} size="sm" />
-              {submission.is_late && (
-                <Badge tone="warning" size="sm">
-                  <Hourglass />
-                  {submission.late_by_minutes > 0 ? `${Math.round(submission.late_by_minutes)} min late` : 'Late'}
-                </Badge>
-              )}
-            </div>
-            <p className="truncate text-xs text-muted-foreground">
-              {classLabel(exam)} · {subjectName(exam)}
-              {submission.submitted_at ? ` · handed in ${formatDateTime(submission.submitted_at)}` : ''}
-              {submission.evaluated_at && submission.evaluator
-                ? ` · marked by ${submission.evaluator.full_name} ${formatRelative(submission.evaluated_at)}`
-                : ''}
-            </p>
+            <Link
+              to={`${scope.examPath(exam.id)}?tab=submissions`}
+              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft className="size-3.5" />
+              {exam.title}
+            </Link>
+            <h1 className="mt-1 truncate text-xl font-medium tracking-tight text-foreground">
+              {tidy(studentName)}
+              {submission.is_late && <span className="ml-2 align-middle text-xs font-medium text-warning">late</span>}
+            </h1>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">
+              Script {position >= 0 ? position + 1 : '—'} of {order.length} · {markedCount} marked
+            </span>
+            {prev ? (
+              <Button asChild variant="outline" size="icon-sm" aria-label="Previous student">
+                <Link to={scope.gradePath(exam.id, prev.student_id)}>
+                  <ChevronLeft />
+                </Link>
+              </Button>
+            ) : (
+              <Button variant="outline" size="icon-sm" disabled aria-label="Previous student">
+                <ChevronLeft />
+              </Button>
+            )}
+            {next ? (
+              <Button asChild variant="outline" size="icon-sm" aria-label="Next student">
+                <Link to={scope.gradePath(exam.id, next.student_id)}>
+                  <ChevronRight />
+                </Link>
+              </Button>
+            ) : (
+              <Button variant="outline" size="icon-sm" disabled aria-label="Next student">
+                <ChevronRight />
+              </Button>
+            )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">
-            {position >= 0 ? `${position + 1} of ${order.length}` : ''} · {markedCount} marked
-          </span>
-          {prev ? (
-            <Button asChild variant="outline" size="icon-sm" aria-label="Previous student">
-              <Link to={scope.gradePath(exam.id, prev.student_id)}>
-                <ChevronLeft />
-              </Link>
-            </Button>
-          ) : (
-            <Button variant="outline" size="icon-sm" disabled aria-label="Previous student">
-              <ChevronLeft />
-            </Button>
-          )}
-          {next ? (
-            <Button asChild variant="outline" size="icon-sm" aria-label="Next student">
-              <Link to={scope.gradePath(exam.id, next.student_id)}>
-                <ChevronRight />
-              </Link>
-            </Button>
-          ) : (
-            <Button variant="outline" size="icon-sm" disabled aria-label="Next student">
-              <ChevronRight />
-            </Button>
-          )}
-        </div>
-      </div>
+      </Band>
 
-      {inProgress && (
-        <div className="mb-5 flex items-start gap-3 rounded-xl border border-info/30 bg-info/8 p-4 text-sm">
-          <Hourglass className="mt-0.5 size-4 shrink-0 text-info" />
-          <p>
-            <span className="font-medium">Not handed in yet.</span>{' '}
-            <span className="text-muted-foreground">
-              {studentName} started {submission.started_at ? formatRelative(submission.started_at) : ''} and is still
-              working. You can read what they have saved so far, but marks can only be recorded once they submit.
-            </span>
-          </p>
+      {sheetMode ? (
+        <div className="!mt-0">
+          <Band className="border-b border-border">
+            <div className="-mx-4 h-[calc(100vh-11.5rem)] min-h-[32rem] sm:-mx-6 lg:-mx-8">
+              <MarkingEditor
+                inline
+                exam={exam}
+                submission={submission}
+                onRecordTotal={async (sheetTotal) => {
+                  setFlatMarks(String(sheetTotal))
+                  // On a graded exam the grade is left out, so the server gives the band the marks reach.
+                  await evaluate.mutateAsync({
+                    examId: exam.id,
+                    studentId,
+                    body: { marks_obtained: sheetTotal, remarks: remarks.trim() || null },
+                  })
+                }}
+                asideFooter={
+                  <div className="space-y-2 border-t border-border px-3 py-3">
+                    <Input
+                      value={remarks}
+                      onChange={(e) => setRemarks(e.target.value)}
+                      placeholder="Remark to the student (optional)"
+                      aria-label="Remarks to the student"
+                      className="h-8 text-sm"
+                    />
+                    <div className="flex items-center justify-between">
+                      <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-danger" onClick={() => setConfirmReopen(true)}>
+                        <RotateCcw />
+                        Hand back
+                      </Button>
+                      {(nextUnmarked ?? next) && (
+                        <Button asChild variant="outline" size="sm">
+                          <Link to={scope.gradePath(exam.id, (nextUnmarked ?? next)!.student_id)}>
+                            Next script
+                            <ChevronRight />
+                          </Link>
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                }
+              />
+            </div>
+          </Band>
         </div>
-      )}
+      ) : (
+      <div className="!mt-0">
+        {inProgress && (
+          <Band className="border-b border-border bg-info/[0.05]">
+            <p className="py-2.5 text-sm text-foreground">
+              Not handed in yet. {tidy(studentName)} is still writing; you can read what is saved, but marks can be recorded once they submit.
+            </p>
+          </Band>
+        )}
 
-      {/* --------------------------------------------------- split view */}
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,28rem)] xl:grid-cols-[minmax(0,1fr)_minmax(24rem,32rem)]">
-        {/* ----------------------------------------------- answers */}
-        <section aria-label="Student's answers" className="min-w-0 space-y-4">
-          {scriptAttachments.length > 0 && (
-            <Card className="p-4 sm:p-5">
-              <div className="flex items-center gap-2">
-                <Paperclip className="size-4 text-primary" />
-                <h2 className="text-sm font-semibold">Answer sheets</h2>
-                <span className="text-xs text-muted-foreground">
-                  {scriptAttachments.length} file{scriptAttachments.length === 1 ? '' : 's'}
-                </span>
-                {submission.status !== 'IN_PROGRESS' && (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    icon={<PenLine />}
-                    className="ml-auto"
-                    onClick={() => setMarkingOpen(true)}
-                  >
+        {/* The answer sheets, when the student uploaded any for the whole paper. */}
+        {scriptAttachments.length > 0 && (
+          <Band className="border-b border-border">
+            <div className="space-y-2 py-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium text-foreground">
+                  Answer sheets <span className="font-normal text-muted-foreground">· {scriptAttachments.length}</span>
+                  {submission.marking_total != null && (
+                    <span className="ml-2 font-normal text-muted-foreground">
+                      marked on the sheet: {formatMark(submission.marking_total)} / {formatMark(maxMarks)}
+                    </span>
+                  )}
+                </p>
+                {!inProgress && (
+                  <Button size="sm" icon={<PenLine />} onClick={() => setMarkingOpen(true)}>
                     Mark on the answer sheet
                   </Button>
                 )}
               </div>
-              {submission.marking_total != null && (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Marked on the sheet: {formatMark(submission.marking_total)} / {formatMark(maxMarks)}
+              {scriptAttachments.map((a) => (
+                <AttachmentPreview
+                  key={a.file_url}
+                  attachment={a}
+                  examId={submission.exam_id}
+                  studentId={submission.student_id}
+                  index={submission.attachments.findIndex((x) => x.file_url === a.file_url)}
+                />
+              ))}
+            </div>
+          </Band>
+        )}
+
+        {/* --------------------------------------------- one question */}
+        {current ? (
+          <Band className="border-b border-border">
+            {/* Every question as a number: green once it has a mark, red if the mark is wrong. */}
+            <div className="flex flex-wrap gap-1.5 border-b border-border py-3">
+              {questions.map((q, i) => {
+                const v = lines[q.id]?.marks ?? ''
+                const bad = lineErrors.some((e) => e.id === q.id)
+                return (
+                  <button
+                    key={q.id}
+                    type="button"
+                    onClick={() => setQIndex(i)}
+                    aria-current={i === qi ? 'true' : undefined}
+                    aria-label={`Question ${i + 1}`}
+                    className={cn(
+                      'flex size-8 items-center justify-center rounded-md border text-xs font-medium tabular-nums transition-colors',
+                      i === qi
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : bad
+                          ? 'border-danger bg-danger/10 text-danger'
+                          : v.trim() !== ''
+                            ? 'border-success/40 bg-success/10 text-success'
+                            : 'border-border text-muted-foreground hover:border-primary/50',
+                    )}
+                  >
+                    {i + 1}
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="grid gap-x-10 py-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
+              <div className="min-w-0 space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Question {qi + 1} of {questions.length} · {QUESTION_TYPE_META[current.question_type].label} · {formatMark(current.marks)} mark{current.marks === 1 ? '' : 's'}
                 </p>
-              )}
-              <div className="mt-3 space-y-2">
-                {scriptAttachments.map((a) => (
+                <p className="whitespace-pre-wrap text-base font-medium leading-relaxed text-foreground">{current.text}</p>
+                <div>
+                  <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Answer</p>
+                  <StudentAnswer question={current} answer={answers.get(current.id)} />
+                </div>
+                {filesFor(current).map((a) => (
                   <AttachmentPreview
                     key={a.file_url}
                     attachment={a}
@@ -625,247 +705,115 @@ export default function GradingPage() {
                   />
                 ))}
               </div>
-            </Card>
-          )}
 
-          {questions.length === 0 && scriptAttachments.length === 0 && (
-            <Card className="p-8 text-center text-sm text-muted-foreground">
-              Nothing was written or uploaded on this script.
-            </Card>
-          )}
-
-          {questions.map((q, index) => {
-            const answer = answers.get(q.id)
-            const line = lines[q.id]
-            const auto = isAuto(q.id, line?.marks ?? '')
-            const verdict = verdictFor(q, answer, line, auto)
-            const look = VERDICT_LOOK[verdict]
-            const questionFiles = [
-              ...(byQuestionAttachments.get(q.id) ?? []),
-              ...(answer?.attachments ?? [])
-                .filter((url) => !(byQuestionAttachments.get(q.id) ?? []).some((a) => a.file_url === url))
-                .map<AttachmentOut>((url) => ({ file_url: url, filename: null, provider: null, storage_warning: null, uploaded_at: null, question_id: q.id })),
-            ]
-            return (
-              <Card key={q.id} id={`answer-${q.id}`} className="scroll-mt-4 p-4 sm:p-5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="flex size-7 items-center justify-center rounded-full bg-primary/12 text-xs font-bold text-primary">
-                    {index + 1}
-                  </span>
-                  <Badge tone="outline" size="sm">
-                    {QUESTION_TYPE_META[q.question_type].label}
-                  </Badge>
-                  <Badge tone={look.tone} size="sm">
-                    <look.Icon />
-                    {look.label}
-                  </Badge>
-                  <span className="ml-auto text-sm font-semibold tabular-nums">
-                    {exam.grading_scheme === 'MARKS' && line?.marks.trim() ? (
-                      <span className={cn(Number(line.marks) === q.marks ? 'text-success' : Number(line.marks) === 0 ? 'text-danger' : 'text-foreground')}>
-                        {formatMark(Number(line.marks))}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                    <span className="text-muted-foreground"> / {formatMark(q.marks)}</span>
-                  </span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon-sm" aria-label="Go to the key for this question" onClick={() => scrollTo(`key-${q.id}`)}>
-                        <KeyRound />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Jump to the answer key and marks</TooltipContent>
-                  </Tooltip>
-                </div>
-                <p className="mt-3 whitespace-pre-wrap text-sm font-medium leading-relaxed">{q.text}</p>
-                <div className="mt-3">
-                  <StudentAnswer question={q} answer={answer} />
-                </div>
-                {questionFiles.length > 0 && (
-                  <div className="mt-3 space-y-2">
-                    {questionFiles.map((a) => (
-                      <AttachmentPreview
-                        key={a.file_url}
-                        attachment={a}
-                        examId={submission.exam_id}
-                        studentId={submission.student_id}
-                        index={submission.attachments.findIndex((x) => x.file_url === a.file_url)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </Card>
-            )
-          })}
-        </section>
-
-        {/* ----------------------------------------------- marking */}
-        <aside
-          aria-label="Answer key and marks"
-          className="lg:sticky lg:top-4 lg:max-h-[calc(100dvh-2rem)] lg:overflow-y-auto"
-        >
-          <Card className="overflow-hidden">
-            <div className="border-b border-border bg-surface/60 px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground">Total</p>
-                  <p className="text-2xl font-semibold tabular-nums leading-tight">
-                    {isGrade && grade ? (
-                      grade
-                    ) : (
-                      <>
-                        {total != null ? formatMark(total) : '—'}
-                        <span className="text-base font-normal text-muted-foreground"> / {formatMark(maxMarks)}</span>
-                      </>
-                    )}
-                  </p>
-                </div>
-                <div className="text-right text-xs text-muted-foreground">
-                  {percentage != null && (
-                    <p className={cn('text-base font-semibold', PERCENT_TONE[performanceTone(percentage)])}>{formatPercent(percentage, 1)}</p>
-                  )}
-                  {!isGrade && derivedGrade && <p>Grade {derivedGrade}</p>}
-                  {passed != null && (
-                    <p className={passed ? 'text-success' : 'text-danger'}>{passed ? 'Pass' : 'Below pass mark'}</p>
-                  )}
-                </div>
-              </div>
-              {usesLines && unmarkedLines.length > 0 && (
-                <p className="mt-2 flex items-center gap-1.5 text-2xs text-warning">
-                  <TriangleAlert className="size-3" />
-                  {unmarkedLines.length} question{unmarkedLines.length === 1 ? '' : 's'} without a mark — they count as nothing.
-                </p>
-              )}
-              {overTotal && (
-                <p className="mt-2 flex items-center gap-1.5 text-2xs text-danger">
-                  <TriangleAlert className="size-3" />
-                  The total exceeds what the exam is out of.
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-2.5 p-4">
-              {usesLines ? (
-                questions.map((q, index) => {
-                  const line = lines[q.id] ?? { marks: '', remarks: '' }
-                  const auto = isAuto(q.id, line.marks)
-                  return (
-                    <KeyRow
-                      key={q.id}
-                      question={q}
-                      index={index}
-                      line={line}
-                      verdict={verdictFor(q, answers.get(q.id), line, auto)}
-                      auto={auto}
-                      scheme={exam.grading_scheme}
-                      onChange={(patch) => setLines((prev) => ({ ...prev, [q.id]: { ...(prev[q.id] ?? { marks: '', remarks: '' }), ...patch } }))}
-                    />
-                  )
-                })
-              ) : (
-                <div className="rounded-lg border border-border/80 p-3">
-                  <p className="text-sm font-medium">Marks for the whole paper</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    This exam has no question form, so record the total you awarded on the answer sheet.
-                  </p>
-                  {exam.grading_scheme === 'GRADE' && (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      On a graded exam, enter the marks and the grade is worked out from them — or pick the grade below.
-                    </p>
-                  )}
-                  <div className="mt-2.5 flex items-center gap-2">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={maxMarks}
-                      step="any"
-                      inputMode="decimal"
-                      value={flatMarks}
-                      invalid={flatInvalid || overTotal}
-                      aria-label="Total marks"
-                      className="h-9 w-28 text-right text-base font-semibold"
-                      onChange={(e) => setFlatMarks(e.target.value)}
-                    />
-                    <span className="text-sm text-muted-foreground">/ {formatMark(maxMarks)}</span>
-                  </div>
-                </div>
-              )}
-
-              {isGrade && (
-                <div className="rounded-lg border border-border/80 p-3">
-                  <p className="text-sm font-medium">Grade awarded</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">One of this exam&rsquo;s own bands.</p>
-                  <Select value={grade} onValueChange={setGrade}>
-                    <SelectTrigger className="mt-2" aria-label="Grade">
-                      <SelectValue placeholder="Choose a grade" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {exam.grade_bands.map((b) => (
-                        <SelectItem key={b.grade} value={b.grade}>
-                          {b.grade}
-                          {b.description ? ` — ${b.description}` : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {derivedGrade && derivedGrade !== grade && total != null && (
-                    <p className="mt-1.5 text-2xs text-muted-foreground">
-                      The marks entered would put this at {derivedGrade}.{' '}
-                      <button type="button" className="text-primary hover:underline" onClick={() => setGrade(derivedGrade)}>
-                        Use that
-                      </button>
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <div>
-                <label className="text-xs font-medium" htmlFor="evaluator-remarks">
-                  Remarks to the student
-                </label>
-                <Textarea
-                  id="evaluator-remarks"
-                  rows={3}
-                  value={remarks}
-                  placeholder="Shown with their result once it is published."
-                  className="mt-1"
-                  onChange={(e) => setRemarks(e.target.value)}
+              <div className="mt-5 lg:mt-0">
+                <KeyRow
+                  question={current}
+                  index={qi}
+                  line={lines[current.id] ?? { marks: '', remarks: '' }}
+                  verdict={verdictFor(current, answers.get(current.id), lines[current.id], isAuto(current.id, lines[current.id]?.marks ?? ''))}
+                  auto={isAuto(current.id, lines[current.id]?.marks ?? '')}
+                  scheme={exam.grading_scheme}
+                  onChange={(patch) => setLines((prev) => ({ ...prev, [current.id]: { ...(prev[current.id] ?? { marks: '', remarks: '' }), ...patch } }))}
                 />
-              </div>
-
-              {error && (
-                <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger" role="alert">
-                  {error}
-                </p>
-              )}
-            </div>
-
-            <div className="sticky bottom-0 space-y-2 border-t border-border bg-card/95 p-4 backdrop-blur">
-              <div className="flex gap-2">
-                <Button variant="outline" className="flex-1" icon={<Save />} disabled={!ready} loading={evaluate.isPending} onClick={() => save('stay')}>
-                  Save
-                </Button>
-                <Button variant="primary" className="flex-1" icon={<ChevronRight />} disabled={!ready} loading={evaluate.isPending} onClick={() => save('next')}>
-                  Save &amp; next
-                </Button>
-              </div>
-              <div className="flex items-center justify-between">
-                <p className="text-2xs text-muted-foreground">
-                  {exam.results_published ? 'Results are published — saving updates the student’s mark.' : 'Hidden from the student until results are published.'}
-                </p>
-                {!inProgress && (
-                  <Button variant="ghost" size="xs" icon={<RotateCcw />} className="text-danger hover:bg-danger/10" onClick={() => setConfirmReopen(true)}>
-                    Hand back
+                <div className="mt-3 flex items-center justify-between">
+                  <Button variant="ghost" size="sm" disabled={qi === 0} onClick={() => setQIndex(qi - 1)}>
+                    <ChevronLeft />
+                    Q{qi}
                   </Button>
-                )}
+                  <Button variant="outline" size="sm" disabled={qi >= questions.length - 1} onClick={() => setQIndex(qi + 1)}>
+                    Q{qi + 2}
+                    <ChevronRight />
+                  </Button>
+                </div>
               </div>
             </div>
-          </Card>
-        </aside>
-      </div>
+          </Band>
+        ) : (
+          // No question form: one mark for the whole paper.
+          <Band className="border-b border-border">
+            <div className="flex flex-wrap items-center gap-3 py-5">
+              <p className="text-sm text-foreground">Marks for the whole paper</p>
+              <Input
+                type="number"
+                min={0}
+                max={maxMarks}
+                step="any"
+                inputMode="decimal"
+                value={flatMarks}
+                invalid={flatInvalid || overTotal}
+                aria-label="Total marks"
+                className="h-9 w-28 text-right text-base font-semibold"
+                onChange={(e) => setFlatMarks(e.target.value)}
+              />
+              <span className="text-sm text-muted-foreground">/ {formatMark(maxMarks)}</span>
+              {scriptAttachments.length === 0 && <span className="text-sm text-muted-foreground">· nothing was uploaded on this script</span>}
+            </div>
+          </Band>
+        )}
 
-      {exam && submission && submission.status !== 'IN_PROGRESS' && (
+        {/* ------------------------------------------- the total, and save */}
+        <Band className="sticky bottom-0 z-10 border-b border-t border-border bg-card/95 backdrop-blur">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 py-3">
+            <p className="text-sm">
+              <span className="text-muted-foreground">Total </span>
+              <span className="text-lg font-medium tabular-nums text-foreground">
+                {isGrade && grade ? grade : total != null ? formatMark(total) : '—'}
+              </span>
+              {!(isGrade && grade) && <span className="text-muted-foreground"> / {formatMark(maxMarks)}</span>}
+              {percentage != null && <span className={cn('ml-2 font-medium', PERCENT_TONE[performanceTone(percentage)])}>{formatPercent(percentage, 0)}</span>}
+              {!isGrade && derivedGrade && <span className="ml-2 text-muted-foreground">grade {derivedGrade}</span>}
+              {passed != null && <span className={cn('ml-2', passed ? 'text-success' : 'text-danger')}>{passed ? 'pass' : 'below pass'}</span>}
+            </p>
+            {usesLines && unmarkedLines.length > 0 && <span className="text-xs text-warning">{unmarkedLines.length} without a mark</span>}
+            {overTotal && <span className="text-xs text-danger">More than the exam is out of</span>}
+            {isGrade && (
+              <Select value={grade} onValueChange={setGrade}>
+                <SelectTrigger className="h-8 w-32" aria-label="Grade">
+                  <SelectValue placeholder="Grade" />
+                </SelectTrigger>
+                <SelectContent>
+                  {exam.grade_bands.map((b) => (
+                    <SelectItem key={b.grade} value={b.grade}>
+                      {b.grade}
+                      {b.description ? ` — ${b.description}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <Input
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              placeholder="Remark to the student (optional)"
+              aria-label="Remarks to the student"
+              className="h-8 min-w-48 flex-1 text-sm"
+            />
+            <div className="ml-auto flex items-center gap-2">
+              {!inProgress && (
+                <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-danger" onClick={() => setConfirmReopen(true)}>
+                  <RotateCcw />
+                  Hand back
+                </Button>
+              )}
+              <Button variant="outline" size="sm" icon={<Save />} disabled={!ready} loading={evaluate.isPending} onClick={() => save('stay')}>
+                Save
+              </Button>
+              <Button size="sm" icon={<ChevronRight />} disabled={!ready} loading={evaluate.isPending} onClick={() => save('next')}>
+                Save &amp; next
+              </Button>
+            </div>
+            {error && (
+              <p className="w-full text-sm text-danger" role="alert">
+                {error}
+              </p>
+            )}
+          </div>
+        </Band>
+      </div>
+      )}
+
+      {!sheetMode && exam && submission && submission.status !== 'IN_PROGRESS' && (
         <MarkingEditor
           open={markingOpen}
           onOpenChange={setMarkingOpen}
@@ -901,6 +849,6 @@ export default function GradingPage() {
           )
         }
       />
-    </>
+    </div>
   )
 }

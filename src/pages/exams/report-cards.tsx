@@ -11,6 +11,7 @@ import {
   Sparkles,
   Trash2,
   TriangleAlert,
+  X,
 } from 'lucide-react'
 import * as React from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
@@ -27,11 +28,10 @@ import {
   useUpdateReportCard,
 } from '@/queries/exam.queries'
 import { cn } from '@/lib/cn'
-import { formatDate, parseApiDate } from '@/lib/datetime'
+import { parseApiDate } from '@/lib/datetime'
 import { DEFAULT_GRADE_BANDS } from '@/lib/exams'
 import { useDebouncedValue } from '@/lib/hooks'
 import { formatPercent } from '@/lib/format'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import { DatePicker } from '@/components/ui/date-picker'
@@ -45,14 +45,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input, Textarea } from '@/components/ui/input'
-import { Segmented } from '@/components/ui/segmented'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
-import { PrintReportCardButton, ReportCardTile, ReportCardView, withRowTotals } from '@/components/domain/report-card'
-import { EmptyState, ErrorState, NoResults } from '@/components/feedback/states'
+import { PrintReportCardButton, ReportCardView, withRowTotals } from '@/components/domain/report-card'
+import { ErrorState } from '@/components/feedback/states'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field } from '@/components/forms/field'
-import { PageHeader } from '@/components/layout/page-header'
+import { Band, Figure, Figures, WorkspaceHeader } from '@/components/layout/workspace'
+import { tidyName as tidy } from '@/lib/names'
 import { useExamCatalogue, useExamScope } from './exam-scope'
 
 /**
@@ -69,7 +69,7 @@ import { useExamCatalogue, useExamScope } from './exam-scope'
 
 function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint: string }) {
   return (
-    <label className="flex items-start gap-3 rounded-lg border border-border px-3 py-2.5">
+    <label className="flex cursor-pointer items-start gap-3 rounded-md px-1 py-1.5 hover:bg-muted/40">
       <Switch checked={checked} onCheckedChange={onChange} className="mt-0.5" />
       <span className="text-sm">
         <span className="font-medium">{label}</span>
@@ -79,15 +79,8 @@ function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange
   )
 }
 
-function GenerateDialog({
-  open,
-  onOpenChange,
-  onDone,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onDone: (batch: ReportCardBatch) => void
-}) {
+function IssuePanel({ onClose, onDone }: { onClose: () => void; onDone: (batch: ReportCardBatch) => void }) {
+  const open = true
   const scope = useExamScope()
   const catalogue = useExamCatalogue()
   const examsQuery = useExams(open)
@@ -160,25 +153,27 @@ function GenerateDialog({
     try {
       const batch = await generate.mutateAsync(body)
       onDone(batch)
-      onOpenChange(false)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not issue the report cards.')
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !generate.isPending && onOpenChange(v)}>
-      <DialogContent size="lg">
-        <DialogHeader>
-          <DialogTitle>Issue report cards</DialogTitle>
-          <DialogDescription>
-            One card per enrolled student, consolidating their exams by subject. Re-issuing with the same title
-            overwrites the previous version.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogBody className="space-y-5">
+    <div className="max-w-3xl space-y-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-medium tracking-tight text-foreground">Issue report cards</h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              One card per enrolled student, their exams consolidated by subject. Re-issuing with the same title replaces the set
+            </p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close" disabled={generate.isPending}>
+            <X />
+          </Button>
+        </div>
+        <div className="space-y-5 border-t border-border pt-4">
           {error && (
-            <p className="rounded-lg border border-danger/30 bg-danger/8 px-3 py-2 text-sm text-danger" role="alert">
+            <p className="border-l-2 border-danger bg-danger/5 px-3 py-2 text-sm text-danger" role="alert">
               {error}
             </p>
           )}
@@ -209,10 +204,8 @@ function GenerateDialog({
           {classId && !examsQuery.isPending && !paperQuery.isPending && (
             <div
               className={cn(
-                'flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-xs',
-                candidateExams.length + paperExams.length === 0
-                  ? 'border-danger/30 bg-danger/8 text-danger'
-                  : 'border-border bg-surface text-muted-foreground',
+                'flex items-start gap-2.5 border-l-2 px-3 py-2 text-xs',
+                candidateExams.length + paperExams.length === 0 ? 'border-danger bg-danger/5 text-danger' : 'border-primary bg-primary/[0.04] text-muted-foreground',
               )}
             >
               {candidateExams.length + paperExams.length === 0 ? (
@@ -264,17 +257,16 @@ function GenerateDialog({
           <Field id="rc-remarks" label="Remarks on every card" hint="You can edit each card's remarks afterwards.">
             <Textarea id="rc-remarks" rows={2} value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Optional" />
           </Field>
-        </DialogBody>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={generate.isPending}>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-border pt-3">
+          <Button variant="outline" size="sm" onClick={onClose} disabled={generate.isPending}>
             Cancel
           </Button>
-          <Button variant="primary" icon={<FileBadge />} disabled={!valid} loading={generate.isPending} onClick={submit}>
+          <Button size="sm" icon={<FileBadge />} disabled={!valid} loading={generate.isPending} onClick={submit}>
             Issue cards
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </div>
+    </div>
   )
 }
 
@@ -282,17 +274,73 @@ function GenerateDialog({
 
 type PublishedFilter = 'ALL' | 'RELEASED' | 'DRAFT'
 
+/** The selected card, large, with the things a class teacher does to it. */
+function CardPreview({ card, onDeleted }: { card: ReportCardOut; onDeleted: () => void }) {
+  const scope = useExamScope()
+  const update = useUpdateReportCard()
+  const remove = useDeleteReportCard()
+  const [editing, setEditing] = React.useState(false)
+  const [deleting, setDeleting] = React.useState(false)
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className={cn('inline-flex items-center gap-1.5 text-xs font-medium', card.is_published ? 'text-success' : 'text-warning')}>
+          <span className={cn('size-2 rounded-full', card.is_published ? 'bg-success' : 'bg-warning')} aria-hidden />
+          {card.is_published ? 'Released to the student' : 'Not released: the student cannot see it yet'}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" icon={<PencilLine />} onClick={() => setEditing(true)}>
+            Remarks
+          </Button>
+          <Button
+            variant={card.is_published ? 'outline' : 'primary'}
+            size="sm"
+            icon={card.is_published ? <EyeOff /> : <Eye />}
+            loading={update.isPending}
+            onClick={() => update.mutate({ cardId: card.id, body: { is_published: !card.is_published } })}
+          >
+            {card.is_published ? 'Withdraw' : 'Release'}
+          </Button>
+          <Button asChild variant="ghost" size="sm">
+            <Link to={scope.reportCardPath(card.id)}>Open full page</Link>
+          </Button>
+          <Button variant="ghost" size="icon-sm" className="hover:text-danger" aria-label="Delete this report card" onClick={() => setDeleting(true)}>
+            <Trash2 />
+          </Button>
+        </div>
+      </div>
+
+      <ReportCardView card={card} actions={<PrintReportCardButton />} />
+
+      <RemarksDialog card={card} open={editing} onOpenChange={setEditing} />
+      <ConfirmDialog
+        open={deleting}
+        onOpenChange={setDeleting}
+        title="Delete this report card?"
+        description={`${card.student?.full_name ?? 'The student'}’s “${card.title}” will be withdrawn. The exam marks it was built from are untouched, so it can be re-issued.`}
+        confirmLabel="Delete card"
+        destructive
+        loading={remove.isPending}
+        onConfirm={() => remove.mutate(card.id, { onSuccess: onDeleted, onSettled: () => setDeleting(false) })}
+      />
+    </div>
+  )
+}
+
 export default function ReportCardsPage() {
   const scope = useExamScope()
   const catalogue = useExamCatalogue()
   const cardsQuery = useReportCards()
-  const navigate = useNavigate()
+  const update = useUpdateReportCard()
 
-  const [generating, setGenerating] = React.useState(false)
+  const [issuing, setIssuing] = React.useState(false)
   const [warnings, setWarnings] = React.useState<string[]>([])
   const [search, setSearch] = React.useState('')
   const [classId, setClassId] = React.useState<string | null>(null)
   const [published, setPublished] = React.useState<PublishedFilter>('ALL')
+  const [selectedId, setSelectedId] = React.useState<string | null>(null)
+  const [releasing, setReleasing] = React.useState<string | null>(null)
   const debounced = useDebouncedValue(search.trim().toLowerCase())
 
   const cards = React.useMemo(() => cardsQuery.data ?? [], [cardsQuery.data])
@@ -300,202 +348,272 @@ export default function ReportCardsPage() {
   const classOptions = React.useMemo(() => {
     const map = new Map<number, string>()
     for (const c of cards) {
-      // A tuition card has no class, so it cannot be bucketed by one. Skipped
-      // rather than filed under "null", which would offer a filter that means
-      // nothing on this school-side screen.
+      // A tuition card has no class, so it cannot be bucketed by one.
       if (c.class_id == null) continue
       map.set(c.class_id, c.class_room?.name ?? `Class ${String(c.class_id).slice(-6)}`)
     }
-    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true }))
   }, [cards])
 
-  const titleOptions = React.useMemo(() => [...new Set(cards.map((c) => c.title))], [cards])
+  const visible = cards.filter((c) => {
+    if (classId && String(c.class_id) !== classId) return false
+    if (published === 'RELEASED' && !c.is_published) return false
+    if (published === 'DRAFT' && c.is_published) return false
+    if (debounced) {
+      const hay = `${c.student?.full_name ?? ''} ${c.student?.email ?? ''} ${c.title} ${c.class_room?.name ?? ''}`.toLowerCase()
+      if (!hay.includes(debounced)) return false
+    }
+    return true
+  })
 
-  const visible = React.useMemo(
-    () =>
-      cards.filter((c) => {
-        if (classId && String(c.class_id) !== classId) return false
-        if (published === 'RELEASED' && !c.is_published) return false
-        if (published === 'DRAFT' && c.is_published) return false
-        if (debounced) {
-          const hay = `${c.student?.full_name ?? ''} ${c.student?.email ?? ''} ${c.title} ${c.class_room?.name ?? ''}`.toLowerCase()
-          if (!hay.includes(debounced)) return false
-        }
-        return true
-      }),
-    [cards, classId, published, debounced],
-  )
-
-  const grouped = React.useMemo(() => {
+  // One set per title and class, newest first; inside, by rank then name.
+  const sets = (() => {
     const map = new Map<string, ReportCardOut[]>()
     for (const c of visible) {
       const key = `${c.title}|${c.class_id}`
-      const list = map.get(key)
-      if (list) list.push(c)
-      else map.set(key, [c])
+      map.set(key, [...(map.get(key) ?? []), c])
     }
     for (const list of map.values()) list.sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999) || (a.student?.full_name ?? '').localeCompare(b.student?.full_name ?? ''))
     return [...map.entries()].sort((a, b) => (b[1][0].generated_at ?? '').localeCompare(a[1][0].generated_at ?? ''))
-  }, [visible])
+  })()
+  const ordered = sets.flatMap(([, list]) => list)
+  const selected = issuing ? null : (ordered.find((c) => c.id === selectedId) ?? ordered[0] ?? null)
 
+  const releasedCount = cards.filter((c) => c.is_published).length
+  const setCount = new Set(cards.map((c) => `${c.title}|${c.class_id}`)).size
   const canIssue = catalogue.leadableClasses.length > 0
-  const filtersActive = !!classId || published !== 'ALL' || !!search
+
+  /** Release every card in a set that is not out yet, one request each. */
+  const releaseAll = async (key: string, list: ReportCardOut[]) => {
+    setReleasing(key)
+    try {
+      for (const c of list.filter((x) => !x.is_published)) {
+        await update.mutateAsync({ cardId: c.id, body: { is_published: true } })
+      }
+    } finally {
+      setReleasing(null)
+    }
+  }
 
   return (
-    <>
-      <PageHeader
-        title="Report cards"
+    <div className="space-y-6">
+      <WorkspaceHeader
+        title="Report Cards"
         description={
           scope.isAdmin
-            ? 'Consolidated results for every class. Issue, read and release them on the class teacher’s behalf.'
-            : 'Consolidated results for the classes you lead, one card per student.'
+            ? 'Consolidated results for every class. Issue, read and release them on the class teacher’s behalf'
+            : 'Consolidated results for the classes you lead, one card per student'
         }
+        icon={FileBadge}
         actions={
           <>
             {canIssue && (
-              <Button asChild variant="outline">
+              <Button asChild variant="outline" size="sm">
                 <Link to={scope.paperMarksPath}>
                   <ClipboardPen className="size-4" />
                   Offline exam marks
                 </Link>
               </Button>
             )}
-            <Button variant="primary" icon={<Plus />} disabled={!canIssue || catalogue.isPending} onClick={() => setGenerating(true)}>
+            <Button size="sm" icon={<Plus />} disabled={!canIssue || catalogue.isPending} onClick={() => setIssuing(true)}>
               Issue report cards
             </Button>
           </>
         }
       />
 
-      {canIssue && (
-        <p className="mb-5 rounded-md border border-border bg-card px-4 py-2.5 text-sm text-muted-foreground">
-          Exam held offline, not in the LMS? Enter its marks under{' '}
-          <span className="font-medium text-foreground">Offline exam marks</span> first, then issue the report cards. Exams held
-          in the LMS are counted on their own once their results are published.
-        </p>
-      )}
+      <div className="!mt-0">
+        <Figures>
+          <Figure label="Report cards" value={cardsQuery.data ? String(cards.length) : '—'} context={`in ${setCount} set${setCount === 1 ? '' : 's'}`} tone="primary" />
+          <Figure label="Released" value={cardsQuery.data ? String(releasedCount) : '—'} context="students can see them" tone="success" />
+          <Figure
+            label="Not released"
+            value={cardsQuery.data ? String(cards.length - releasedCount) : '—'}
+            context="waiting for you"
+            alert={cards.length - releasedCount > 0}
+            tone="warning"
+          />
+          <Figure label="Classes" value={cardsQuery.data ? String(classOptions.length) : '—'} context="with cards issued" tone="neutral" />
+        </Figures>
 
-      {!catalogue.isPending && !canIssue && !scope.isAdmin && (
-        <div className="mb-5 flex items-start gap-3 rounded-xl border border-info/30 bg-info/8 p-4 text-sm">
-          <FileBadge className="mt-0.5 size-4 shrink-0 text-info" />
-          <p className="text-muted-foreground">
-            Report cards are issued by a class&rsquo;s class teacher, and you do not lead a class. Ask an administrator to
-            assign you, or to issue them.
-          </p>
-        </div>
-      )}
+        {!catalogue.isPending && !canIssue && !scope.isAdmin && (
+          <Band className="border-b border-border bg-info/[0.05]">
+            <p className="py-2.5 text-sm text-foreground">
+              Report cards are issued by a class&rsquo;s class teacher, and you do not lead a class. Ask an administrator to assign you, or to issue them.
+            </p>
+          </Band>
+        )}
 
-      {warnings.length > 0 && (
-        <div className="mb-5 space-y-1 rounded-xl border border-warning/30 bg-warning/8 p-4 text-sm">
-          <p className="flex items-center gap-2 font-medium">
-            <TriangleAlert className="size-4 text-warning" />
-            Issued with notes
-          </p>
-          <ul className="list-disc space-y-0.5 pl-6 text-muted-foreground">
-            {warnings.map((w) => (
-              <li key={w}>{w}</li>
-            ))}
-          </ul>
-          <Button variant="ghost" size="xs" onClick={() => setWarnings([])}>
-            Dismiss
-          </Button>
-        </div>
-      )}
-
-      {cardsQuery.isPending ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-24 rounded-xl" />
-          ))}
-        </div>
-      ) : cardsQuery.isError ? (
-        <ErrorState error={cardsQuery.error} onRetry={() => cardsQuery.refetch()} />
-      ) : cards.length === 0 ? (
-        <EmptyState
-          icon={<FileBadge />}
-          title="No report cards yet"
-          description={
-            canIssue
-              ? 'Issue the first set once exam results are published, or once the marks for an offline exam are entered. Cards start unreleased so you can read them first.'
-              : 'Report cards for the classes you lead will appear here once they are issued.'
-          }
-          action={
-            canIssue ? (
-              <Button variant="primary" icon={<Plus />} onClick={() => setGenerating(true)}>
-                Issue report cards
+        {warnings.length > 0 && (
+          <Band className="border-b border-border bg-warning/[0.06]">
+            <div className="flex items-start gap-3 py-2.5 text-sm">
+              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-foreground">Issued with notes</p>
+                <ul className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
+                  {warnings.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setWarnings([])}>
+                Dismiss
               </Button>
-            ) : undefined
-          }
-        />
-      ) : (
-        <div className="space-y-6">
-          <div className="grid gap-3 rounded-xl border border-border bg-card p-3 sm:grid-cols-[1fr_1fr_auto]">
-            <Input leading={<Search />} placeholder="Search by student or title…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search report cards" />
-            <Combobox
-              value={classId}
-              onChange={(v) => setClassId(v === classId ? null : v)}
-              placeholder="Every class"
-              options={classOptions.map(([id, name]) => ({ value: String(id), label: name }))}
-            />
-            <Segmented<PublishedFilter>
-              layoutId="rc-published-filter"
-              size="sm"
-              value={published}
-              onChange={setPublished}
-              aria-label="Release state"
-              options={[
-                { value: 'ALL', label: 'All' },
-                { value: 'RELEASED', label: 'Released' },
-                { value: 'DRAFT', label: 'Not released' },
-              ]}
-            />
-          </div>
+            </div>
+          </Band>
+        )}
 
-          {visible.length === 0 ? (
-            <NoResults
-              onClear={
-                filtersActive
-                  ? () => {
-                      setClassId(null)
-                      setPublished('ALL')
-                      setSearch('')
-                    }
-                  : undefined
-              }
-            />
+        <Band className="border-b border-border">
+          {cardsQuery.isPending ? (
+            <div className="grid gap-4 py-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
+              <Skeleton className="h-80 w-full" />
+              <Skeleton className="h-80 w-full" />
+            </div>
+          ) : cardsQuery.isError ? (
+            <div className="py-6">
+              <ErrorState error={cardsQuery.error} onRetry={() => cardsQuery.refetch()} />
+            </div>
           ) : (
-            grouped.map(([key, list]) => {
-              const first = list[0]
-              const released = list.filter((c) => c.is_published).length
-              const average = list.reduce((sum, c) => sum + withRowTotals(c).overall_percentage, 0) / list.length
-              return (
-                <section key={key}>
-                  <div className="mb-2.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                    <h2 className="text-sm font-semibold">{first.title}</h2>
-                    <span className="text-xs text-muted-foreground">
-                      {first.class_room?.name ?? ''} · {list.length} card{list.length === 1 ? '' : 's'} · class average {formatPercent(average, 0)} · issued {formatDate(first.generated_at)}
-                    </span>
-                    <Badge tone={released === list.length ? 'success' : released > 0 ? 'warning' : 'neutral'} size="sm" className="ml-auto">
-                      {released === list.length ? 'All released' : released > 0 ? `${released} of ${list.length} released` : 'Not released'}
-                    </Badge>
+            <div className="grid lg:h-[calc(100vh-17rem)] lg:min-h-[30rem] lg:grid-cols-[22rem_minmax(0,1fr)] lg:divide-x lg:divide-border">
+              {/* ------------------------------------------------- the list */}
+              <div className="-mx-4 flex flex-col border-b border-border sm:-mx-6 lg:mx-0 lg:-ml-8 lg:min-h-0 lg:border-b-0">
+                <div className="space-y-2 border-b border-border py-2.5 pl-4 pr-4 sm:pl-6 lg:pl-8">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search students or titles" aria-label="Search report cards" className="h-8 py-1 pl-8 text-sm" />
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                    {list.map((card) => (
-                      <ReportCardTile key={card.id} card={card} onClick={() => navigate(scope.reportCardPath(card.id))} />
-                    ))}
+                  <div className="flex gap-2">
+                    {classOptions.length > 1 && (
+                      <Combobox
+                        value={classId ?? 'all'}
+                        onChange={(v) => setClassId(v === 'all' ? null : v)}
+                        options={[{ value: 'all', label: 'All classes' }, ...classOptions.map(([id, name]) => ({ value: String(id), label: name }))]}
+                        searchPlaceholder="Search classes"
+                        className="h-8 min-w-0 flex-1 text-xs"
+                      />
+                    )}
+                    <div className="flex rounded-md border border-border p-0.5" role="radiogroup" aria-label="Release state">
+                      {(
+                        [
+                          ['ALL', 'All'],
+                          ['RELEASED', 'Released'],
+                          ['DRAFT', 'Not yet'],
+                        ] as const
+                      ).map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          role="radio"
+                          aria-checked={published === value}
+                          onClick={() => setPublished(value)}
+                          className={cn('rounded px-2 py-0.5 text-xs transition-colors', published === value ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </section>
-              )
-            })
-          )}
-          {titleOptions.length > 1 && (
-            <p className="text-xs text-muted-foreground">Cards are grouped by title and class. Re-issuing with the same title replaces the group.</p>
-          )}
-        </div>
-      )}
+                </div>
 
-      <GenerateDialog open={generating} onOpenChange={setGenerating} onDone={(batch) => setWarnings(batch.warnings)} />
-    </>
+                <div className="max-h-96 flex-1 overflow-y-auto lg:max-h-none lg:min-h-0">
+                  {cards.length === 0 ? (
+                    <p className="px-6 py-12 text-center text-sm text-muted-foreground">
+                      {canIssue ? 'No report cards yet. Issue the first set once results are in' : 'Report cards for the classes you lead appear here once issued'}
+                    </p>
+                  ) : sets.length === 0 ? (
+                    <p className="px-6 py-12 text-center text-sm text-muted-foreground">Nothing matches</p>
+                  ) : (
+                    sets.map(([key, list]) => {
+                      const first = list[0]
+                      const released = list.filter((c) => c.is_published).length
+                      const average = list.reduce((sum, c) => sum + withRowTotals(c).overall_percentage, 0) / list.length
+                      return (
+                        <section key={key}>
+                          <div className="sticky top-0 z-10 border-b border-border bg-muted py-2 pl-4 pr-4 sm:pl-6 lg:pl-8">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="min-w-0 truncate text-xs font-medium text-foreground" title={first.title}>
+                                {first.title}
+                              </p>
+                              {released < list.length && (
+                                <Button
+                                  variant="ghost"
+                                  size="xs"
+                                  className="h-6 shrink-0 text-primary"
+                                  loading={releasing === key}
+                                  onClick={() => void releaseAll(key, list)}
+                                >
+                                  Release all
+                                </Button>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-muted-foreground">
+                              {first.class_room?.name ?? ''} · {list.length} cards · average {formatPercent(average, 0)} · {released}/{list.length} released
+                            </p>
+                          </div>
+                          <ul className="divide-y divide-border">
+                            {list.map((c) => {
+                              const active = selected?.id === c.id
+                              const totals = withRowTotals(c)
+                              return (
+                                <li key={c.id}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedId(c.id)
+                                      setIssuing(false)
+                                    }}
+                                    aria-current={active ? 'true' : undefined}
+                                    className={cn('relative flex w-full items-center gap-3 py-2 pl-4 pr-4 text-left transition-colors sm:pl-6 lg:pl-8', active ? 'bg-primary/5' : 'hover:bg-muted/40')}
+                                  >
+                                    {active && <span className="absolute inset-y-0 left-0 w-0.5 bg-primary" aria-hidden />}
+                                    <span className="w-6 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{c.rank ?? '—'}</span>
+                                    <span className={cn('min-w-0 flex-1 truncate text-sm', active ? 'font-medium text-primary' : 'text-foreground')}>
+                                      {tidy(c.student?.full_name ?? `Student #${String(c.student_id).slice(-6)}`)}
+                                    </span>
+                                    <span className="shrink-0 text-xs tabular-nums text-foreground">{formatPercent(totals.overall_percentage, 0)}</span>
+                                    {totals.overall_grade && <span className="w-6 shrink-0 text-xs font-medium text-muted-foreground">{totals.overall_grade}</span>}
+                                    <span className={cn('size-1.5 shrink-0 rounded-full', c.is_published ? 'bg-success' : 'bg-warning')} title={c.is_published ? 'Released' : 'Not released'} />
+                                  </button>
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        </section>
+                      )
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* ----------------------------------------- the card, or issuing */}
+              <section className="min-w-0 py-5 lg:min-h-0 lg:overflow-y-auto lg:pl-8 lg:pr-1">
+                {issuing ? (
+                  <IssuePanel
+                    onClose={() => setIssuing(false)}
+                    onDone={(batch) => {
+                      setWarnings(batch.warnings)
+                      setIssuing(false)
+                    }}
+                  />
+                ) : selected ? (
+                  <CardPreview key={selected.id} card={selected} onDeleted={() => setSelectedId(null)} />
+                ) : (
+                  <div className="flex h-full flex-col items-center justify-center py-16 text-center">
+                    <FileBadge className="size-8 text-muted-foreground/40" strokeWidth={1.5} />
+                    <p className="mt-2 text-sm text-muted-foreground">{cards.length === 0 ? 'No report cards yet' : 'Pick a student to see their card'}</p>
+                    {canIssue && cards.length === 0 && (
+                      <Button size="sm" className="mt-4" icon={<Plus />} onClick={() => setIssuing(true)}>
+                        Issue report cards
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+        </Band>
+      </div>
+    </div>
   )
 }
 
@@ -637,7 +755,7 @@ export function ReportCardDetailPage() {
       </div>
 
       {!card.is_published && (
-        <p className="mb-4 flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
+        <p className="mb-4 flex items-center gap-2 border-l-2 border-warning bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
           <MessageSquareQuote className="size-3.5" />
           Not released yet — the student cannot see this card until you release it.
         </p>

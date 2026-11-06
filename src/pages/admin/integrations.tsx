@@ -291,7 +291,7 @@ function IntegrationsGrid({ data }: { data: IntegrationsHealth }) {
             probed={data.probed}
             actions={
               <Button asChild variant="outline" size="sm">
-                <Link to="/admin/recordings">
+                <Link to="/admin/materials?tab=recordings">
                   <Video className="size-4" />
                   Recordings
                 </Link>

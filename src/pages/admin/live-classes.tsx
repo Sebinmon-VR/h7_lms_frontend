@@ -1,33 +1,8 @@
-import {
-  Activity,
-  Check,
-  Copy,
-  DoorOpen,
-  ExternalLink,
-  Hourglass,
-  Link as LinkIcon,
-  LogIn,
-  LogOut,
-  MonitorPlay,
-  Play,
-  Radio,
-  RefreshCw,
-  Square,
-  UserCheck,
-  UserRound,
-  Users,
-  Video,
-} from 'lucide-react'
+import { Check, Copy, MonitorPlay, Radio, RefreshCw, Video } from 'lucide-react'
 import * as React from 'react'
-import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 
-import type {
-  ClassRoomAttendanceOut,
-  ClassRoomEventOut,
-  LiveClassBoardRow,
-  ScheduledPeriod,
-} from '@/api/types'
+import type { ClassRoomAttendanceOut, ClassRoomEventOut, LiveClassBoardRow, ScheduledPeriod } from '@/api/types'
 import { ApiError } from '@/api/errors'
 import {
   useClassRoomAttendance,
@@ -44,40 +19,31 @@ import { formatSchoolTime } from '@/lib/school-time'
 import { countLabel } from '@/lib/format'
 import { useCopyToClipboard } from '@/lib/hooks'
 import { shareableLink } from '@/lib/meeting-links'
+import { tidyName as tidy } from '@/lib/names'
 import { subjectName } from '@/lib/select'
-import { Badge } from '@/components/ui/badge'
+import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { ProgressBar } from '@/components/ui/progress'
 import { Segmented } from '@/components/ui/segmented'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Switch } from '@/components/ui/switch'
-import {
-  Sheet,
-  SheetBody,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { EmptyState, ErrorState } from '@/components/feedback/states'
-import { PageHeader } from '@/components/layout/page-header'
+import { ErrorState } from '@/components/feedback/states'
+import { Band, Figure, Figures, TabStrip, TONE_FILL, TONE_TEXT, WorkspaceHeader, type Tone } from '@/components/layout/workspace'
 
 /**
  * The office's live board: every class room right now.
  *
- * Classes happen inside the LMS (Azure Communication Services). The board
- * shows no video itself — the "Preview window" button opens the class room
- * in a compact pop-out beside this page.
+ * Laid out like the other admin workspaces — white bands, no cards. Classes
+ * on the left, each with what is on and who is in; the chosen class on the
+ * right with the period running, the day's periods and when each teacher came
+ * in, and the room's log and attendance as tabs.
  *
- * Two views of who was in, both from the LMS. The room log: a join, a leave,
- * a period a teacher opened — "in now" on a card is whoever's last word today
- * was a join. And attendance: each person's join and leave times, built from
- * the join/leave log the in-LMS call writes on connect and hang-up. The
- * activity drawer shows both.
+ * Classes happen inside the LMS (Azure Communication Services). The board
+ * shows no video itself — "Preview" opens the class room in a compact pop-out
+ * beside this page. "In now" is whoever's last word in the room log today was
+ * a join; attendance is each person's join and leave times from the same log.
  */
 
 type Filter = 'LIVE' | 'TODAY' | 'ALL'
-type ActivityView = 'LOG' | 'ATTENDANCE'
+type DetailTab = 'periods' | 'log' | 'attendance'
 
 const ACTION_LABEL: Record<string, string> = {
   JOINED_ROOM: 'joined the room',
@@ -91,25 +57,6 @@ const ACTION_LABEL: Record<string, string> = {
   ROOM_CLEARED: 'removed the room',
 }
 
-function ActionIcon({ action }: { action: string }) {
-  const cls = 'size-3.5'
-  switch (action) {
-    case 'JOINED_ROOM':
-    case 'JOINED_SESSION':
-      return <LogIn className={cls} />
-    case 'LEFT_ROOM':
-      return <LogOut className={cls} />
-    case 'STARTED':
-      return <Play className={cls} />
-    case 'ENDED':
-      return <Square className={cls} />
-    case 'ROOM_CLEARED':
-      return <DoorOpen className={cls} />
-    default:
-      return <LinkIcon className={cls} />
-  }
-}
-
 function serverNow(row: LiveClassBoardRow): Date {
   return /[zZ]$|[+-]\d\d:\d\d$/.test(row.now) ? new Date(row.now) : new Date(`${row.now}Z`)
 }
@@ -118,8 +65,34 @@ function minutesLeft(period: ScheduledPeriod, now: Date): number {
   return Math.max(0, Math.round((new Date(period.ends_at).getTime() - now.getTime()) / 60_000))
 }
 
+/** How far through the period we are, 0–100. */
+function periodProgress(period: ScheduledPeriod, now: Date): number {
+  const start = new Date(period.starts_at).getTime()
+  const end = new Date(period.ends_at).getTime()
+  if (end <= start) return 0
+  return Math.min(100, Math.max(0, ((now.getTime() - start) / (end - start)) * 100))
+}
+
 function periodTeacher(period: ScheduledPeriod): string {
-  return period.entry.teacher?.full_name ?? 'Teacher to be confirmed'
+  return period.entry.teacher?.full_name ? tidy(period.entry.teacher.full_name) : 'Teacher to be confirmed'
+}
+
+/** One word for where the class is in its day, and its colour. */
+function statusOf(row: LiveClassBoardRow): { label: string; tone: Tone } {
+  if (row.is_live) return row.current_period && !row.teacher_present ? { label: 'Teacher not in', tone: 'warning' } : { label: 'In session', tone: 'success' }
+  if (row.periods_today.length === 0) return { label: 'No classes today', tone: 'neutral' }
+  if (row.next_period) return { label: 'Break', tone: 'info' }
+  return { label: 'Done for today', tone: 'neutral' }
+}
+
+function StatusTag({ row }: { row: LiveClassBoardRow }) {
+  const status = statusOf(row)
+  return (
+    <span className={cn('inline-flex items-center gap-1.5 text-xs font-medium', TONE_TEXT[status.tone])}>
+      <span className={cn('size-2 rounded-full', TONE_FILL[status.tone])} aria-hidden />
+      {status.label}
+    </span>
+  )
 }
 
 /**
@@ -132,11 +105,7 @@ function periodTeacher(period: ScheduledPeriod): string {
 function usePreviewWindow() {
   const join = useJoinClassRoom()
   return (row: LiveClassBoardRow) => {
-    const handle = window.open(
-      '',
-      `h7-room-${row.class_id}`,
-      'popup=yes,width=980,height=640,menubar=no,toolbar=no,location=no,status=no',
-    )
+    const handle = window.open('', `h7-room-${row.class_id}`, 'popup=yes,width=980,height=640,menubar=no,toolbar=no,location=no,status=no')
     join.mutate(row.class_id, {
       onSuccess: (result) => {
         if (result.room_link) {
@@ -155,499 +124,517 @@ function usePreviewWindow() {
   }
 }
 
-function LiveClassCard({
-  row,
-  onActivity,
+// ==================================================================== list
+
+/** Which group a class sits in on the list, most urgent first. */
+const GROUPS: { key: string; label: string; tone: Tone; test: (r: LiveClassBoardRow) => boolean }[] = [
+  { key: 'attention', label: 'Needs attention', tone: 'warning', test: (r) => r.is_live && !!r.current_period && !r.teacher_present },
+  { key: 'live', label: 'In session', tone: 'success', test: (r) => r.is_live },
+  { key: 'later', label: 'Later today', tone: 'info', test: (r) => !!r.next_period },
+  { key: 'done', label: 'Done or no classes', tone: 'neutral', test: () => true },
+]
+
+function ClassList({
+  rows,
+  value,
+  onChange,
 }: {
-  row: LiveClassBoardRow
-  onActivity: (row: LiveClassBoardRow) => void
+  rows: LiveClassBoardRow[]
+  value: number | null
+  onChange: (id: number) => void
 }) {
-  const join = useJoinClassRoom()
-  const openPreview = usePreviewWindow()
-  const { copied, copy } = useCopyToClipboard()
-  const now = serverNow(row)
-  const current = row.current_period ?? null
-  const liveSession = row.live_sessions.find((s) => s.timing.is_live) ?? row.live_sessions[0] ?? null
-
-  const status = row.is_live
-    ? { label: 'In session', tone: 'success' as const }
-    : row.periods_today.length === 0
-      ? { label: 'No classes today', tone: 'neutral' as const }
-      : row.next_period
-        ? { label: 'Break', tone: 'info' as const }
-        : { label: 'Done for today', tone: 'neutral' as const }
-
-  const share = row.enrolled_count > 0 ? (row.students_joined_today / row.enrolled_count) * 100 : 0
-
-  const joinNow = () => {
-    join.mutate(row.class_id, {
-      onSuccess: (result) => {
-        if (result.room_link) window.open(result.room_link, '_blank', 'noopener')
-        else toast.warning('This class has no room link yet')
-      },
-      onError: (error) => {
-        toast.error(error instanceof ApiError ? error.message : 'Could not open the room.')
-      },
-    })
-  }
+  // Each class in the first group it passes.
+  const placed = new Set<number>()
+  const groups = GROUPS.map((g) => {
+    const items = rows.filter((r) => !placed.has(r.class_id) && g.test(r))
+    items.forEach((r) => placed.add(r.class_id))
+    return { ...g, items }
+  }).filter((g) => g.items.length > 0)
 
   return (
-    <div
-      className={cn(
-        'overflow-hidden rounded-2xl border bg-card',
-        row.is_live ? 'border-success/40 shadow-glow' : 'border-border',
-      )}
-    >
-      {/* The "monitor": what is happening in the room this minute. Dark so a
-          wall of these reads at a glance from across the office. */}
-      <div className="bg-slate-950 p-4 text-white">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              {row.is_live ? (
-                <Badge tone="success" size="sm" dot>
-                  Live
-                </Badge>
-              ) : (
-                <Badge tone={status.tone} size="sm">
-                  {status.label}
-                </Badge>
-              )}
-              {!row.has_room && (
-                <Badge tone={row.room_status === 'FAILED' ? 'danger' : 'warning'} size="sm">
-                  {row.room_status === 'FAILED' ? 'Room failed' : 'No room yet'}
-                </Badge>
-              )}
-            </div>
-            <h3 className="mt-1.5 truncate text-lg font-semibold">{row.class_name}</h3>
-          </div>
-          <MonitorPlay className="size-5 shrink-0 text-white/40" />
-        </div>
-
-        <div className="mt-3 min-h-14">
-          {current ? (
-            <>
-              <p className="text-xs uppercase tracking-wider text-white/50">Now teaching</p>
-              <p className="mt-0.5 truncate text-xl font-bold">{subjectName(current.entry)}</p>
-              <p className="truncate text-sm text-white/70">
-                {periodTeacher(current)} · ends {formatSchoolTime(current.ends_at)} ·{' '}
-                {minutesLeft(current, now)} min left
-              </p>
-            </>
-          ) : liveSession ? (
-            <>
-              <p className="text-xs uppercase tracking-wider text-white/50">Live session</p>
-              <p className="mt-0.5 truncate text-xl font-bold">
-                {liveSession.title ?? liveSession.subject_name ?? 'Live class'}
-              </p>
-              <p className="truncate text-sm text-white/70">
-                {liveSession.teacher_name ?? 'Teacher'}
-                {liveSession.timing.minutes_remaining != null
-                  ? ` · ${Math.max(0, Math.round(liveSession.timing.minutes_remaining))} min left`
-                  : ''}
-              </p>
-            </>
-          ) : row.next_period ? (
-            <>
-              <p className="text-xs uppercase tracking-wider text-white/50">Up next</p>
-              <p className="mt-0.5 truncate text-xl font-bold">{subjectName(row.next_period.entry)}</p>
-              <p className="truncate text-sm text-white/70">
-                {periodTeacher(row.next_period)} · {formatSchoolTime(row.next_period.starts_at)}
-              </p>
-            </>
-          ) : (
-            <p className="text-sm text-white/60">
-              {row.periods_today.length === 0
-                ? 'Nothing on the timetable today.'
-                : 'The last period of the day has finished.'}
-            </p>
-          )}
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button size="sm" variant={row.is_live ? 'primary' : 'solid'} loading={join.isPending} onClick={joinNow}>
-            <Video />
-            Join
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="border-white/20 bg-white/5 text-white hover:bg-white/15"
-            disabled={!row.has_room}
-            onClick={() => openPreview(row)}
-          >
-            <MonitorPlay />
-            Preview window
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-white/80 hover:bg-white/10 hover:text-white"
-            onClick={() => onActivity(row)}
-          >
-            <Activity />
-            Activity
-          </Button>
-          {row.room_link && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="text-white/70 hover:bg-white/10 hover:text-white"
-              aria-label="Copy the room link"
-              onClick={() => void copy(shareableLink(row.room_link))}
-            >
-              {copied ? <Check className="text-success" /> : <Copy />}
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* Who is in, as far as the LMS saw: joins it handed out, leaves people pressed. */}
-      <div className="space-y-3 p-4">
-        <div>
-          <div className="flex items-center justify-between gap-3 text-sm">
-            <span className="inline-flex items-center gap-1.5">
-              <Users className="size-4 text-muted-foreground" />
-              <span className={cn('font-medium', row.students_in_now.length > 0 && 'text-success')}>
-                {row.students_in_now.length} in now
-              </span>
-              <span className="text-muted-foreground">
-                · {row.students_joined_today} of {countLabel(row.enrolled_count, 'student')} joined today
-              </span>
+    <div className="max-h-80 overflow-y-auto lg:h-full lg:max-h-none">
+      {groups.map((g) => (
+        <section key={g.key}>
+          <h3 className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-muted/80 py-1.5 pl-4 pr-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground backdrop-blur sm:pl-6 lg:pl-8">
+            <span className="flex items-center gap-1.5">
+              <span className={cn('size-1.5 rounded-full', TONE_FILL[g.tone])} aria-hidden />
+              {g.label}
             </span>
-            <span className="text-xs text-muted-foreground">{Math.round(share)}%</span>
-          </div>
-          <ProgressBar value={share} size="sm" className="mt-1.5" />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="inline-flex items-center gap-1.5">
-            <UserRound className="size-4 text-muted-foreground" />
-            {row.teachers_in_now.length > 0 ? (
-              <span className="text-success">In now: {row.teachers_in_now.join(', ')}</span>
-            ) : current ? (
-              row.teacher_present ? (
-                <span className="text-success">
-                  Teacher is in
-                  {current.waiting_minutes != null && current.waiting_minutes >= 1
-                    ? ` · students waited ${formatMinutes(current.waiting_minutes)}`
-                    : ''}
-                </span>
-              ) : (
-                <span className="text-warning">
-                  Teacher not in yet
-                  {current.waiting_minutes != null
-                    ? ` · students waiting ${formatMinutes(current.waiting_minutes)}`
-                    : ''}
-                </span>
-              )
-            ) : row.teachers_joined_today.length > 0 ? (
-              <span className="text-muted-foreground">
-                Taught today by {row.teachers_joined_today.join(', ')}
-              </span>
-            ) : (
-              <span className="text-muted-foreground">No teacher in yet today</span>
-            )}
-          </span>
-        </div>
-
-        {row.last_event ? (
-          <p className="text-xs text-muted-foreground">
-            Last: {row.last_event.user_name ?? 'System'}{' '}
-            {ACTION_LABEL[row.last_event.action] ?? row.last_event.action.toLowerCase()}{' '}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="underline decoration-dotted">{formatRelative(row.last_event.at)}</span>
-              </TooltipTrigger>
-              <TooltipContent>{formatDateTime(row.last_event.at)}</TooltipContent>
-            </Tooltip>
-          </p>
-        ) : (
-          <p className="text-xs text-muted-foreground">No activity recorded today.</p>
-        )}
-
-        {row.periods_today.length > 0 && (
-          <ol className="flex flex-wrap gap-1.5 border-t border-border pt-3">
-            {row.periods_today.map((period) => {
-              const isNow = period.entry.id === current?.entry.id
-              const past = new Date(period.ends_at) <= now
-              // Per subject: when the teacher came in, and how long the
-              // students sat waiting for them.
-              const arrival = arrivalText(period)
+            <span className="tabular-nums">{g.items.length}</span>
+          </h3>
+          <ul className="divide-y divide-border">
+            {g.items.map((row) => {
+              const active = value === row.class_id
+              const current = row.current_period ?? null
+              const session = row.live_sessions.find((x) => x.timing.is_live) ?? null
+              const line = current
+                ? `${subjectName(current.entry)} · ${periodTeacher(current)}`
+                : session
+                  ? `${session.title ?? session.subject_name ?? 'Live session'} · ${session.teacher_name ? tidy(session.teacher_name) : 'Teacher'}`
+                  : row.next_period
+                    ? `${formatSchoolTime(row.next_period.starts_at)} · ${subjectName(row.next_period.entry)}`
+                    : statusOf(row).label
               return (
-                <li
-                  key={period.entry.id}
-                  className={cn(
-                    'rounded-md border px-2 py-1 text-xs',
-                    isNow
-                      ? 'border-success/40 bg-success/10 text-foreground'
-                      : past
-                        ? 'border-border text-muted-foreground/70'
-                        : 'border-border text-muted-foreground',
-                    arrival?.tone === 'danger' && 'border-danger/40',
-                    arrival?.tone === 'warning' && 'border-warning/50',
-                  )}
-                  title={`${subjectName(period.entry)} · ${periodTeacher(period)}${arrival ? ` · ${arrival.text}` : ''}`}
-                >
-                  <span className={cn(past && !isNow && 'line-through')}>
-                    {formatSchoolTime(period.starts_at)} {subjectName(period.entry)}
-                  </span>
-                  {arrival && (
-                    <span className={cn('block text-[10px] leading-tight', ARRIVAL_TONE[arrival.tone])}>
-                      {arrival.text}
+                <li key={row.class_id}>
+                  <button
+                    type="button"
+                    onClick={() => onChange(row.class_id)}
+                    aria-current={active ? 'true' : undefined}
+                    className={cn(
+                      'relative flex w-full items-center gap-3 py-2.5 pl-4 pr-4 text-left transition-colors sm:pl-6 lg:pl-8',
+                      active ? 'bg-primary/5' : 'hover:bg-muted/40',
+                    )}
+                  >
+                    {active && <span className="absolute inset-y-0 left-0 w-0.5 bg-primary" aria-hidden />}
+                    <span className="min-w-0 flex-1">
+                      <span className={cn('block truncate text-sm font-medium', active ? 'text-primary' : 'text-foreground')}>{row.class_name}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{line}</span>
                     </span>
-                  )}
+                    {row.is_live ? (
+                      <span className="flex shrink-0 items-center gap-1 text-xs tabular-nums text-muted-foreground" title="Students in the room now">
+                        <span className={cn('size-1.5 animate-pulse rounded-full', TONE_FILL[g.tone])} aria-hidden />
+                        {row.students_in_now.length}
+                      </span>
+                    ) : (
+                      !row.has_room && <span className="shrink-0 text-[10px] text-warning">No room</span>
+                    )}
+                  </button>
                 </li>
               )
             })}
-          </ol>
+          </ul>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+/** Minutes left as a small ring: the arc is the part of the period still to go. */
+function TimeRing({ percentGone, minutes, tone }: { percentGone: number; minutes: number; tone: Tone }) {
+  const r = 22
+  const c = 2 * Math.PI * r
+  return (
+    <span className="relative inline-flex size-16 shrink-0 items-center justify-center">
+      <svg viewBox="0 0 52 52" className="absolute inset-0 -rotate-90" aria-hidden>
+        <circle cx="26" cy="26" r={r} fill="none" strokeWidth="4" className="stroke-muted" />
+        <circle
+          cx="26"
+          cy="26"
+          r={r}
+          fill="none"
+          strokeWidth="4"
+          strokeLinecap="round"
+          strokeDasharray={c}
+          strokeDashoffset={(c * percentGone) / 100}
+          className={tone === 'warning' ? 'stroke-warning' : 'stroke-success'}
+        />
+      </svg>
+      <span className="text-center leading-none">
+        <span className="block text-base font-medium tabular-nums text-foreground">{minutes}</span>
+        <span className="block text-[9px] uppercase tracking-wide text-muted-foreground">min left</span>
+      </span>
+    </span>
+  )
+}
+
+/**
+ * The class's school day as one strip: each period a block, past ones grey,
+ * the running one green, a line where "now" is. A block with a coloured top
+ * edge is a period the teacher came in late to, or never did.
+ */
+function DayStrip({ row, now }: { row: LiveClassBoardRow; now: Date }) {
+  const periods = row.periods_today
+  if (periods.length === 0) return null
+  const start = new Date(periods[0].starts_at).getTime()
+  const end = new Date(periods[periods.length - 1].ends_at).getTime()
+  const span = Math.max(1, end - start)
+  const at = (t: number) => ((t - start) / span) * 100
+  const nowPos = at(now.getTime())
+  const currentId = row.current_period?.entry.id
+
+  return (
+    <div>
+      <div className="relative h-9">
+        {periods.map((p) => {
+          const a = new Date(p.starts_at).getTime()
+          const b = new Date(p.ends_at).getTime()
+          const past = b <= now.getTime()
+          const isNow = p.entry.id === currentId
+          const arrival = arrivalText(p)
+          return (
+            <span
+              key={p.entry.id}
+              title={`${formatSchoolTime(p.starts_at)}–${formatSchoolTime(p.ends_at)} · ${subjectName(p.entry)} · ${periodTeacher(p)}${arrival ? ` · ${arrival.text}` : ''}`}
+              className={cn(
+                'absolute inset-y-0 flex items-center overflow-hidden rounded-sm border-t-2 px-1.5 text-[10px] font-medium',
+                isNow ? 'bg-success/15 text-success' : past ? 'bg-muted text-muted-foreground' : 'bg-primary/[0.07] text-foreground/70',
+                arrival?.tone === 'danger' ? 'border-t-danger' : arrival?.tone === 'warning' ? 'border-t-warning' : 'border-t-transparent',
+              )}
+              style={{ left: `${at(a)}%`, width: `calc(${at(b) - at(a)}% - 2px)` }}
+            >
+              <span className="truncate">{subjectName(p.entry)}</span>
+            </span>
+          )
+        })}
+        {nowPos > 0 && nowPos < 100 && (
+          <span className="absolute -inset-y-1 w-0.5 rounded-full bg-foreground" style={{ left: `${nowPos}%` }} aria-label="Now" />
         )}
+      </div>
+      <div className="mt-1 flex justify-between text-[10px] tabular-nums text-muted-foreground">
+        <span>{formatSchoolTime(periods[0].starts_at)}</span>
+        <span>{formatSchoolTime(periods[periods.length - 1].ends_at)}</span>
       </div>
     </div>
   )
 }
 
-function attendanceWho(entry: ClassRoomAttendanceOut): string {
-  if (entry.matched_role) {
-    return ROLE_LABEL[entry.matched_role as keyof typeof ROLE_LABEL] ?? entry.matched_role
+// ================================================================== detail
+
+function PeriodsTable({ row, now }: { row: LiveClassBoardRow; now: Date }) {
+  const current = row.current_period ?? null
+  if (row.periods_today.length === 0) {
+    return <p className="border-y border-border py-8 text-center text-sm text-muted-foreground">Nothing on the timetable today</p>
   }
-  if (entry.user_kind === 'LMS') return 'signed in to the LMS'
-  if (entry.user_kind === 'ANONYMOUS') return 'guest, not signed in'
-  if (entry.user_kind === 'PHONE') return 'dialled in'
-  return 'not matched to an account'
+  return (
+    <div className="overflow-x-auto border-y border-border">
+      <table className="w-full text-sm">
+        <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+          <tr>
+            <th className="px-3 py-2 text-left font-medium">Time</th>
+            <th className="px-3 py-2 text-left font-medium">Subject</th>
+            <th className="px-3 py-2 text-left font-medium">Teacher</th>
+            <th className="px-3 py-2 text-left font-medium">Teacher arrived</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {row.periods_today.map((period) => {
+            const isNow = period.entry.id === current?.entry.id
+            const past = new Date(period.ends_at) <= now
+            // When the teacher came in, and how long the students waited.
+            const arrival = arrivalText(period)
+            return (
+              <tr key={period.entry.id} className={cn(isNow && 'bg-success/[0.06]', past && !isNow && 'text-muted-foreground')}>
+                <td className="relative whitespace-nowrap px-3 py-1.5 tabular-nums">
+                  {isNow && <span className="absolute inset-y-0 left-0 w-0.5 bg-success" aria-hidden />}
+                  {formatSchoolTime(period.starts_at)}–{formatSchoolTime(period.ends_at)}
+                </td>
+                <td className="px-3 py-1.5 font-medium">
+                  {subjectName(period.entry)}
+                  {isNow && <span className="ml-2 text-[10px] font-medium uppercase tracking-wide text-success">Now</span>}
+                </td>
+                <td className="px-3 py-1.5">{periodTeacher(period)}</td>
+                <td className={cn('px-3 py-1.5 text-xs', arrival ? ARRIVAL_TONE[arrival.tone] : 'text-muted-foreground')}>
+                  {arrival?.text ?? (past ? '—' : 'Later today')}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function RoomLog({ classId }: { classId: number }) {
+  const [todayOnly, setTodayOnly] = React.useState(true)
+  const events = useClassRoomEvents(classId, todayOnly, true)
+  const rows = events.data ?? []
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <Segmented
+          size="sm"
+          layoutId="live-log-range"
+          aria-label="Range"
+          value={todayOnly ? 'today' : 'all'}
+          onChange={(v) => setTodayOnly(v === 'today')}
+          options={[
+            { value: 'today', label: 'Today' },
+            { value: 'all', label: 'Everything' },
+          ]}
+        />
+      </div>
+      {events.isPending ? (
+        <Skeleton className="h-40" />
+      ) : events.isError ? (
+        <ErrorState error={events.error} onRetry={() => events.refetch()} compact />
+      ) : rows.length === 0 ? (
+        <p className="border-y border-border py-8 text-center text-sm text-muted-foreground">{todayOnly ? 'Nothing recorded today' : 'Nothing recorded yet'}</p>
+      ) : (
+        <ol className="divide-y divide-border border-y border-border">
+          {rows.map((event: ClassRoomEventOut, index) => {
+            const tone: Tone = event.action === 'JOINED_ROOM' || event.action === 'JOINED_SESSION' || event.action === 'STARTED' ? 'success' : event.action === 'LEFT_ROOM' || event.action === 'ENDED' ? 'neutral' : 'info'
+            return (
+              <li key={event.id ?? `${event.at}-${index}`} className="flex items-center gap-3 px-1 py-1.5 text-sm">
+                <span className="w-16 shrink-0 text-xs tabular-nums text-muted-foreground" title={formatDateTime(event.at)}>
+                  {todayOnly ? formatSchoolTime(event.at) : formatDateTime(event.at)}
+                </span>
+                <span className={cn('size-1.5 shrink-0 rounded-full', TONE_FILL[tone])} aria-hidden />
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="font-medium text-foreground">{event.user_name ? tidy(event.user_name) : 'System'}</span>
+                  {event.role && <span className="text-xs text-muted-foreground"> · {ROLE_LABEL[event.role as keyof typeof ROLE_LABEL] ?? event.role}</span>}{' '}
+                  <span className="text-muted-foreground">{ACTION_LABEL[event.action] ?? event.action.toLowerCase()}</span>
+                  {event.detail && <span className="text-muted-foreground"> · {event.detail}</span>}
+                </span>
+              </li>
+            )
+          })}
+        </ol>
+      )}
+    </div>
+  )
+}
+
+function attendanceWho(entry: ClassRoomAttendanceOut): string {
+  if (entry.matched_role) return ROLE_LABEL[entry.matched_role as keyof typeof ROLE_LABEL] ?? entry.matched_role
+  if (entry.user_kind === 'LMS') return 'Signed in'
+  if (entry.user_kind === 'ANONYMOUS') return 'Guest'
+  if (entry.user_kind === 'PHONE') return 'Dialled in'
+  return 'Not matched'
 }
 
 /**
  * Who was in the room today: each person with their join and leave times,
- * built from the join/leave log the in-LMS call writes on connect and
- * hang-up. The one place the office can see who really sat through the day.
+ * built from the join/leave log the in-LMS call writes on connect and hang-up.
  */
-function AttendanceList({ row }: { row: LiveClassBoardRow }) {
+function AttendanceTable({ row }: { row: LiveClassBoardRow }) {
   const attendance = useClassRoomAttendance(row.class_id)
   const sync = useSyncClassRoomAttendance()
   const rows = attendance.data ?? []
   const inNow = rows.filter((r) => r.still_in).length
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-start justify-between gap-3 rounded-xl border border-border px-4 py-3 text-sm">
-        <div className="min-w-0">
-          <p className="font-medium">From the class room</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {row.room_attendance_synced_at
-              ? `Last updated ${formatRelative(row.room_attendance_synced_at)}; refreshed every few minutes.`
-              : 'Not updated yet.'}{' '}
-            Every join and hang-up in the LMS call is recorded against the person&rsquo;s account.
-          </p>
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          loading={sync.isPending}
-          onClick={() => sync.mutate({ classId: row.class_id })}
-        >
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-xs text-muted-foreground">
+          {rows.length > 0 && `${countLabel(rows.length, 'person', 'people')} today${inNow ? ` · ${inNow} still in` : ''} · `}
+          {row.room_attendance_synced_at ? `updated ${formatRelative(row.room_attendance_synced_at)}` : 'not updated yet'}
+        </span>
+        <Button size="sm" variant="outline" loading={sync.isPending} onClick={() => sync.mutate({ classId: row.class_id })}>
           <RefreshCw />
           Update now
         </Button>
       </div>
-
-      {row.room_attendance_error && (
-        <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-xs">
-          <p className="font-medium text-warning">Attendance could not be updated</p>
-          <p className="mt-1 text-muted-foreground">{row.room_attendance_error}</p>
-        </div>
-      )}
-
+      {row.room_attendance_error && <p className="border-l-2 border-warning bg-warning/5 px-3 py-2 text-xs text-foreground">{row.room_attendance_error}</p>}
       {attendance.isPending ? (
-        <div className="space-y-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-14 rounded-lg" />
-          ))}
-        </div>
+        <Skeleton className="h-40" />
       ) : attendance.isError ? (
         <ErrorState error={attendance.error} onRetry={() => attendance.refetch()} compact />
       ) : rows.length === 0 ? (
-        <EmptyState
-          icon={<UserCheck />}
-          title="Nobody has joined yet"
-          description="People appear here as they join the class room in the LMS."
-        />
+        <p className="border-y border-border py-8 text-center text-sm text-muted-foreground">Nobody has joined yet. People appear here as they join the class room</p>
       ) : (
-        <>
-          <p className="text-xs text-muted-foreground">
-            {countLabel(rows.length, 'participant')} today
-            {inNow > 0 ? ` · ${inNow} in the room right now` : ''}
-          </p>
-          <ol className="space-y-1.5">
-            {rows.map((entry, index) => (
-              <li
-                key={entry.id ?? `${entry.participant ?? entry.display_name}-${index}`}
-                className="flex items-start gap-3 rounded-lg border border-border px-3 py-2 text-sm"
-              >
-                <span
-                  className={cn(
-                    'mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full',
-                    entry.still_in ? 'bg-success/12 text-success' : 'bg-muted text-muted-foreground',
-                  )}
-                >
-                  <UserRound className="size-3.5" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p>
-                    <span className="font-medium">
-                      {entry.matched_user_name ?? entry.display_name ?? 'Participant'}
-                    </span>
-                    <span className="text-xs text-muted-foreground"> · {attendanceWho(entry)}</span>
-                  </p>
-                  <p className="text-xs tabular-nums text-muted-foreground">
-                    Joined {entry.first_joined_at ? formatSchoolTime(entry.first_joined_at) : '—'}
-                    {' · '}
-                    {entry.still_in ? (
-                      <span className="font-medium text-success">still in</span>
-                    ) : (
-                      `left ${entry.last_left_at ? formatSchoolTime(entry.last_left_at) : '—'}`
-                    )}
-                    {' · '}
-                    {Math.round(entry.minutes)} min
-                    {entry.sessions.length > 1 ? ` · in and out ${entry.sessions.length} times` : ''}
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </>
+        <div className="overflow-x-auto border-y border-border">
+          <table className="w-full text-sm">
+            <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Name</th>
+                <th className="px-3 py-2 text-left font-medium">Role</th>
+                <th className="px-3 py-2 text-left font-medium">Joined</th>
+                <th className="px-3 py-2 text-left font-medium">Left</th>
+                <th className="px-3 py-2 text-right font-medium">Minutes</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {rows.map((entry, index) => (
+                <tr key={entry.id ?? `${entry.participant ?? entry.display_name}-${index}`}>
+                  <td className="px-3 py-1.5 font-medium text-foreground">
+                    {tidy(entry.matched_user_name ?? entry.display_name ?? 'Participant')}
+                    {entry.sessions.length > 1 && <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">in and out {entry.sessions.length}×</span>}
+                  </td>
+                  <td className="px-3 py-1.5 text-xs text-muted-foreground">{attendanceWho(entry)}</td>
+                  <td className="px-3 py-1.5 tabular-nums">{entry.first_joined_at ? formatSchoolTime(entry.first_joined_at) : '—'}</td>
+                  <td className="px-3 py-1.5 tabular-nums">
+                    {entry.still_in ? <span className="font-medium text-success">Still in</span> : entry.last_left_at ? formatSchoolTime(entry.last_left_at) : '—'}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{Math.round(entry.minutes)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )
 }
 
-function ActivitySheet({ row, onClose }: { row: LiveClassBoardRow | null; onClose: () => void }) {
-  const [todayOnly, setTodayOnly] = React.useState(true)
-  const [view, setView] = React.useState<ActivityView>('LOG')
-  const events = useClassRoomEvents(row?.class_id ?? null, todayOnly, !!row && view === 'LOG')
+function ClassDetail({ row }: { row: LiveClassBoardRow }) {
+  const join = useJoinClassRoom()
+  const openPreview = usePreviewWindow()
+  const { copied, copy } = useCopyToClipboard()
+  const [tab, setTab] = React.useState<DetailTab>('periods')
+  const now = serverNow(row)
+  const current = row.current_period ?? null
+  const session = row.live_sessions.find((s) => s.timing.is_live) ?? row.live_sessions[0] ?? null
+  const share = row.enrolled_count > 0 ? Math.round((row.students_joined_today / row.enrolled_count) * 100) : 0
 
-  React.useEffect(() => {
-    setTodayOnly(true)
-    setView('LOG')
-  }, [row?.class_id])
+  const joinNow = () =>
+    join.mutate(row.class_id, {
+      onSuccess: (result) => {
+        if (result.room_link) window.open(result.room_link, '_blank', 'noopener')
+        else toast.warning('This class has no room link yet')
+      },
+      onError: (error) => toast.error(error instanceof ApiError ? error.message : 'Could not open the room.'),
+    })
+
+  const tabs: { key: DetailTab; label: string }[] = [
+    { key: 'periods', label: `Today's periods (${row.periods_today.length})` },
+    { key: 'log', label: 'Room log' },
+    { key: 'attendance', label: 'Attendance' },
+  ]
 
   return (
-    <Sheet open={!!row} onOpenChange={(v) => !v && onClose()}>
-      <SheetContent side="right">
-        <SheetHeader>
-          <SheetTitle className="text-lg font-semibold">
-            {row?.class_name} · room activity
-          </SheetTitle>
-          <p className="text-sm text-muted-foreground">
-            The room log is every event in order: joins, leaves, periods opened and closed, room
-            changes. Attendance sums it up per person — who was in the room, and when.
-          </p>
-        </SheetHeader>
-        <SheetBody className="space-y-4">
-          <Segmented
-            layoutId="live-activity-view"
-            size="sm"
-            value={view}
-            onChange={setView}
-            aria-label="Which record to show"
-            options={[
-              { value: 'LOG', label: 'Room log' },
-              { value: 'ATTENDANCE', label: 'Attendance' },
-            ]}
+    <div className="space-y-5">
+      {/* ----------------------------------------------------------- head */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="text-2xl font-medium tracking-tight text-foreground">{row.class_name}</h2>
+            <StatusTag row={row} />
+            {!row.has_room && (
+              <span className={cn('text-xs font-medium', row.room_status === 'FAILED' ? 'text-danger' : 'text-warning')}>
+                {row.room_status === 'FAILED' ? 'Room failed' : 'No room yet'}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {row.room_link && (
+            <Button variant="ghost" size="icon-sm" aria-label="Copy the room link" onClick={() => void copy(shareableLink(row.room_link))}>
+              {copied ? <Check className="text-success" /> : <Copy />}
+            </Button>
+          )}
+          <Button size="sm" variant="outline" disabled={!row.has_room} onClick={() => openPreview(row)}>
+            <MonitorPlay />
+            Preview
+          </Button>
+          <Button size="sm" loading={join.isPending} onClick={joinNow}>
+            <Video />
+            Join room
+          </Button>
+        </div>
+      </div>
+
+      {/* ------------------------------------------------------------ now */}
+      {current ? (
+        <div className="flex items-center gap-4">
+          <TimeRing
+            percentGone={periodProgress(current, now)}
+            minutes={minutesLeft(current, now)}
+            tone={row.teacher_present || row.teachers_in_now.length > 0 ? 'success' : 'warning'}
           />
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Now · {formatSchoolTime(current.starts_at)}–{formatSchoolTime(current.ends_at)}
+            </p>
+            <p className="truncate text-xl font-medium text-foreground">{subjectName(current.entry)}</p>
+            <p className="mt-0.5 flex min-w-0 items-center gap-2 text-sm">
+              <Avatar name={current.entry.teacher?.full_name ?? '?'} size="xs" />
+              <span className="truncate text-foreground">{periodTeacher(current)}</span>
+              {row.teachers_in_now.length > 0 || row.teacher_present ? (
+                <span className="shrink-0 text-success">
+                  in the room
+                  {current.waiting_minutes != null && current.waiting_minutes >= 1 ? ` · came ${formatMinutes(current.waiting_minutes)} late` : ''}
+                </span>
+              ) : (
+                <span className="shrink-0 font-medium text-warning">
+                  not in yet{current.waiting_minutes != null ? ` · ${formatMinutes(current.waiting_minutes)} waiting` : ''}
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+      ) : session ? (
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Live session</p>
+          <p className="truncate text-xl font-medium text-foreground">{session.title ?? session.subject_name ?? 'Live class'}</p>
+          <p className="text-sm text-muted-foreground">
+            {session.teacher_name ? tidy(session.teacher_name) : 'Teacher'}
+            {session.timing.minutes_remaining != null ? ` · ${Math.max(0, Math.round(session.timing.minutes_remaining))} min left` : ''}
+          </p>
+        </div>
+      ) : row.next_period ? (
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Up next · {formatSchoolTime(row.next_period.starts_at)}</p>
+          <p className="truncate text-xl font-medium text-foreground">{subjectName(row.next_period.entry)}</p>
+          <p className="text-sm text-muted-foreground">{periodTeacher(row.next_period)}</p>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">{row.periods_today.length === 0 ? 'Nothing on the timetable today.' : 'The last period of the day has finished.'}</p>
+      )}
 
-          {row && view === 'ATTENDANCE' && <AttendanceList row={row} />}
+      <DayStrip row={row} now={now} />
 
-          {view === 'LOG' && (
-          <label className="flex items-center justify-between gap-4 rounded-xl border border-border px-4 py-3 text-sm">
-            <span className="font-medium">Today only</span>
-            <Switch checked={todayOnly} onCheckedChange={setTodayOnly} />
-          </label>
-          )}
+      {/* ---------------------------------------------------------- facts */}
+      <div className="grid grid-cols-3 divide-x divide-border border-y border-border">
+        <div className="px-4 py-2.5 first:pl-0">
+          <p className="text-xs text-muted-foreground">In the room now</p>
+          <p className={cn('text-lg font-medium tabular-nums', row.students_in_now.length > 0 ? 'text-success' : 'text-foreground')}>{row.students_in_now.length}</p>
+        </div>
+        <div className="px-4 py-2.5">
+          <p className="text-xs text-muted-foreground">Joined today</p>
+          <p className="text-lg font-medium tabular-nums text-foreground">
+            {row.students_joined_today}
+            <span className="text-xs font-normal text-muted-foreground"> / {row.enrolled_count} · {share}%</span>
+          </p>
+        </div>
+        <div className="min-w-0 px-4 py-2.5">
+          <p className="text-xs text-muted-foreground">Last activity</p>
+          <p className="truncate text-sm text-foreground" title={row.last_event ? formatDateTime(row.last_event.at) : undefined}>
+            {row.last_event ? `${formatRelative(row.last_event.at)} · ${row.last_event.user_name ? tidy(row.last_event.user_name) : 'System'}` : 'None today'}
+          </p>
+        </div>
+      </div>
 
-          {view !== 'LOG' ? null : events.isPending ? (
-            <div className="space-y-2">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Skeleton key={i} className="h-12 rounded-lg" />
-              ))}
-            </div>
-          ) : events.isError ? (
-            <ErrorState error={events.error} onRetry={() => events.refetch()} compact />
-          ) : (events.data ?? []).length === 0 ? (
-            <EmptyState
-              icon={<Activity />}
-              title={todayOnly ? 'Nothing recorded today' : 'Nothing recorded yet'}
-              description="Joins, opened periods and room changes appear here as they happen."
-            />
-          ) : (
-            <ol className="space-y-1.5">
-              {(events.data ?? []).map((event: ClassRoomEventOut, index) => (
-                <li
-                  key={event.id ?? `${event.at}-${index}`}
-                  className="flex items-start gap-3 rounded-lg border border-border px-3 py-2 text-sm"
-                >
-                  <span
-                    className={cn(
-                      'mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full',
-                      event.role === 'STUDENT'
-                        ? 'bg-accent/12 text-accent'
-                        : event.action.startsWith('ROOM_')
-                          ? 'bg-muted text-muted-foreground'
-                          : 'bg-primary/12 text-primary',
-                    )}
-                  >
-                    <ActionIcon action={event.action} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p>
-                      <span className="font-medium">{event.user_name ?? 'System'}</span>
-                      {event.role && (
-                        <span className="text-xs text-muted-foreground">
-                          {' '}
-                          · {ROLE_LABEL[event.role as keyof typeof ROLE_LABEL] ?? event.role}
-                        </span>
-                      )}{' '}
-                      <span className="text-muted-foreground">
-                        {ACTION_LABEL[event.action] ?? event.action.toLowerCase()}
-                      </span>
-                      {event.detail && <span className="text-muted-foreground"> · {event.detail}</span>}
-                    </p>
-                  </div>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                        {todayOnly ? formatSchoolTime(event.at) : formatDateTime(event.at)}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>{formatDateTime(event.at)}</TooltipContent>
-                  </Tooltip>
-                </li>
-              ))}
-            </ol>
-          )}
-        </SheetBody>
-      </SheetContent>
-    </Sheet>
+      {/* ----------------------------------------------------------- tabs */}
+      <div role="tablist" aria-label={row.class_name} className="flex items-stretch gap-1 overflow-x-auto border-b border-border [scrollbar-width:none]">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.key}
+            onClick={() => setTab(t.key)}
+            className={cn(
+              'relative inline-flex h-9 shrink-0 items-center px-3 text-sm transition-colors',
+              tab === t.key ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {t.label}
+            {tab === t.key && <span className="absolute inset-x-0 -bottom-px h-0.5 bg-primary" aria-hidden />}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'periods' && <PeriodsTable row={row} now={now} />}
+      {tab === 'log' && <RoomLog classId={row.class_id} />}
+      {tab === 'attendance' && <AttendanceTable row={row} />}
+    </div>
   )
 }
+
+// ==================================================================== page
 
 export default function AdminLiveClassesPage() {
   const board = useLiveBoard()
   const [filter, setFilter] = React.useState<Filter>('LIVE')
-  const [activityFor, setActivityFor] = React.useState<LiveClassBoardRow | null>(null)
+  const [selectedId, setSelectedId] = React.useState<number | null>(null)
 
   const rows = React.useMemo(() => board.data ?? [], [board.data])
   const live = React.useMemo(() => rows.filter((r) => r.is_live), [rows])
   const today = React.useMemo(() => rows.filter((r) => r.periods_today.length > 0), [rows])
-  const shown = filter === 'LIVE' ? live : filter === 'TODAY' ? today : rows
-  const studentsIn = rows.reduce((n, r) => n + r.students_joined_today, 0)
-  const studentsInNow = rows.reduce((n, r) => n + r.students_in_now.length, 0)
-  const roomsReady = rows.filter((r) => r.has_room).length
+  // Classes where students are waiting for the teacher come first.
+  const shown = React.useMemo(() => {
+    const list = filter === 'LIVE' ? live : filter === 'TODAY' ? today : rows
+    const rank = (r: LiveClassBoardRow) => (r.is_live ? (r.current_period && !r.teacher_present ? 0 : 1) : r.next_period ? 2 : 3)
+    return [...list].sort((a, b) => rank(a) - rank(b) || a.class_name.localeCompare(b.class_name, undefined, { numeric: true }))
+  }, [filter, live, today, rows])
 
-  // Keep the activity drawer on the live row, so it follows refreshes.
-  const activityRow = activityFor
-    ? (rows.find((r) => r.class_id === activityFor.class_id) ?? activityFor)
-    : null
+  const waiting = live.filter((r) => r.current_period && !r.teacher_present).length
+  const studentsInNow = rows.reduce((n, r) => n + r.students_in_now.length, 0)
+  const joinedToday = rows.reduce((n, r) => n + r.students_joined_today, 0)
+  const enrolled = rows.reduce((n, r) => n + r.enrolled_count, 0)
+  const refreshedAt = parseApiDateTime(rows[0]?.now ?? null)
 
   // Land on whichever list has something in it.
   React.useEffect(() => {
@@ -656,118 +643,91 @@ export default function AdminLiveClassesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [board.data])
 
-  const refreshedAt = parseApiDateTime(rows[0]?.now ?? null)
+  // The selection follows refreshes; with none, the first class in the list.
+  const selected = shown.find((r) => r.class_id === selectedId) ?? shown[0] ?? null
 
   return (
-    <>
-      <PageHeader
-        title="Live Classes"
-        description="Every class room right now: who is teaching, how long is left, who has come in. Join a room, or open it in a preview window beside this page. Refreshes every 30 seconds."
+    <div className="space-y-6">
+      <WorkspaceHeader
+        title="Live Class Monitor"
+        description="Every class room right now. Refreshes every 30 seconds"
+        icon={Radio}
         actions={
-          <Button
-            variant="outline"
-            icon={<RefreshCw />}
-            loading={board.isFetching && !board.isPending}
-            onClick={() => board.refetch()}
-          >
+          <Button variant="outline" size="sm" icon={<RefreshCw />} loading={board.isFetching && !board.isPending} onClick={() => board.refetch()}>
             Refresh
           </Button>
         }
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge tone={live.length > 0 ? 'success' : 'neutral'}>
-            <Radio />
-            {live.length} in session
-          </Badge>
-          <Badge tone={studentsInNow > 0 ? 'success' : 'accent'}>
-            <Users />
-            {studentsInNow} in rooms now · {countLabel(studentsIn, 'student')} joined today
-          </Badge>
-          <Badge tone="neutral">
-            {roomsReady} of {countLabel(rows.length, 'room')} ready
-          </Badge>
-          {refreshedAt && (
-            <span className="text-xs text-muted-foreground">
-              as of {formatSchoolTime(refreshedAt)}
-            </span>
+        tabs={
+          <TabStrip
+            label="Which classes"
+            idPrefix="live-tab"
+            value={filter}
+            onChange={(f) => {
+              setFilter(f)
+              setSelectedId(null)
+            }}
+            tabs={[
+              { key: 'LIVE', label: 'In session', count: live.length, tone: 'success' },
+              { key: 'TODAY', label: 'Classes today', count: today.length, tone: 'info' },
+              { key: 'ALL', label: 'All classes', count: rows.length },
+            ]}
+            trailing={refreshedAt ? `As of ${formatSchoolTime(refreshedAt)}` : undefined}
+          />
+        }
+      />
+
+      <div className="!mt-0">
+        <Figures>
+          <Figure label="In session" value={board.data ? String(live.length) : '—'} context={`of ${countLabel(today.length, 'class', 'classes')} today`} tone="success" />
+          <Figure label="Teacher not in" value={board.data ? String(waiting) : '—'} context="students waiting" alert={waiting > 0} tone="warning" />
+          <Figure label="In rooms now" value={board.data ? String(studentsInNow) : '—'} context="students" tone="primary" />
+          <Figure
+            label="Joined today"
+            value={board.data ? String(joinedToday) : '—'}
+            context={enrolled ? `of ${enrolled} · ${Math.round((joinedToday / enrolled) * 100)}%` : undefined}
+            tone="info"
+          />
+        </Figures>
+
+        <Band className="border-b border-border">
+          {board.isPending ? (
+            <div className="grid gap-4 py-4 lg:grid-cols-[19rem_minmax(0,1fr)]">
+              <Skeleton className="h-72 w-full" />
+              <Skeleton className="h-72 w-full" />
+            </div>
+          ) : board.isError ? (
+            <div className="py-6">
+              <ErrorState error={board.error} onRetry={() => board.refetch()} />
+            </div>
+          ) : shown.length === 0 ? (
+            <div className="py-14 text-center">
+              <p className="text-base font-medium text-foreground">
+                {filter === 'LIVE' ? 'No class is in session right now' : filter === 'TODAY' ? 'No class has lessons today' : 'No classes yet'}
+              </p>
+              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+                {filter === 'LIVE'
+                  ? 'A class appears here while one of its timetabled periods is running, or a scheduled session is live.'
+                  : 'Timetabled periods decide which classes are on today. Set them up under Timetable.'}
+              </p>
+              {filter !== 'ALL' && rows.length > 0 && (
+                <Button variant="outline" size="sm" className="mt-4" onClick={() => setFilter('ALL')}>
+                  Show every class
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="grid lg:h-[calc(100vh-20rem)] lg:min-h-[26rem] lg:grid-cols-[19rem_minmax(0,1fr)] lg:divide-x lg:divide-border">
+              <div className="-mx-4 border-b border-border sm:-mx-6 lg:mx-0 lg:-ml-8 lg:min-h-0 lg:border-b-0">
+                <ClassList rows={shown} value={selected?.class_id ?? null} onChange={setSelectedId} />
+              </div>
+              <section className="min-w-0 py-5 lg:min-h-0 lg:overflow-y-auto lg:pl-8 lg:pr-1">
+                {selected && <ClassDetail key={selected.class_id} row={selected} />}
+              </section>
+            </div>
           )}
-        </div>
-      </PageHeader>
+        </Band>
 
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <Segmented
-          layoutId="live-classes-filter"
-          size="sm"
-          value={filter}
-          onChange={setFilter}
-          aria-label="Which classes to show"
-          options={[
-            { value: 'LIVE', label: `In session (${live.length})` },
-            { value: 'TODAY', label: `Classes today (${today.length})` },
-            { value: 'ALL', label: `All (${rows.length})` },
-          ]}
-        />
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Hourglass className="size-3.5" />
-          Rooms are managed under{' '}
-          <Link to="/admin/classes" className="font-medium text-primary hover:underline">
-            Classes
-          </Link>
-          ; sessions under{' '}
-          <Link to="/admin/meetings" className="font-medium text-primary hover:underline">
-            Meetings
-          </Link>
-          .
-        </p>
       </div>
-
-      {board.isPending ? (
-        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-72 rounded-2xl" />
-          ))}
-        </div>
-      ) : board.isError ? (
-        <ErrorState error={board.error} onRetry={() => board.refetch()} />
-      ) : shown.length === 0 ? (
-        <EmptyState
-          icon={<Video />}
-          title={
-            filter === 'LIVE'
-              ? 'No class is in session right now'
-              : filter === 'TODAY'
-                ? 'No class has lessons today'
-                : 'No classes yet'
-          }
-          description={
-            filter === 'LIVE'
-              ? 'A class appears here while one of its timetabled periods is running, or a scheduled session is live.'
-              : 'Timetabled periods decide which classes are on today. Set them up under Timetable.'
-          }
-          action={
-            filter !== 'ALL' && rows.length > 0 ? (
-              <Button variant="outline" onClick={() => setFilter('ALL')}>
-                Show every class
-              </Button>
-            ) : undefined
-          }
-        />
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-          {shown.map((row) => (
-            <LiveClassCard key={row.class_id} row={row} onActivity={setActivityFor} />
-          ))}
-        </div>
-      )}
-
-      <div className="mt-6 rounded-xl border border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
-        <ExternalLink className="mr-1.5 inline size-3.5" />
-        Classes happen inside the LMS; the preview window opens the class room beside this page.
-        "In now" counts come from the room log — every join and hang-up in the call. Each
-        person&rsquo;s join and leave times are under Activity → Attendance.
-      </div>
-
-      <ActivitySheet row={activityRow} onClose={() => setActivityFor(null)} />
-    </>
+    </div>
   )
 }

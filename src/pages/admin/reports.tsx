@@ -615,7 +615,7 @@ export default function AdminReportsPage() {
         )}
       </WorkspaceHeader>
 
-      <div role="tabpanel" id="report-tab-panel" aria-labelledby={`report-tab-${tab}`} className="-mt-6 space-y-6">
+      <div role="tabpanel" id="report-tab-panel" aria-labelledby={`report-tab-${tab}`} className="!mt-0 space-y-6">
         {/* -------------------------------------------------------- overview */}
         {tab === 'overview' && (
           <>

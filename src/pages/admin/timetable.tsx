@@ -666,7 +666,7 @@ export default function AdminTimetablePage() {
         }
       />
 
-      <div className="-mt-6">
+      <div className="!mt-0">
         {/* ------------------------------------------------------ toolbar */}
         <Band className="border-b border-border">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 py-2.5">

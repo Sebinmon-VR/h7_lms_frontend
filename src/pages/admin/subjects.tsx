@@ -927,7 +927,7 @@ export default function AdminSubjectsPage() {
         }
       />
 
-      <div className="-mt-6">
+      <div className="!mt-0">
         <Figures>
           <Figure label="Subjects" value={subjectsQuery.data ? String(subjects.length) : '—'} context="in the catalogue" tone="primary" />
           <Figure label="Taught" value={mappingsQuery.data ? String(inUse) : '—'} context="in at least one class" tone="success" />

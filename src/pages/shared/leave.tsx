@@ -1311,7 +1311,7 @@ export default function LeavePage() {
         tabs={<TabStrip label="Leave" idPrefix="leave-tab" value={tab} onChange={setTab} tabs={tabs} />}
       />
 
-      <div className="-mt-6" role="tabpanel" id="leave-tab-panel" aria-labelledby={`leave-tab-${tab}`}>
+      <div className="!mt-0" role="tabpanel" id="leave-tab-panel" aria-labelledby={`leave-tab-${tab}`}>
         {isAdmin ? <AdminFigures pending={pending.data?.length} /> : <TeacherFigures />}
 
         {tab === 'requests' && isAdmin && <RequestsTab />}

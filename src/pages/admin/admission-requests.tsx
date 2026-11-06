@@ -2960,7 +2960,7 @@ export function AdmissionRequestsBoard({ board }: { board: Program }) {
         }
       />
 
-      <div className="-mt-6 space-y-6">
+      <div className="!mt-0 space-y-6">
         <Figures>
           <Figure
             label="Needs action"

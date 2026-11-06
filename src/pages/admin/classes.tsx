@@ -1832,7 +1832,7 @@ export default function AdminClassesPage() {
         }
       />
 
-      <div className="-mt-6">
+      <div className="!mt-0">
         <Figures>
           <Figure label="Classes" value={classesQuery.data ? String(classes.length) : '—'} context={`in ${countLabel(groupByGrade(classes).length, 'grade')}`} tone="primary" />
           <Figure

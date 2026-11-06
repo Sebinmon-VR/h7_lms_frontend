@@ -113,7 +113,18 @@ export function AppShell() {
           />
         </div>
 
-        <main className={paper ? 'paper-light relative flex-1 overflow-y-auto bg-background text-foreground' : 'relative flex-1 overflow-y-auto'}>
+        {/* Admin and teacher screens sit on plain white: their sections are
+            divided by rules, not floated as cards on a grey page. Student
+            screens keep their scenery. */}
+        <main
+          className={
+            paper
+              ? 'paper-light relative flex-1 overflow-y-auto bg-background text-foreground'
+              : decorated
+                ? 'relative flex-1 overflow-y-auto'
+                : 'relative flex-1 overflow-y-auto bg-card'
+          }
+        >
           {/* Inside <main> so it scrolls under the content but not over the
               sidebar or topbar, which keep their own solid backgrounds. */}
           {decorated && <Scenery />}

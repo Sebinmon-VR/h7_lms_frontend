@@ -748,7 +748,7 @@ export default function AdminUsersPage({ scope }: { scope?: UserScope } = {}) {
         }
       />
 
-      <div id="users-tab-panel" role={scope ? undefined : 'tabpanel'} className="-mt-6 space-y-6">
+      <div id="users-tab-panel" role={scope ? undefined : 'tabpanel'} className="!mt-0 space-y-6">
         {scope ? (
           <Figures>
             {summary.map((f) => (

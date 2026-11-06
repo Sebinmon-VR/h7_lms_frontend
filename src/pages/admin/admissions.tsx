@@ -1365,7 +1365,7 @@ export function AdmissionsBoard({ board }: { board: Program }) {
         }
       />
 
-      <div role="tabpanel" id="years-tab-panel" className="-mt-6">
+      <div role="tabpanel" id="years-tab-panel" className="!mt-0">
         {tab === 'years' ? (
           <YearsTab key="years" board={board} addSignal={addSignal} />
         ) : (

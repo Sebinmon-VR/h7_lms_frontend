@@ -36,7 +36,6 @@ const AdminMaterials = lazy(() => import('@/pages/admin/materials'))
 const AdminIntegrations = lazy(() => import('@/pages/admin/integrations'))
 const AdminTimetable = lazy(() => import('@/pages/admin/timetable'))
 const AdminReminders = lazy(() => import('@/pages/admin/reminders'))
-const AdminRecordings = lazy(() => import('@/pages/admin/recordings'))
 
 // The September modules. Admissions, families, finance, notices and oversight
 // are admin-only; the four below them are one screen each, served to whichever
@@ -269,7 +268,8 @@ export function AppRoutes() {
               <Route path="/admin/integrations" element={<AdminIntegrations />} />
               <Route path="/admin/timetable" element={<AdminTimetable />} />
               <Route path="/admin/reminders" element={<AdminReminders />} />
-              <Route path="/admin/recordings" element={<AdminRecordings />} />
+              {/* Class recordings now live on Materials. */}
+              <Route path="/admin/recordings" element={<Navigate to="/admin/materials?tab=recordings" replace />} />
 
               {/* The September modules, admin side. Finance is one route with
                   tabs rather than five: the four links of the fee chain are

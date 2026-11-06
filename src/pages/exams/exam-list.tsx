@@ -1,51 +1,42 @@
-import { ChevronRight, ClipboardCheck, Plus, Search } from 'lucide-react'
+import { AlertTriangle, ChevronRight, ClipboardCheck, ExternalLink, FolderClosed, FolderOpen, Pencil, PenLine, Plus, Search } from 'lucide-react'
 import * as React from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 
-import type { ExamMode, ExamOut, ExamStatus, ExamWindowState } from '@/api/types'
+import type { ExamOut } from '@/api/types'
 import { useExams } from '@/queries/exam.queries'
 import { cn } from '@/lib/cn'
-import { formatDateTime, formatRelative } from '@/lib/datetime'
+import { formatDate, formatRelative, parseApiDateTime } from '@/lib/datetime'
 import { describePaper, formatMark, formatMinutes } from '@/lib/exams'
 import { useDebouncedValue } from '@/lib/hooks'
+import { tidyName as tidy } from '@/lib/names'
+import { formatSchoolTime } from '@/lib/school-time'
 import { className as classLabel, subjectName } from '@/lib/select'
-import { subjectLook, toneStyle } from '@/lib/subjects'
 import { Button } from '@/components/ui/button'
-import { Combobox } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
-import { Segmented } from '@/components/ui/segmented'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  ExamModeBadge,
-  ExamStatusBadge,
-  ExamWindowBadge,
-  ResultsBadge,
-} from '@/components/domain/badges'
-import { FiledBy } from '@/components/domain/filed-by'
-import { EmptyState, ErrorState, NoResults } from '@/components/feedback/states'
-import { PageHeader } from '@/components/layout/page-header'
+import { ErrorState } from '@/components/feedback/states'
+import { Band, Figure, Figures, TONE_FILL, TONE_TEXT, WorkspaceHeader, type Tone } from '@/components/layout/workspace'
 import { useExamCatalogue, useExamScope } from './exam-scope'
 
 /**
- * Every exam this user may act on, grouped by what needs doing.
+ * Every exam this user may act on: a list on the left grouped by what needs
+ * doing, and the chosen exam's summary on the right with the ways into it.
  *
- * An exam list sorted by date alone buries the one thing a teacher opens
- * this page for — the paper the class is sitting right now, or the one due to
- * open in an hour — under last term's. So the groups come first: open, then
- * upcoming, then drafts still being written, then what is finished.
+ * An exam list sorted by date alone buries the one thing a teacher opens this
+ * page for — the paper the class is sitting right now, or the one due to open
+ * in an hour — under last term's. So the groups come first: open, then coming
+ * up, then drafts still being written, then what is finished.
  */
 
 type Group = 'open' | 'upcoming' | 'draft' | 'finished' | 'cancelled'
 
-const GROUP_ORDER: Group[] = ['open', 'upcoming', 'draft', 'finished', 'cancelled']
-
-const GROUP_LABEL: Record<Group, { title: string; hint: string }> = {
-  open: { title: 'Open now', hint: 'Students can hand in.' },
-  upcoming: { title: 'Coming up', hint: 'Published, waiting for the window to open.' },
-  draft: { title: 'Drafts', hint: 'Not visible to students yet.' },
-  finished: { title: 'Finished', hint: 'The window has closed.' },
-  cancelled: { title: 'Cancelled', hint: '' },
-}
+const GROUPS: { key: Group; label: string; tone: Tone }[] = [
+  { key: 'open', label: 'Open now', tone: 'success' },
+  { key: 'upcoming', label: 'Coming up', tone: 'info' },
+  { key: 'draft', label: 'Drafts', tone: 'neutral' },
+  { key: 'finished', label: 'Finished', tone: 'warning' },
+  { key: 'cancelled', label: 'Cancelled', tone: 'neutral' },
+]
 
 function groupOf(exam: ExamOut): Group {
   if (exam.status === 'CANCELLED') return 'cancelled'
@@ -55,63 +46,137 @@ function groupOf(exam: ExamOut): Group {
   return 'finished'
 }
 
-type StatusFilter = 'ALL' | ExamStatus | 'OPEN'
+/** Where the exam stands, in one phrase and a colour. */
+function standing(exam: ExamOut): { label: string; tone: Tone } {
+  switch (groupOf(exam)) {
+    case 'cancelled':
+      return { label: 'Cancelled', tone: 'neutral' }
+    case 'draft':
+      return { label: 'Draft, not visible to students', tone: 'neutral' }
+    case 'open':
+      return { label: exam.window_state === 'GRACE' ? 'Closing, in grace time' : 'Open now', tone: 'success' }
+    case 'upcoming':
+      return { label: `Opens ${formatRelative(exam.starts_at)}`, tone: 'info' }
+    default:
+      return exam.results_published ? { label: 'Finished, results out', tone: 'success' } : { label: 'Finished, results not released', tone: 'warning' }
+  }
+}
 
-function ExamRow({ exam, to }: { exam: ExamOut; to: string }) {
-  const subject = subjectName(exam)
-  const look = subjectLook(subject)
-  const showWindow: ExamWindowState | null = exam.status === 'PUBLISHED' ? exam.window_state : null
+const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString()
+
+/** "Mon 10 Nov, 09:00–10:30", or both dates when the window spans days. */
+function whenText(exam: ExamOut, long = false) {
+  const a = parseApiDateTime(exam.starts_at)
+  const b = parseApiDateTime(exam.ends_at)
+  if (!a) return '—'
+  const day = long ? 'EEEE d MMMM' : 'EEE d MMM'
+  if (!b) return `${formatDate(a, day)}, ${formatSchoolTime(a)}`
+  return sameDay(a, b)
+    ? `${formatDate(a, day)}, ${formatSchoolTime(a)}–${formatSchoolTime(b)}`
+    : `${formatDate(a, 'd MMM')} ${formatSchoolTime(a)} → ${formatDate(b, 'd MMM')} ${formatSchoolTime(b)}`
+}
+
+function Fact({ label, children, warn }: { label: string; children: React.ReactNode; warn?: boolean }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 border-b border-border py-2.5 text-sm">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className={cn('text-right font-medium', warn ? 'text-warning' : 'text-foreground')}>{children}</dd>
+    </div>
+  )
+}
+
+function ExamSummary({ exam }: { exam: ExamOut }) {
+  const scope = useExamScope()
+  const navigate = useNavigate()
+  const s = standing(exam)
+  const group = groupOf(exam)
+  const noPaper = exam.question_count === 0 && !exam.question_paper_url
+
+  // What still needs doing before (or after) the exam, in plain words.
+  const todo: string[] = []
+  if (group !== 'cancelled' && group !== 'finished' && noPaper) todo.push(exam.mode === 'ONLINE' ? 'No questions written yet' : 'No question paper attached yet')
+  if (exam.mode === 'ONLINE' && exam.question_count > 0 && !exam.answer_key_complete) todo.push('Some questions have no answer key, so they need marking by hand')
+  if (group === 'draft') todo.push(exam.auto_publish ? `Publishes by itself ${exam.auto_publish_at ? formatRelative(exam.auto_publish_at) : 'when the window opens'}` : 'Publish it so students can see it')
+  if (group === 'finished' && !exam.results_published) todo.push('Mark the scripts, then release the results')
+  if (exam.auto_publish_error) todo.push(exam.auto_publish_error)
 
   return (
-    <li>
-      <Link
-        to={to}
-        style={toneStyle(look.tone)}
-        className={cn(
-          'group flex items-stretch gap-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-all',
-          'hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+    <div className="space-y-5">
+      <div>
+        <span className={cn('inline-flex items-center gap-1.5 text-xs font-medium', TONE_TEXT[s.tone])}>
+          <span className={cn('size-2 rounded-full', TONE_FILL[s.tone], group === 'open' && 'animate-pulse')} aria-hidden />
+          {s.label}
+        </span>
+        <h2 className="mt-1 text-2xl font-medium tracking-tight text-foreground">{exam.title}</h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          {classLabel(exam)} · {tidy(subjectName(exam))}
+          {exam.teacher ? ` · ${tidy(exam.teacher.full_name)}` : ''}
+        </p>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" onClick={() => navigate(scope.examPath(exam.id))}>
+          <ExternalLink />
+          Open exam
+        </Button>
+        {group !== 'cancelled' && (
+          <Button variant="outline" size="sm" onClick={() => navigate(scope.editExamPath(exam.id))}>
+            <Pencil />
+            Edit
+          </Button>
         )}
-      >
-        <span className="w-1.5 shrink-0 bg-[hsl(var(--tile))]" aria-hidden />
-        <div className="flex min-w-0 flex-1 flex-col gap-2 p-4 sm:flex-row sm:items-center sm:gap-4">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-lg leading-none" aria-hidden>
-                {look.emoji}
-              </span>
-              <p className="truncate text-sm font-semibold">{exam.title}</p>
-              <ExamModeBadge mode={exam.mode} />
-              {exam.status !== 'PUBLISHED' && <ExamStatusBadge status={exam.status} size="sm" />}
-              {showWindow && <ExamWindowBadge state={showWindow} size="sm" />}
-              {exam.window_state === 'CLOSED' && exam.status === 'PUBLISHED' && (
-                <ResultsBadge published={exam.results_published} />
-              )}
-              <FiledBy teacherId={exam.teacher_id} teacher={exam.teacher} />
-            </div>
-            <p className="mt-1 truncate text-xs text-muted-foreground">
-              {classLabel(exam)} · {subject}
-              {exam.teacher ? ` · ${exam.teacher.full_name}` : ''}
-            </p>
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">{formatDateTime(exam.starts_at)}</span>
-              {' → '}
-              {formatDateTime(exam.ends_at)}
-              {exam.duration_minutes ? ` · ${formatMinutes(exam.duration_minutes)} each` : ''}
-              {exam.window_state === 'NOT_OPEN' && exam.status === 'PUBLISHED'
-                ? ` · opens ${formatRelative(exam.starts_at)}`
-                : ''}
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-4 text-xs text-muted-foreground sm:flex-col sm:items-end sm:gap-1">
-            <span>{describePaper(exam)}</span>
-            <span>
-              Out of <span className="font-semibold text-foreground">{formatMark(exam.max_marks)}</span>
-            </span>
-          </div>
-          <ChevronRight className="hidden size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 sm:block" />
+        {(group === 'open' || group === 'finished') && (
+          <Button variant="outline" size="sm" onClick={() => navigate(scope.examPath(exam.id))}>
+            <PenLine />
+            Mark scripts
+          </Button>
+        )}
+      </div>
+
+      {todo.length > 0 && (
+        <div className="border-l-2 border-warning bg-warning/5 px-3 py-2.5">
+          <p className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <AlertTriangle className="size-4 text-warning" />
+            To do
+          </p>
+          <ul className="mt-1 space-y-0.5 text-sm text-muted-foreground">
+            {todo.map((t) => (
+              <li key={t}>{t}</li>
+            ))}
+          </ul>
         </div>
-      </Link>
-    </li>
+      )}
+
+      <dl className="max-w-2xl">
+        <Fact label="When">{whenText(exam, true)}</Fact>
+        <Fact label="Time for each student">{exam.duration_minutes ? formatMinutes(exam.duration_minutes) : 'The whole window'}</Fact>
+        <Fact label="How it is taken">{exam.mode === 'ONLINE' ? 'Online, in the LMS' : 'On paper, answers uploaded'}</Fact>
+        <Fact label="Paper" warn={noPaper}>
+          {describePaper(exam)}
+        </Fact>
+        <Fact label="Marks">
+          Out of {formatMark(exam.max_marks)}
+          {exam.pass_marks != null ? `, pass at ${formatMark(exam.pass_marks)}` : ''}
+          {exam.grading_scheme === 'GRADE' ? ', shown as grades' : ''}
+        </Fact>
+        {exam.upload_grace_minutes > 0 && exam.mode === 'OFFLINE' && <Fact label="Upload grace time">{formatMinutes(exam.upload_grace_minutes)}</Fact>}
+        {exam.live_invigilation && <Fact label="Invigilation">Watched live</Fact>}
+        <Fact label="Results" warn={group === 'finished' && !exam.results_published}>
+          {exam.results_published
+            ? `Released${exam.results_published_at ? ` ${formatDate(exam.results_published_at, 'd MMM')}` : ''}`
+            : group === 'finished'
+              ? 'Not released yet'
+              : 'After the exam'}
+        </Fact>
+      </dl>
+
+      {(exam.instructions || exam.description) && (
+        <div className="max-w-2xl space-y-1">
+          <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Instructions</h3>
+          <p className="whitespace-pre-line text-sm text-foreground">{exam.instructions || exam.description}</p>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -122,226 +187,221 @@ export default function ExamListPage() {
   const navigate = useNavigate()
 
   const [search, setSearch] = React.useState('')
-  const [classId, setClassId] = React.useState<string | null>(null)
-  const [subjectId, setSubjectId] = React.useState<string | null>(null)
-  const [status, setStatus] = React.useState<StatusFilter>('ALL')
-  const [mode, setMode] = React.useState<'ALL' | ExamMode>('ALL')
+  const [selectedId, setSelectedId] = React.useState<number | null>(null)
   const debouncedSearch = useDebouncedValue(search.trim().toLowerCase())
 
   const exams = React.useMemo(() => examsQuery.data ?? [], [examsQuery.data])
+  const now = Date.now()
 
-  // Filter options come from the exams that exist, not the catalogue: a
-  // class with no exams is not something to filter to.
-  const classOptions = React.useMemo(() => {
-    const map = new Map<number, string>()
-    for (const e of exams) {
-      if (e.class_id == null) continue
-      map.set(e.class_id, classLabel(e))
-    }
-    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
-  }, [exams])
+  const filtered = exams.filter((e) => {
+    if (!debouncedSearch) return true
+    return `${e.title} ${classLabel(e)} ${subjectName(e)} ${e.teacher?.full_name ?? ''}`.toLowerCase().includes(debouncedSearch)
+  })
 
-  const subjectOptions = React.useMemo(() => {
-    const map = new Map<number, string>()
-    for (const e of exams) {
-      if (classId && String(e.class_id) !== classId) continue
-      map.set(e.subject_id, subjectName(e))
-    }
-    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
-  }, [exams, classId])
-
-  const filtered = React.useMemo(
-    () =>
-      exams.filter((e) => {
-        if (classId && String(e.class_id) !== classId) return false
-        if (subjectId && String(e.subject_id) !== subjectId) return false
-        if (mode !== 'ALL' && e.mode !== mode) return false
-        if (status === 'OPEN') {
-          if (groupOf(e) !== 'open') return false
-        } else if (status !== 'ALL' && e.status !== status) return false
-        if (debouncedSearch) {
-          const haystack = `${e.title} ${classLabel(e)} ${subjectName(e)} ${e.teacher?.full_name ?? ''}`.toLowerCase()
-          if (!haystack.includes(debouncedSearch)) return false
-        }
-        return true
-      }),
-    [exams, classId, subjectId, mode, status, debouncedSearch],
-  )
-
-  const grouped = React.useMemo(() => {
-    const map = new Map<Group, ExamOut[]>()
-    for (const e of filtered) {
-      const g = groupOf(e)
-      const list = map.get(g)
-      if (list) list.push(e)
-      else map.set(g, [e])
-    }
-    // Open and upcoming soonest-first; everything else most recent first.
-    for (const [g, list] of map) {
-      list.sort((a, b) =>
-        g === 'open' || g === 'upcoming'
-          ? a.starts_at.localeCompare(b.starts_at)
-          : b.starts_at.localeCompare(a.starts_at),
-      )
-    }
-    return map
-  }, [filtered])
-
-  const counts = React.useMemo(() => {
-    const c: Record<Group, number> = { open: 0, upcoming: 0, draft: 0, finished: 0, cancelled: 0 }
-    for (const e of exams) c[groupOf(e)] += 1
-    return c
-  }, [exams])
-
-  const filtersActive = !!classId || !!subjectId || status !== 'ALL' || mode !== 'ALL' || !!search
-  const clearFilters = () => {
-    setClassId(null)
-    setSubjectId(null)
-    setStatus('ALL')
-    setMode('ALL')
-    setSearch('')
+  // Folders: class, then subject, then its exams. Inside a subject, what
+  // needs doing first: open, coming up (soonest first), drafts, then finished
+  // and cancelled (newest first).
+  const rank: Record<Group, number> = { open: 0, upcoming: 1, draft: 2, finished: 3, cancelled: 4 }
+  const byNeed = (a: ExamOut, b: ExamOut) => {
+    const ga = groupOf(a)
+    const gb = groupOf(b)
+    if (ga !== gb) return rank[ga] - rank[gb]
+    return ga === 'open' || ga === 'upcoming' ? a.starts_at.localeCompare(b.starts_at) : b.starts_at.localeCompare(a.starts_at)
   }
+  const tree = (() => {
+    type Sub = { id: number; name: string; items: ExamOut[] }
+    const classes = new Map<string, { key: string; name: string; count: number; open: number; subjects: Map<number, Sub> }>()
+    for (const e of filtered) {
+      const key = e.class_id != null ? String(e.class_id) : 'none'
+      if (!classes.has(key)) classes.set(key, { key, name: e.class_id != null ? classLabel(e) : 'No class', count: 0, open: 0, subjects: new Map() })
+      const c = classes.get(key)!
+      c.count += 1
+      if (groupOf(e) === 'open') c.open += 1
+      if (!c.subjects.has(e.subject_id)) c.subjects.set(e.subject_id, { id: e.subject_id, name: tidy(subjectName(e)), items: [] })
+      c.subjects.get(e.subject_id)!.items.push(e)
+    }
+    return [...classes.values()]
+      .sort((x, y) => x.name.localeCompare(y.name, undefined, { numeric: true }))
+      .map((c) => ({
+        ...c,
+        subjects: [...c.subjects.values()].map((sub) => ({ ...sub, items: [...sub.items].sort(byNeed) })).sort((x, y) => x.name.localeCompare(y.name)),
+      }))
+  })()
+  const ordered = tree.flatMap((c) => c.subjects.flatMap((sub) => sub.items))
+  const selected = ordered.find((e) => e.id === selectedId) ?? null
 
+  // Folders start closed, except a class with an exam open right now. A search
+  // opens everything that matches, and the chosen exam's folders stay open; a
+  // click on a folder overrides all of that.
+  const [toggled, setToggled] = React.useState<Map<string, boolean>>(new Map())
+  const isOpen = (key: string, liveClass = false) =>
+    toggled.get(key) ??
+    (!!debouncedSearch ||
+      liveClass ||
+      (!!selected && (key === `c${selected.class_id ?? 'none'}` || key === `s${selected.class_id ?? 'none'}-${selected.subject_id}`)))
+  const toggleFolder = (key: string, liveClass = false) => setToggled((prev) => new Map(prev).set(key, !isOpen(key, liveClass)))
+
+  const count = (g: Group) => exams.filter((e) => groupOf(e) === g).length
+  const awaitingResults = exams.filter((e) => groupOf(e) === 'finished' && !e.results_published).length
+  const weekAhead = exams.filter((e) => groupOf(e) === 'upcoming' && (parseApiDateTime(e.starts_at)?.getTime() ?? 0) - now < 7 * 86_400_000).length
   const canCreate = scope.isAdmin || !catalogue.hasNothing
 
   return (
-    <>
-      <PageHeader
-        title="Exams"
-        description={
-          scope.isAdmin
-            ? 'Every exam set by any teacher. Open one to edit it, mark scripts or release results.'
-            : 'Exams you have set, plus every exam in a class you lead.'
-        }
+    <div className="space-y-6">
+      <WorkspaceHeader
+        title={scope.isAdmin ? 'Exam Management' : 'Exams'}
+        description={scope.isAdmin ? 'Every exam set by any teacher. Pick one to see where it stands' : 'Exams you have set, plus every exam in a class you lead'}
+        icon={ClipboardCheck}
         actions={
-          <Button variant="primary" icon={<Plus />} disabled={!canCreate} onClick={() => navigate(scope.newExamPath)}>
+          <Button size="sm" icon={<Plus />} disabled={!canCreate} onClick={() => navigate(scope.newExamPath)}>
             New exam
           </Button>
         }
-      >
-        {exams.length > 0 && (
-          <div className="flex flex-wrap gap-2 text-xs">
-            {GROUP_ORDER.filter((g) => counts[g] > 0 && g !== 'cancelled').map((g) => (
-              <button
-                key={g}
-                type="button"
-                onClick={() => setStatus(g === 'open' ? 'OPEN' : g === 'draft' ? 'DRAFT' : 'ALL')}
-                className={cn(
-                  'rounded-full border border-border bg-card px-3 py-1 transition-colors hover:border-primary/40',
-                  g === 'open' && counts.open > 0 && 'border-success/40 bg-success/8 text-success',
-                )}
-              >
-                <span className="font-semibold tabular-nums">{counts[g]}</span> {GROUP_LABEL[g].title.toLowerCase()}
-              </button>
-            ))}
-          </div>
-        )}
-      </PageHeader>
+      />
 
-      {examsQuery.isPending ? (
-        <div className="space-y-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-24 rounded-xl" />
-          ))}
-        </div>
-      ) : examsQuery.isError ? (
-        <ErrorState error={examsQuery.error} onRetry={() => examsQuery.refetch()} />
-      ) : exams.length === 0 ? (
-        <EmptyState
-          icon={<ClipboardCheck />}
-          title="No exams yet"
-          description={
-            canCreate
-              ? 'Set the first one. It starts as a draft, so you can write the paper before the class sees anything.'
-              : 'You need a class and subject assignment before you can set an exam. Ask an administrator.'
-          }
-          action={
-            canCreate ? (
-              <Button variant="primary" icon={<Plus />} onClick={() => navigate(scope.newExamPath)}>
-                New exam
-              </Button>
-            ) : undefined
-          }
-        />
-      ) : (
-        <div className="space-y-6">
-          <div className="grid gap-3 rounded-xl border border-border bg-card p-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto]">
-            <Input
-              leading={<Search />}
-              placeholder="Search by title, class, subject…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              aria-label="Search exams"
-            />
-            <Combobox
-              value={classId}
-              onChange={(v) => {
-                setClassId(v === classId ? null : v)
-                setSubjectId(null)
-              }}
-              placeholder="Every class"
-              options={classOptions.map(([id, name]) => ({ value: String(id), label: name }))}
-            />
-            <Combobox
-              value={subjectId}
-              onChange={(v) => setSubjectId(v === subjectId ? null : v)}
-              placeholder="Every subject"
-              options={subjectOptions.map(([id, name]) => ({ value: String(id), label: name }))}
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <Segmented<StatusFilter>
-                layoutId="exam-status-filter"
-                size="sm"
-                value={status}
-                onChange={setStatus}
-                aria-label="Status"
-                options={[
-                  { value: 'ALL', label: 'All' },
-                  { value: 'OPEN', label: 'Open' },
-                  { value: 'DRAFT', label: 'Drafts' },
-                  { value: 'PUBLISHED', label: 'Published' },
-                ]}
-              />
-              <Segmented<'ALL' | ExamMode>
-                layoutId="exam-mode-filter"
-                size="sm"
-                value={mode}
-                onChange={setMode}
-                aria-label="Mode"
-                options={[
-                  { value: 'ALL', label: 'Any' },
-                  { value: 'ONLINE', label: 'Online' },
-                  { value: 'OFFLINE', label: 'Upload paper' },
-                ]}
-              />
+      <div className="!mt-0">
+        <Figures>
+          <Figure label="Open now" value={examsQuery.data ? String(count('open')) : '—'} context="students can hand in" tone="success" />
+          <Figure label="Next 7 days" value={examsQuery.data ? String(weekAhead) : '—'} context="exams opening" tone="info" />
+          <Figure label="Drafts" value={examsQuery.data ? String(count('draft')) : '—'} context="not visible yet" tone="neutral" />
+          <Figure label="Results to release" value={examsQuery.data ? String(awaitingResults) : '—'} context="finished, not out" alert={awaitingResults > 0} tone="warning" />
+        </Figures>
+
+        <Band className="border-b border-border">
+          {examsQuery.isPending ? (
+            <div className="grid gap-4 py-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
+              <Skeleton className="h-80 w-full" />
+              <Skeleton className="h-80 w-full" />
             </div>
-          </div>
-
-          {filtered.length === 0 ? (
-            <NoResults onClear={filtersActive ? clearFilters : undefined} />
+          ) : examsQuery.isError ? (
+            <div className="py-6">
+              <ErrorState error={examsQuery.error} onRetry={() => examsQuery.refetch()} />
+            </div>
+          ) : exams.length === 0 ? (
+            <div className="py-14 text-center">
+              <p className="text-base font-medium text-foreground">No exams yet</p>
+              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+                {canCreate
+                  ? 'Set the first one. It starts as a draft, so the paper can be written before the class sees anything'
+                  : 'A class and subject assignment is needed before an exam can be set. Ask an administrator'}
+              </p>
+              {canCreate && (
+                <Button size="sm" className="mt-4" icon={<Plus />} onClick={() => navigate(scope.newExamPath)}>
+                  New exam
+                </Button>
+              )}
+            </div>
           ) : (
-            GROUP_ORDER.filter((g) => grouped.has(g)).map((g) => {
-              const list = grouped.get(g) as ExamOut[]
-              return (
-                <section key={g}>
-                  <div className="mb-2.5 flex items-baseline gap-2">
-                    <h2 className="text-sm font-semibold">{GROUP_LABEL[g].title}</h2>
-                    <span className="text-xs text-muted-foreground">
-                      {list.length}
-                      {GROUP_LABEL[g].hint ? ` · ${GROUP_LABEL[g].hint}` : ''}
-                    </span>
+            <div className="grid lg:h-[calc(100vh-17rem)] lg:min-h-[28rem] lg:grid-cols-[22rem_minmax(0,1fr)] lg:divide-x lg:divide-border">
+              {/* ------------------------------------------------- the list */}
+              <div className="-mx-4 flex flex-col border-b border-border sm:-mx-6 lg:mx-0 lg:-ml-8 lg:min-h-0 lg:border-b-0">
+                <div className="flex gap-2 border-b border-border py-2.5 pl-4 pr-4 sm:pl-6 lg:pl-8">
+                  <div className="relative min-w-0 flex-1">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search exams" aria-label="Search exams" className="h-8 py-1 pl-8 text-sm" />
                   </div>
-                  <ul className="space-y-2.5">
-                    {list.map((exam) => (
-                      <ExamRow key={exam.id} exam={exam} to={scope.examPath(exam.id)} />
-                    ))}
-                  </ul>
-                </section>
-              )
-            })
+                </div>
+                <div className="max-h-96 flex-1 overflow-y-auto lg:max-h-none lg:min-h-0">
+                  {tree.length === 0 && <p className="px-6 py-12 text-center text-sm text-muted-foreground">Nothing matches</p>}
+                  {tree.map((c) => {
+                    const cKey = `c${c.key}`
+                    const cOpen = isOpen(cKey, c.open > 0)
+                    return (
+                      <div key={c.key} className="border-b border-border">
+                        <button
+                          type="button"
+                          onClick={() => toggleFolder(cKey, c.open > 0)}
+                          aria-expanded={cOpen}
+                          className="flex w-full items-center gap-2 py-2.5 pl-4 pr-4 text-left hover:bg-muted/40 sm:pl-6 lg:pl-8"
+                        >
+                          <ChevronRight className={cn('size-4 shrink-0 text-muted-foreground transition-transform', cOpen && 'rotate-90')} />
+                          {cOpen ? (
+                            <FolderOpen className="size-5 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+                          ) : (
+                            <FolderClosed className="size-5 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+                          )}
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{c.name}</span>
+                          {c.open > 0 && <span className="text-[11px] font-medium text-success">{c.open} open</span>}
+                          <span className="text-xs tabular-nums text-muted-foreground">{c.count}</span>
+                        </button>
+                        {cOpen &&
+                          c.subjects.map((sub) => {
+                            const sKey = `s${c.key}-${sub.id}`
+                            const sOpen = isOpen(sKey, c.open > 0)
+                            return (
+                              <div key={sub.id}>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleFolder(sKey, c.open > 0)}
+                                  aria-expanded={sOpen}
+                                  className="flex w-full items-center gap-2 py-1.5 pl-10 pr-4 text-left hover:bg-muted/40 sm:pl-12 lg:pl-14"
+                                >
+                                  <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', sOpen && 'rotate-90')} />
+                                  {sOpen ? (
+                                    <FolderOpen className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+                                  ) : (
+                                    <FolderClosed className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+                                  )}
+                                  <span className="min-w-0 flex-1 truncate text-sm text-foreground">{sub.name}</span>
+                                  <span className="text-xs tabular-nums text-muted-foreground">{sub.items.length}</span>
+                                </button>
+                                {sOpen && (
+                                  <ul className="pb-1">
+                                    {sub.items.map((e) => {
+                                      const active = selected?.id === e.id
+                                      const start = parseApiDateTime(e.starts_at)
+                                      const g = groupOf(e)
+                                      const late = g === 'finished' && !e.results_published
+                                      const tone = late ? 'warning' : GROUPS.find((x) => x.key === g)!.tone
+                                      return (
+                                        <li key={e.id}>
+                                          <button
+                                            type="button"
+                                            onClick={() => setSelectedId(e.id)}
+                                            onDoubleClick={() => navigate(scope.examPath(e.id))}
+                                            aria-current={active ? 'true' : undefined}
+                                            className={cn(
+                                              'relative flex w-full items-center gap-2.5 py-1.5 pl-[4.5rem] pr-4 text-left transition-colors sm:pl-20 lg:pl-[5.5rem]',
+                                              active ? 'bg-primary/10' : 'hover:bg-muted/40',
+                                            )}
+                                          >
+                                            {active && <span className="absolute inset-y-0 left-0 w-0.5 bg-primary" aria-hidden />}
+                                            <span
+                                              className={cn('size-2 shrink-0 rounded-full', TONE_FILL[tone], g === 'open' && 'animate-pulse')}
+                                              title={late ? 'Results not released' : GROUPS.find((x) => x.key === g)!.label}
+                                            />
+                                            <span className={cn('min-w-0 flex-1 truncate text-sm', active ? 'font-medium text-primary' : 'text-foreground')} title={e.title}>
+                                              {e.title}
+                                            </span>
+                                            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{start ? formatDate(start, 'd MMM') : ''}</span>
+                                          </button>
+                                        </li>
+                                      )
+                                    })}
+                                  </ul>
+                                )}
+                              </div>
+                            )
+                          })}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* ---------------------------------------------- the summary */}
+              <section className="min-w-0 py-5 lg:min-h-0 lg:overflow-y-auto lg:pl-8 lg:pr-1">
+                {selected ? <ExamSummary key={selected.id} exam={selected} /> : (
+                  <div className="flex h-full flex-col items-center justify-center py-16 text-center">
+                    <ClipboardCheck className="size-8 text-muted-foreground/40" strokeWidth={1.5} />
+                    <p className="mt-2 text-sm text-muted-foreground">Open a class, then pick an exam to see where it stands</p>
+                  </div>
+                )}
+              </section>
+            </div>
           )}
-        </div>
-      )}
-    </>
+        </Band>
+      </div>
+    </div>
   )
 }

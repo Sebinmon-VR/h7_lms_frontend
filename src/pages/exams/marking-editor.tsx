@@ -241,7 +241,7 @@ function MarkingSurface({
 
   if (sheet.query.isPending) {
     return (
-      <div className="grid h-64 place-items-center rounded-lg border border-border bg-muted/40 text-sm text-muted-foreground">
+      <div className="grid h-64 place-items-center bg-muted/30 text-sm text-muted-foreground">
         <span className="inline-flex items-center gap-2">
           <Loader2 className="size-4 animate-spin" /> Opening the answer sheet…
         </span>
@@ -249,11 +249,15 @@ function MarkingSurface({
     )
   }
   if (sheet.query.isError || !sheet.query.data) {
-    return <p className="rounded-lg border border-border p-4 text-sm text-danger">This file could not be opened.</p>
+    return (
+      <p className="border-l-2 border-warning bg-warning/5 px-3 py-2.5 text-sm text-foreground">
+        This sheet could not be opened{(sheet.query.error as { status?: number } | null)?.status === 404 ? ': it is missing from storage' : ''}. Score it in the list on the right.
+      </p>
+    )
   }
   if (sheet.kind === 'other') {
     return (
-      <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">
+      <p className="border-l-2 border-border px-3 py-2.5 text-sm text-muted-foreground">
         This kind of file cannot be drawn on. Score it in the list on the right.
       </p>
     )
@@ -262,7 +266,7 @@ function MarkingSurface({
   const bounds = [0, ...file.dividers, 1]
 
   return (
-    <div ref={sheet.surfaceRef} className="relative overflow-hidden rounded-lg border border-border bg-white shadow-sm">
+    <div ref={sheet.surfaceRef} className="relative overflow-hidden border border-border bg-white">
       <div ref={sheet.hostRef} />
       {sheet.drawn === 'drawing' && (
         <div className="absolute inset-0 grid place-items-center bg-white/70 text-sm text-muted-foreground">
@@ -438,19 +442,30 @@ function MarkingSurface({
 // ---------------------------------------------------------------- the editor
 
 export function MarkingEditor({
-  open,
+  open = false,
   onOpenChange,
+  inline = false,
+  asideFooter,
   exam,
   submission,
   onRecordTotal,
 }: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  /**
+   * Drawn in the page rather than in a dialog: the marking screen for a paper
+   * exam is this editor, with the sheet on the left and the scores on the right.
+   */
+  inline?: boolean
+  /** Extra rows under the scores when inline, such as the remark to the student. */
+  asideFooter?: React.ReactNode
   exam: ExamOut
   submission: SubmissionOut
   /** Records the total as the script's marks (the grade follows on a graded exam). */
   onRecordTotal: (total: number) => Promise<void>
 }) {
+  // Inline, the editor is always open; in a dialog it opens and closes.
+  const isOpen = inline || open
   const [sheet, setSheet] = React.useState<Sheet>(() => initialSheet(submission))
   const [tool, setTool] = React.useState<Tool>('lines')
   const [color, setColor] = React.useState<string>(MARK_COLORS[0].value)
@@ -460,14 +475,15 @@ export function MarkingEditor({
   const [error, setError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
-    if (open) {
+    if (isOpen) {
       setSheet(initialSheet(submission))
       setHistory([])
       setError(null)
     }
-    // Only when the editor opens: a background refresh must not wipe what is being marked.
+    // Only when the editor opens (or, inline, when the script changes): a background
+    // refresh must not wipe what is being marked.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }, [isOpen, submission.id])
 
   const files = submission.attachments.map((attachment, index) => ({ attachment, index, key: String(index) }))
 
@@ -538,7 +554,7 @@ export function MarkingEditor({
   const undoRef = React.useRef(undo)
   undoRef.current = undo
   React.useEffect(() => {
-    if (!open) return
+    if (!isOpen) return
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.key.toLowerCase() !== 'z') return
       if ((e.target as HTMLElement | null)?.closest('input, textarea, [contenteditable="true"]')) return
@@ -547,7 +563,7 @@ export function MarkingEditor({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open])
+  }, [isOpen])
 
   const persist = async () => {
     await examApi.saveMarking(exam.id, submission.student_id, { files: sheet })
@@ -572,7 +588,8 @@ export function MarkingEditor({
     try {
       await persist()
       await onRecordTotal(rounded)
-      onOpenChange(false)
+      if (inline) toast.success(`Marks recorded: ${formatMark(rounded)} / ${formatMark(maxMarks)}`)
+      else onOpenChange?.(false)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'The marks could not be recorded.')
     } finally {
@@ -587,29 +604,42 @@ export function MarkingEditor({
         ? 'Click a part to choose it.'
         : MARK_TOOLS.find((t) => t.tool === tool)?.hint
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        size="xl"
-        className="h-[calc(100dvh-1rem)] max-w-[calc(100vw-1rem)]"
-        // Escape in a note being typed cancels the note, not the whole marking.
-        onEscapeKeyDown={(e) => {
-          if ((e.target as HTMLElement | null)?.closest?.('[data-sheet-note]')) e.preventDefault()
-        }}
-      >
-        <DialogHeader>
-          <DialogTitle>Mark on the answer sheet · {submission.student?.full_name ?? 'Student'}</DialogTitle>
-          <DialogDescription>
-            Draw a line under each answer to split the sheet into parts, then give each part its score. The total,
-            percentage{exam.grading_scheme === 'GRADE' ? ' and grade are' : ' is'} worked out for you. Circle, tick,
-            cross or write on the sheet to show mistakes: the student sees the marked sheet when results are published.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex min-h-0 flex-1 flex-col gap-3 px-4 pb-4 lg:flex-row">
+  const totalsBar = (
+            <div className="flex items-center gap-4">
+              <p className="text-right leading-tight">
+                <span className={cn('text-2xl font-medium tabular-nums', overTotal ? 'text-danger' : 'text-foreground')}>{formatMark(rounded)}</span>
+                <span className="text-sm text-muted-foreground"> / {formatMark(maxMarks)}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {percentage != null ? `${percentage.toFixed(1)}%` : 'No parts scored'}
+                  {exam.grade_bands.length > 0 && grade ? ` · grade ${grade}` : ''}
+                </span>
+              </p>
+              <Button variant="outline" size="sm" loading={busy === 'save'} onClick={saveOnly}>
+                Save for later
+              </Button>
+              <Button size="sm" icon={<Save />} loading={busy === 'record'} disabled={!scored || overTotal || overParts.length > 0} onClick={record}>
+                Record marks
+              </Button>
+            </div>
+  )
+  const warningLine = (
+    <>
+          {(overTotal || overParts.length > 0 || error) && (
+            <p className="mt-1 flex items-start gap-1.5 text-xs text-danger">
+              <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+              {error ??
+                (overTotal
+                  ? `The parts add up to more than the exam is out of (${formatMark(maxMarks)}).`
+                  : 'A part is given more than it is worth.')}
+            </p>
+          )}
+    </>
+  )
+  const workspace = (
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           {/* ------------------------------------------------ the sheets */}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">
               <Button
                 size="sm"
                 variant={tool === 'lines' ? 'primary' : 'outline'}
@@ -671,9 +701,9 @@ export function MarkingEditor({
                 Undo
               </Button>
 
-              <span className="basis-full text-xs text-muted-foreground">{hint}</span>
+              <span className="ml-auto text-xs text-muted-foreground">{hint}</span>
             </div>
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto rounded-lg bg-muted/40 p-3">
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
               {files.map(({ attachment, index, key }) => {
                 const name = attachment.filename ?? fileNameFromUrl(attachment.file_url) ?? `File ${index + 1}`
                 return (
@@ -699,12 +729,18 @@ export function MarkingEditor({
           </div>
 
           {/* ------------------------------------------------ the parts and the total */}
-          <aside className="flex min-h-0 w-full shrink-0 flex-col rounded-lg border border-border lg:w-80">
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+          <aside className="flex min-h-0 w-full shrink-0 flex-col border-t border-border lg:w-80 lg:border-l lg:border-t-0">
+            <div className="grid grid-cols-[minmax(0,1fr)_4rem_0.75rem_3.5rem] items-center gap-1.5 border-b border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              <span>Part</span>
+              <span className="text-right">Marks</span>
+              <span />
+              <span className="text-right">Out of</span>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto">
               {files.map(({ attachment, index, key }) => (
-                <div key={key} className="space-y-1.5">
+                <div key={key}>
                   {files.length > 1 && (
-                    <p className="truncate text-2xs font-medium uppercase tracking-wide text-muted-foreground">
+                    <p className="truncate border-b border-border px-3 pb-1 pt-3 text-2xs font-medium uppercase tracking-wide text-muted-foreground">
                       {attachment.filename ?? `File ${index + 1}`}
                     </p>
                   )}
@@ -715,19 +751,20 @@ export function MarkingEditor({
                       <div
                         key={i}
                         className={cn(
-                          'rounded-lg border p-2',
-                          chosen ? 'border-primary bg-primary/5' : 'border-border',
-                          over && 'border-danger',
+                          'relative border-b border-border px-3 py-1.5',
+                          chosen && 'bg-primary/5',
+                          over && 'bg-danger/5',
                         )}
                         onClick={() => setActive({ file: key, part: i })}
                       >
-                        <div className="flex items-center gap-1.5">
+                        {chosen && <span className="absolute inset-y-0 left-0 w-0.5 bg-primary" aria-hidden />}
+                        <div className="grid grid-cols-[minmax(0,1fr)_4rem_0.75rem_3.5rem] items-center gap-1.5">
                           <Input
                             value={part.label}
                             onChange={(e) => setPart(key, i, { label: e.target.value })}
                             placeholder={`Part ${i + 1}`}
                             aria-label="Part name"
-                            className="h-8 min-w-0 flex-1 text-sm font-semibold"
+                            className="h-8 min-w-0 border-transparent bg-transparent px-1.5 text-sm font-medium shadow-none hover:border-border focus:border-border"
                           />
                           <Input
                             type="number"
@@ -738,7 +775,7 @@ export function MarkingEditor({
                             onChange={(e) => setPart(key, i, { marks: e.target.value === '' ? null : Number(e.target.value) })}
                             aria-label="Marks"
                             invalid={over}
-                            className="h-8 w-16 text-right font-semibold"
+                            className="h-8 w-16 text-right font-medium"
                           />
                           <span className="text-xs text-muted-foreground">/</span>
                           <Input
@@ -752,7 +789,7 @@ export function MarkingEditor({
                             }
                             placeholder="–"
                             aria-label="Worth"
-                            className="h-8 w-14 text-right"
+                            className="h-8 w-14 border-transparent bg-transparent text-right text-muted-foreground shadow-none hover:border-border focus:border-border"
                           />
                         </div>
                         {chosen && (
@@ -761,7 +798,7 @@ export function MarkingEditor({
                             onChange={(e) => setPart(key, i, { comment: e.target.value || null })}
                             placeholder="Comment on this answer (optional)"
                             aria-label="Comment"
-                            className="mt-1.5 h-8 text-xs"
+                            className="mt-1 h-7 border-transparent bg-transparent px-1.5 text-xs shadow-none hover:border-border focus:border-border"
                           />
                         )}
                       </div>
@@ -771,50 +808,49 @@ export function MarkingEditor({
               ))}
             </div>
 
-            <div className="space-y-2 border-t border-border p-3">
-              <div className="flex items-baseline justify-between">
-                <span className="text-sm text-muted-foreground">Total</span>
-                <span className={cn('text-xl font-semibold tabular-nums', overTotal && 'text-danger')}>
-                  {formatMark(rounded)} <span className="text-sm text-muted-foreground">/ {formatMark(maxMarks)}</span>
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Percentage</span>
-                <span className="font-medium tabular-nums">{percentage != null ? `${percentage.toFixed(1)}%` : '–'}</span>
-              </div>
-              {exam.grade_bands.length > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Grade</span>
-                  <span className="font-semibold">{grade ?? 'Below every band'}</span>
-                </div>
-              )}
-              {(overTotal || overParts.length > 0) && (
-                <p className="flex items-start gap-1.5 text-xs text-danger">
-                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-                  {overTotal
-                    ? `The parts add up to more than the exam is out of (${formatMark(maxMarks)}).`
-                    : 'A part is given more than it is worth.'}
-                </p>
-              )}
-              {error && <p className="text-xs text-danger">{error}</p>}
-              <div className="flex gap-2 pt-1">
-                <Button variant="outline" className="flex-1" loading={busy === 'save'} onClick={saveOnly}>
-                  Save for later
-                </Button>
-                <Button
-                  variant="primary"
-                  className="flex-1"
-                  icon={<Save />}
-                  loading={busy === 'record'}
-                  disabled={!scored || overTotal || overParts.length > 0}
-                  onClick={record}
-                >
-                  Record marks
-                </Button>
-              </div>
-            </div>
+            {asideFooter ?? (
+              <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">Click a part to add a comment on that answer.</p>
+            )}
           </aside>
         </div>
+  )
+
+  if (inline) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2.5">
+          <p className="text-sm text-muted-foreground">Draw a line under each answer, then score each part on the right. Tick, cross or write on the sheet.</p>
+          {totalsBar}
+        </div>
+        <div className="px-4">{warningLine}</div>
+        {workspace}
+      </div>
+    )
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        size="xl"
+        className="h-[calc(100dvh-1rem)] max-w-[calc(100vw-1rem)]"
+        // Escape in a note being typed cancels the note, not the whole marking.
+        onEscapeKeyDown={(e) => {
+          if ((e.target as HTMLElement | null)?.closest?.('[data-sheet-note]')) e.preventDefault()
+        }}
+      >
+        <DialogHeader className="border-b border-border">
+          <div className="flex flex-wrap items-center justify-between gap-3 pr-8">
+            <div className="min-w-0">
+              <DialogTitle>Marking · {submission.student?.full_name ?? 'Student'}</DialogTitle>
+              <DialogDescription>
+                Draw a line under each answer, then score each part. Tick, cross or write on the sheet; the student sees it with their result.
+              </DialogDescription>
+            </div>
+            {totalsBar}
+          </div>
+          {warningLine}
+        </DialogHeader>
+        {workspace}
       </DialogContent>
     </Dialog>
   )

@@ -85,17 +85,26 @@ export function DocumentViewer({
   }, [blob, kind])
 
   if (query.isPending) {
-    return <Skeleton className={cn('w-full rounded-lg', className)} style={{ height: '50vh' }} />
+    return <Skeleton className={cn('w-full', className)} style={{ height: '50vh' }} />
   }
 
   if (query.isError || !blob) {
+    // Say why, when the server said: most often the file is no longer in storage.
+    const reason = (query.error as { message?: string; status?: number } | null) ?? null
+    const missing = reason?.status === 404 || /not found|no longer|missing/i.test(reason?.message ?? '')
     return (
-      <div className={cn('flex flex-col items-center gap-2 rounded-lg border border-border p-6 text-center text-sm', className)}>
-        <TriangleAlert className="size-5 text-warning" />
-        <p>This file could not be shown.</p>
-        <Button variant="outline" size="sm" onClick={() => query.refetch()}>
-          Try again
-        </Button>
+      <div className={cn('flex items-center gap-3 border-l-2 border-warning bg-warning/5 px-3 py-2.5 text-sm', className)}>
+        <TriangleAlert className="size-4 shrink-0 text-warning" />
+        <p className="min-w-0 flex-1">
+          <span className="font-medium text-foreground">{missing ? 'This file is missing from storage.' : 'This file could not be shown.'}</span>
+          {reason?.message && !missing && <span className="ml-1 text-muted-foreground">{reason.message}</span>}
+          {missing && <span className="ml-1 text-muted-foreground">Ask the student to upload it again.</span>}
+        </p>
+        {!missing && (
+          <Button variant="ghost" size="sm" onClick={() => query.refetch()}>
+            Try again
+          </Button>
+        )}
       </div>
     )
   }
@@ -105,7 +114,7 @@ export function DocumentViewer({
       <iframe
         src={objectUrl}
         title={fileName ?? 'Document'}
-        className={cn('w-full rounded-lg border border-border bg-white', className)}
+        className={cn('w-full border border-border bg-white', className)}
         style={{ height }}
       />
     )
@@ -113,7 +122,7 @@ export function DocumentViewer({
 
   if (kind === 'image' && objectUrl) {
     return (
-      <div className={cn('overflow-auto rounded-lg border border-border bg-muted/40', className)} style={{ maxHeight: height }}>
+      <div className={cn('overflow-auto bg-muted/30', className)} style={{ maxHeight: height }}>
         <img src={objectUrl} alt={fileName ?? 'Uploaded image'} className="mx-auto h-auto max-w-full" />
       </div>
     )
@@ -172,8 +181,8 @@ export function InlineFileRow({
   const [confirming, setConfirming] = React.useState(false)
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-card">
-      <div className="flex items-center gap-1.5 px-3 py-2">
+    <div className="border-b border-border">
+      <div className="flex items-center gap-1.5 py-2">
         <FileTypeIcon url={name} size="sm" />
         <div className="ml-1.5 min-w-0 flex-1">
           <p className="truncate text-sm font-medium" title={name}>
@@ -220,7 +229,7 @@ export function InlineFileRow({
         )}
       </div>
       {open && (
-        <div className="border-t border-border p-2">
+        <div className="pb-3">
           <DocumentViewer cacheKey={cacheKey} load={load} fileName={name} height={height} />
         </div>
       )}
