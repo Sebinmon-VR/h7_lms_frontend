@@ -1,11 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
   AlertTriangle,
-  BadgePercent,
   BarChart3,
   CalendarClock,
   Coins,
   Globe,
+  HandCoins,
   Layers,
   Pencil,
   Percent,
@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react'
 import * as React from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 
@@ -71,7 +72,6 @@ import {
 } from '@/lib/school'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input, Textarea } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -83,7 +83,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
   DialogBody,
@@ -93,12 +92,25 @@ import {
   DialogForm,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
+} from '@/components/layout/inline-panel'
 import { Field, FormError } from '@/components/forms/field'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
-import { EmptyState } from '@/components/feedback/states'
+import { cn } from '@/lib/cn'
+import type { LucideIcon } from 'lucide-react'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
-import { PageHeader } from '@/components/layout/page-header'
+import { Band, WorkspaceHeader } from '@/components/layout/workspace'
+import {
+  DETAIL_TH,
+  DetailHeader,
+  DetailSection,
+  Fact,
+  Facts,
+  ListEmpty,
+  ListItem,
+  ListPane,
+  ListSearch,
+  SplitView,
+} from '@/components/layout/split-view'
 import { FinanceInvoicesTab } from './finance-invoices'
 import { FinanceReportsTab } from './finance-reports'
 import { FinanceBulkTab } from './finance-bulk'
@@ -146,6 +158,49 @@ const settingsSchema = z.object({
 })
 
 type SettingsValues = z.infer<typeof settingsSchema>
+
+// ===================================================================== shared
+
+/** The add button beside a list's search box. */
+function AddButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <Button size="sm" icon={<Plus />} onClick={onClick} className="h-8 shrink-0" aria-label={label} title={label}>
+      Add
+    </Button>
+  )
+}
+
+/** Active ones first, then by name; inactive ones stay at the bottom, greyed. */
+function byActiveThenName<T extends { is_active: boolean; name: string }>(a: T, b: T) {
+  return Number(b.is_active) - Number(a.is_active) || a.name.localeCompare(b.name, undefined, { numeric: true })
+}
+
+function DetailActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
+  return (
+    <>
+      <Button variant="outline" size="sm" icon={<Pencil />} onClick={onEdit}>
+        Edit
+      </Button>
+      <Button variant="ghost" size="sm" icon={<Trash2 />} onClick={onDelete}>
+        Delete
+      </Button>
+    </>
+  )
+}
+
+function NothingPicked({ children }: { children: React.ReactNode }) {
+  return <p className="px-5 py-16 text-center text-sm text-muted-foreground">{children}</p>
+}
+
+function ListSkeleton() {
+  return (
+    <div className="space-y-2 p-4">
+      {[0, 1, 2, 3].map((i) => (
+        <Skeleton key={i} className="h-9 w-full" />
+      ))}
+    </div>
+  )
+}
 
 function num(value: string): number {
   const n = Number(value)
@@ -204,10 +259,10 @@ function SettingsTab() {
   }
 
   return (
-    <QueryBoundary query={settings} loading={<Skeleton className="h-96 w-full rounded-xl" />}>
+    <QueryBoundary query={settings} loading={<ListSkeleton />}>
       {() => (
-        <form onSubmit={form.handleSubmit(onSubmit)} className="max-w-3xl space-y-5">
-          <Card className="space-y-4 p-5">
+        <form onSubmit={form.handleSubmit(onSubmit)}>
+          <section className="max-w-4xl space-y-4 border-b border-border px-4 py-5">
             <h3 className="text-sm font-semibold">Money</h3>
             <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
               <Field id="currency" label="Currency" hint="Applies to both products.">
@@ -238,9 +293,9 @@ function SettingsTab() {
                 </Select>
               </Field>
             </div>
-          </Card>
+          </section>
 
-          <Card className="space-y-4 p-5">
+          <section className="max-w-4xl space-y-4 border-b border-border px-4 py-5">
             <label className="flex items-center justify-between gap-4">
               <span>
                 <span className="text-sm font-semibold">Tax</span>
@@ -286,9 +341,9 @@ function SettingsTab() {
                 </label>
               </div>
             )}
-          </Card>
+          </section>
 
-          <Card className="space-y-4 p-5">
+          <section className="max-w-4xl space-y-4 border-b border-border px-4 py-5">
             <label className="flex items-center justify-between gap-4">
               <span>
                 <span className="text-sm font-semibold">Late fees</span>
@@ -327,9 +382,9 @@ function SettingsTab() {
                 </Field>
               </div>
             )}
-          </Card>
+          </section>
 
-          <Card className="space-y-4 p-5">
+          <section className="max-w-4xl space-y-4 border-b border-border px-4 py-5">
             <div>
               <h3 className="text-sm font-semibold">Invoices and surcharges</h3>
               <p className="mt-0.5 text-xs text-muted-foreground">
@@ -360,9 +415,9 @@ function SettingsTab() {
                 <Input id="inv_due" type="number" {...form.register('invoice_due_days')} />
               </Field>
             </div>
-          </Card>
+          </section>
 
-          <Card className="space-y-4 p-5">
+          <section className="max-w-4xl space-y-4 border-b border-border px-4 py-5">
             <label className="flex items-center justify-between gap-4">
               <span>
                 <span className="text-sm font-semibold">Online payment</span>
@@ -381,7 +436,7 @@ function SettingsTab() {
             {/* Said plainly rather than left to be discovered: the endpoints
                 exist, record the attempt and mint an idempotency key, but no
                 provider is integrated and no checkout URL comes back. */}
-            <div className="flex gap-3 rounded-lg border border-warning/30 bg-warning/8 p-3">
+            <div className="flex gap-3 border-l-2 border-warning bg-warning/5 px-3 py-2">
               <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
               <p className="text-xs text-muted-foreground">
                 <strong className="text-foreground">No provider is connected yet.</strong>{' '}
@@ -396,10 +451,10 @@ function SettingsTab() {
                 <Input id="gateway_provider" {...form.register('gateway_provider')} />
               </Field>
             )}
-          </Card>
+          </section>
 
-          <div className="flex justify-end">
-            <Button type="submit" loading={update.isPending}>
+          <div className="sticky bottom-0 flex justify-end border-t border-border bg-card px-4 py-3">
+            <Button type="submit" size="sm" loading={update.isPending} disabled={!form.formState.isDirty}>
               Save settings
             </Button>
           </div>
@@ -578,7 +633,7 @@ function HeadDialog({
               />
             </Field>
 
-            <div className="space-y-3 rounded-xl border border-border p-4">
+            <div className="space-y-3 rounded-md border border-border p-3">
               <label className="flex items-center justify-between gap-4">
                 <span className="text-sm font-medium">Taxable</span>
                 <Switch
@@ -643,128 +698,134 @@ function HeadDialog({
 
 function HeadsTab({ currency }: { currency: string }) {
   const heads = useFeeHeads({ includeInactive: true })
+  const structures = useFeeStructures({ includeInactive: true })
   const remove = useDeleteFeeHead()
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<FeeHeadOut | null>(null)
   const [deleting, setDeleting] = React.useState<FeeHeadOut | null>(null)
+  const [selectedId, setSelectedId] = React.useState<number | null>(null)
+  const [search, setSearch] = React.useState('')
+  const add = () => {
+    setEditing(null)
+    setDialogOpen(true)
+  }
+
+  const needle = search.trim().toLowerCase()
+  const rows = [...(heads.data ?? [])]
+    .filter((h) => !needle || `${h.name} ${h.code}`.toLowerCase().includes(needle))
+    .sort(byActiveThenName)
+  const selected = rows.find((h) => h.id === selectedId) ?? rows[0] ?? null
+  const usedIn = selected
+    ? (structures.data ?? []).filter((x) => x.items.some((i) => i.fee_head_id === selected.id))
+    : []
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button
-          onClick={() => {
-            setEditing(null)
-            setDialogOpen(true)
-          }}
-        >
-          <Plus />
-          Add a fee head
-        </Button>
-      </div>
-
-      <QueryBoundary
-        query={heads}
-        loading={
-          <div className="grid gap-3 sm:grid-cols-2">
-            {[0, 1, 2, 3].map((i) => (
-              <Skeleton key={i} className="h-28 w-full rounded-xl" />
-            ))}
-          </div>
-        }
-        isEmpty={(rows) => rows.length === 0}
-        empty={
-          <EmptyState
-            icon={<Coins />}
-            title="No fee heads yet"
-            description="Start with the teaching fee, then add the charges billed alongside it — transport, exam entry, lab."
-            action={
-              <Button
-                onClick={() => {
-                  setEditing(null)
-                  setDialogOpen(true)
-                }}
-              >
-                <Plus />
-                Add a fee head
-              </Button>
+    <>
+      <SplitView
+        list={
+          <ListPane
+            toolbar={
+              <div className="flex gap-2">
+                <ListSearch value={search} onChange={setSearch} placeholder="Find a fee head" />
+                <AddButton onClick={add} label="Add a fee head" />
+              </div>
             }
-          />
+            footer={heads.data && `${heads.data.filter((h) => h.is_active).length} active of ${heads.data.length}`}
+          >
+            <QueryBoundary query={heads} loading={<ListSkeleton />}>
+              {() =>
+                rows.length === 0 ? (
+                  <ListEmpty>{needle ? 'No fee head matches' : 'No fee heads yet. Start with the teaching fee'}</ListEmpty>
+                ) : (
+                  <>
+                    {rows.map((h) => (
+                      <ListItem
+                        key={h.id}
+                        active={!dialogOpen && selected?.id === h.id}
+                        onClick={() => {
+                          setSelectedId(h.id)
+                          setDialogOpen(false)
+                        }}
+                        title={h.name}
+                        sub={`${h.code} · ${FEE_FREQUENCY_LABEL[h.frequency]}${h.is_active ? '' : ' · Inactive'}`}
+                        muted={!h.is_active}
+                        right={<span className="font-medium tabular-nums text-foreground">{formatMoney(h.default_amount, currency)}</span>}
+                      />
+                    ))}
+                  </>
+                )
+              }
+            </QueryBoundary>
+          </ListPane>
         }
-      >
-        {(rows) => (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {rows.map((head) => (
-              <Card key={head.id} className="p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-sm font-semibold">{head.name}</h3>
-                      <Badge tone="outline" size="sm">
-                        {head.code}
-                      </Badge>
-                      {!head.is_active && (
-                        <Badge tone="neutral" size="sm">
-                          Inactive
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="mt-1 text-sm">
-                      <span className="font-medium tabular-nums">
-                        {formatMoney(head.default_amount, currency)}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {' '}
-                        · {FEE_FREQUENCY_LABEL[head.frequency]}
-                      </span>
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <Badge tone="neutral" size="sm">
-                        {CHARGE_KIND_LABEL[head.kind]}
-                      </Badge>
-                      {head.is_taxable && (
-                        <Badge tone="info" size="sm">
-                          Taxable
-                        </Badge>
-                      )}
-                      {!head.is_discountable && (
-                        <Badge tone="warning" size="sm">
-                          No concessions
-                        </Badge>
-                      )}
-                      {head.is_admission_charge && (
-                        <Badge tone="accent" size="sm">
-                          Admission charge
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => {
-                        setEditing(head)
-                        setDialogOpen(true)
-                      }}
-                    >
-                      <Pencil />
-                    </Button>
-                    <Button variant="ghost" size="icon-sm" onClick={() => setDeleting(head)}>
-                      <Trash2 />
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        )}
-      </QueryBoundary>
-
-      <HeadDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        editing={editing}
-        currency={currency}
+        detail={
+          dialogOpen ? (
+            <HeadDialog open onOpenChange={setDialogOpen} editing={editing} currency={currency} />
+          ) : selected ? (
+            <>
+              <DetailHeader
+                title={selected.name}
+                badges={!selected.is_active && <Badge tone="neutral" size="sm">Inactive</Badge>}
+                sub={`${selected.code} · ${CHARGE_KIND_LABEL[selected.kind]}`}
+                actions={
+                  <DetailActions
+                    onEdit={() => {
+                      setEditing(selected)
+                      setDialogOpen(true)
+                    }}
+                    onDelete={() => setDeleting(selected)}
+                  />
+                }
+              />
+              <Facts>
+                <Fact label="Default amount">
+                  <span className="text-base font-medium tabular-nums">{formatMoney(selected.default_amount, currency)}</span>
+                </Fact>
+                <Fact label="Billed">{FEE_FREQUENCY_LABEL[selected.frequency]}</Fact>
+                <Fact label="Kind">{CHARGE_KIND_LABEL[selected.kind]}</Fact>
+                <Fact label="Tax">{selected.is_taxable ? `Taxable${selected.tax_percent != null ? ` · ${selected.tax_percent}%` : ''}` : 'Not taxed'}</Fact>
+                <Fact label="Concessions">{selected.is_discountable ? 'Allowed' : 'Never applied'}</Fact>
+                <Fact label="Admission charge">{selected.is_admission_charge ? 'Yes, billed once at admission' : 'No'}</Fact>
+                {selected.description && (
+                  <Fact label="Notes" wide>
+                    {selected.description}
+                  </Fact>
+                )}
+              </Facts>
+              <DetailSection title={`Used in structures · ${usedIn.length}`}>
+                {usedIn.length === 0 ? (
+                  <p className="border-b border-border px-5 py-4 text-sm text-muted-foreground">
+                    No structure charges this yet. Add it to one under Fee structures
+                  </p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className={DETAIL_TH}>
+                        <th className="py-1.5 pl-5 pr-3 font-medium">Structure</th>
+                        <th className="px-3 py-1.5 font-medium">Applies to</th>
+                        <th className="py-1.5 pl-3 pr-5 text-right font-medium">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {usedIn.map((x) => {
+                        const item = x.items.find((i) => i.fee_head_id === selected.id)!
+                        return (
+                          <tr key={x.id} className={cn('border-b border-border', !x.is_active && 'text-muted-foreground')}>
+                            <td className="py-1.5 pl-5 pr-3 font-medium">{x.name}</td>
+                            <td className="px-3 py-1.5 text-muted-foreground">{x.class_ids.length === 0 ? 'Every class' : x.class_names.join(', ')}</td>
+                            <td className="py-1.5 pl-3 pr-5 text-right tabular-nums">{formatMoney(item.amount, x.currency || currency)}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </DetailSection>
+            </>
+          ) : (
+            <NothingPicked>Add your first fee head: the teaching fee, then transport, exam entry, lab</NothingPicked>
+          )
+        }
       />
 
       <ConfirmDialog
@@ -780,7 +841,7 @@ function HeadsTab({ currency }: { currency: string }) {
           setDeleting(null)
         }}
       />
-    </div>
+    </>
   )
 }
 
@@ -890,7 +951,7 @@ function StructureDialog({
             />
           </Field>
 
-          <div className="space-y-3 rounded-xl border border-border p-4">
+          <div className="space-y-3 rounded-md border border-border p-3">
             <div className="flex items-center justify-between gap-3">
               <h4 className="text-sm font-semibold">What is charged</h4>
               <span className="text-sm tabular-nums text-muted-foreground">
@@ -966,7 +1027,7 @@ function StructureDialog({
           {/* The empty-means-everything rule, said out loud. An admin who
               leaves both blank expecting "nothing yet" has priced the whole
               school, and nothing else on the screen would tell them. */}
-          <div className="space-y-4 rounded-xl border border-border p-4">
+          <div className="space-y-4 rounded-md border border-border p-3">
             <div>
               <h4 className="text-sm font-semibold">Who it applies to</h4>
               <p className="mt-0.5 text-xs text-muted-foreground">
@@ -1040,123 +1101,159 @@ function StructuresTab({ currency, academicYearId }: { currency: string; academi
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<FeeStructureOut | null>(null)
   const [deleting, setDeleting] = React.useState<FeeStructureOut | null>(null)
+  const [selectedId, setSelectedId] = React.useState<number | null>(null)
+  const [search, setSearch] = React.useState('')
+  const add = () => {
+    setEditing(null)
+    setDialogOpen(true)
+  }
+
+  const needle = search.trim().toLowerCase()
+  const rows = [...(structures.data ?? [])]
+    .filter((x) => !needle || [x.name, ...x.class_names, ...x.admission_category_names].join(' ').toLowerCase().includes(needle))
+    .sort(byActiveThenName)
+  const selected = rows.find((x) => x.id === selectedId) ?? rows[0] ?? null
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button
-          onClick={() => {
-            setEditing(null)
-            setDialogOpen(true)
-          }}
-        >
-          <Plus />
-          Build a structure
-        </Button>
-      </div>
-
-      <QueryBoundary
-        query={structures}
-        loading={
-          <div className="space-y-3">
-            {[0, 1].map((i) => (
-              <Skeleton key={i} className="h-32 w-full rounded-xl" />
-            ))}
-          </div>
-        }
-        isEmpty={(rows) => rows.length === 0}
-        empty={
-          <EmptyState
-            icon={<Layers />}
-            title="No fee structures yet"
-            description="A structure says what a class or category is charged. Without one, nobody can be billed."
-            action={
-              <Button
-                onClick={() => {
-                  setEditing(null)
-                  setDialogOpen(true)
-                }}
-              >
-                <Plus />
-                Build a structure
-              </Button>
+    <>
+      <SplitView
+        list={
+          <ListPane
+            toolbar={
+              <div className="flex gap-2">
+                <ListSearch value={search} onChange={setSearch} placeholder="Structure, class or type" />
+                <AddButton onClick={add} label="Build a structure" />
+              </div>
             }
-          />
+            footer={structures.data && `${structures.data.filter((x) => x.is_active).length} active of ${structures.data.length}`}
+          >
+            <QueryBoundary query={structures} loading={<ListSkeleton />}>
+              {() =>
+                rows.length === 0 ? (
+                  <ListEmpty>{needle ? 'No structure matches' : 'No fee structures yet. Without one, nobody can be billed'}</ListEmpty>
+                ) : (
+                  <>
+                    {rows.map((x) => {
+                      const everyClass = x.class_ids.length === 0
+                      const everyType = x.admission_category_ids.length === 0
+                      return (
+                        <ListItem
+                          key={x.id}
+                          active={!dialogOpen && selected?.id === x.id}
+                          onClick={() => {
+                            setSelectedId(x.id)
+                            setDialogOpen(false)
+                          }}
+                          title={x.name}
+                          sub={
+                            everyClass && everyType
+                              ? 'Year default · everyone'
+                              : `${everyClass ? 'Every class' : x.class_names.join(', ')} · ${everyType ? 'every type' : x.admission_category_names.join(', ')}`
+                          }
+                          muted={!x.is_active}
+                          right={<span className="font-medium tabular-nums text-foreground">{formatMoney(x.gross_total, x.currency || currency)}</span>}
+                        />
+                      )
+                    })}
+                  </>
+                )
+              }
+            </QueryBoundary>
+          </ListPane>
         }
-      >
-        {(rows) => (
-          <div className="space-y-3">
-            {rows.map((structure) => {
-              const everyClass = structure.class_ids.length === 0
-              const everyCategory = structure.admission_category_ids.length === 0
-              return (
-                <Card key={structure.id} className="p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-base font-semibold">{structure.name}</h3>
-                        {everyClass && everyCategory && (
-                          <Badge tone="primary" size="sm">
-                            Year default
-                          </Badge>
-                        )}
-                        {!structure.is_active && (
-                          <Badge tone="neutral" size="sm">
-                            Inactive
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="mt-1 text-sm">
-                        <span className="font-medium tabular-nums">
-                          {formatMoney(structure.gross_total, structure.currency || currency)}
-                        </span>
-                        <span className="text-muted-foreground">
-                          {' '}
-                          · {countLabel(structure.items.length, 'head')} ·{' '}
-                          {structure.academic_year_name ?? 'Year'}
-                        </span>
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {everyClass ? 'Every class' : structure.class_names.join(', ')} ·{' '}
-                        {everyCategory
-                          ? 'every category'
-                          : structure.admission_category_names.join(', ')}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => {
-                          setEditing(structure)
-                          setDialogOpen(true)
-                        }}
-                      >
-                        <Pencil />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => setDeleting(structure)}
-                      >
-                        <Trash2 />
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              )
-            })}
-          </div>
-        )}
-      </QueryBoundary>
-
-      <StructureDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        editing={editing}
-        heads={heads.data ?? []}
-        currency={currency}
-        academicYearId={academicYearId}
+        detail={
+          dialogOpen ? (
+            <StructureDialog
+              open
+              onOpenChange={setDialogOpen}
+              editing={editing}
+              heads={heads.data ?? []}
+              currency={currency}
+              academicYearId={academicYearId}
+            />
+          ) : selected ? (
+            <>
+              <DetailHeader
+                title={selected.name}
+                badges={
+                  <>
+                    {selected.class_ids.length === 0 && selected.admission_category_ids.length === 0 && (
+                      <Badge tone="primary" size="sm">
+                        Year default
+                      </Badge>
+                    )}
+                    {!selected.is_active && (
+                      <Badge tone="neutral" size="sm">
+                        Inactive
+                      </Badge>
+                    )}
+                  </>
+                }
+                sub={`${selected.academic_year_name ?? 'Session'} · ${countLabel(selected.items.length, 'fee head')}`}
+                actions={
+                  <DetailActions
+                    onEdit={() => {
+                      setEditing(selected)
+                      setDialogOpen(true)
+                    }}
+                    onDelete={() => setDeleting(selected)}
+                  />
+                }
+              />
+              <Facts>
+                <Fact label="Total a year">
+                  <span className="text-base font-medium tabular-nums">{formatMoney(selected.gross_total, selected.currency || currency)}</span>
+                </Fact>
+                <Fact label="Session">{selected.academic_year_name ?? '—'}</Fact>
+                <Fact label="Priority">{selected.priority}</Fact>
+                <Fact label="Classes" wide>
+                  {selected.class_ids.length === 0 ? 'Every class' : selected.class_names.join(', ')}
+                </Fact>
+                <Fact label="Admission types" wide>
+                  {selected.admission_category_ids.length === 0 ? 'Every admission type' : selected.admission_category_names.join(', ')}
+                </Fact>
+                {selected.notes && (
+                  <Fact label="Notes" wide>
+                    {selected.notes}
+                  </Fact>
+                )}
+              </Facts>
+              <DetailSection title={`Fees charged · ${selected.items.length}`}>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className={DETAIL_TH}>
+                      <th className="py-1.5 pl-5 pr-3 font-medium">Fee head</th>
+                      <th className="px-3 py-1.5 font-medium">Billed</th>
+                      <th className="py-1.5 pl-3 pr-5 text-right font-medium">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selected.items.map((item, i) => (
+                      <tr key={`${item.fee_head_id}-${i}`} className="border-b border-border">
+                        <td className="py-1.5 pl-5 pr-3">
+                          <span className="font-medium text-foreground">{item.label || item.name || `Head ${item.fee_head_id}`}</span>
+                          {item.code && <span className="ml-1.5 font-mono text-xs text-muted-foreground">{item.code}</span>}
+                        </td>
+                        <td className="px-3 py-1.5 text-muted-foreground">{item.frequency ? FEE_FREQUENCY_LABEL[item.frequency] : '—'}</td>
+                        <td className="py-1.5 pl-3 pr-5 text-right tabular-nums">{formatMoney(item.amount, selected.currency || currency)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-b border-border bg-muted/30 font-medium">
+                      <td colSpan={2} className="py-1.5 pl-5 pr-3 text-right text-[11px] uppercase tracking-wide text-muted-foreground">
+                        Total
+                      </td>
+                      <td className="py-1.5 pl-3 pr-5 text-right tabular-nums">{formatMoney(selected.gross_total, selected.currency || currency)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </DetailSection>
+            </>
+          ) : (
+            <NothingPicked>Build a structure to say what a class or admission type is charged</NothingPicked>
+          )
+        }
       />
 
       <ConfirmDialog
@@ -1172,7 +1269,7 @@ function StructuresTab({ currency, academicYearId }: { currency: string; academi
           setDeleting(null)
         }}
       />
-    </div>
+    </>
   )
 }
 
@@ -1278,7 +1375,7 @@ function PlanDialog({
             />
           </Field>
 
-          <div className="space-y-3 rounded-xl border border-border p-4">
+          <div className="space-y-3 rounded-md border border-border p-3">
             <div className="flex items-center justify-between gap-3">
               <h4 className="text-sm font-semibold">Instalments</h4>
               <span
@@ -1398,7 +1495,7 @@ function PlanDialog({
             </Button>
           </div>
 
-          <label className="flex items-center justify-between gap-4 rounded-xl border border-border p-4">
+          <label className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
             <span>
               <span className="text-sm font-medium">Use this by default</span>
               <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -1423,106 +1520,157 @@ function PlanDialog({
 
 function PlansTab({ academicYearId }: { academicYearId: number | null }) {
   const plans = useInstalmentPlans({ includeInactive: true })
+  const classes = useClasses()
+  const categories = useAdmissionCategories()
   const remove = useDeleteInstalmentPlan()
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<InstalmentPlanOut | null>(null)
   const [deleting, setDeleting] = React.useState<InstalmentPlanOut | null>(null)
+  const [selectedId, setSelectedId] = React.useState<number | null>(null)
+  const [search, setSearch] = React.useState('')
+  const add = () => {
+    setEditing(null)
+    setDialogOpen(true)
+  }
+
+  const needle = search.trim().toLowerCase()
+  const rows = [...(plans.data ?? [])]
+    .filter((x) => !needle || x.name.toLowerCase().includes(needle))
+    .sort((a, b) => Number(b.is_default) - Number(a.is_default) || byActiveThenName(a, b))
+  const selected = rows.find((x) => x.id === selectedId) ?? rows[0] ?? null
+  const className = (id: number) => (classes.data ?? []).find((c) => c.id === id)?.name ?? `Class ${id}`
+  const typeName = (id: number) => (categories.data ?? []).find((c) => c.id === id)?.name ?? `Type ${id}`
+  const shareTotal = selected ? selected.instalments.reduce((n, l) => n + (l.percent ?? 0), 0) : 0
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button
-          onClick={() => {
-            setEditing(null)
-            setDialogOpen(true)
-          }}
-        >
-          <Plus />
-          Create a plan
-        </Button>
-      </div>
-
-      <QueryBoundary
-        query={plans}
-        loading={<Skeleton className="h-32 w-full rounded-xl" />}
-        isEmpty={(rows) => rows.length === 0}
-        empty={
-          <EmptyState
-            icon={<CalendarClock />}
-            title="No instalment plans yet"
-            description="Without one the whole fee falls due at once. Most schools want at least a two- or three-term plan."
-            action={
-              <Button
-                onClick={() => {
-                  setEditing(null)
-                  setDialogOpen(true)
-                }}
-              >
-                <Plus />
-                Create a plan
-              </Button>
+    <>
+      <SplitView
+        list={
+          <ListPane
+            toolbar={
+              <div className="flex gap-2">
+                <ListSearch value={search} onChange={setSearch} placeholder="Find a plan" />
+                <AddButton onClick={add} label="Create a plan" />
+              </div>
             }
-          />
+            footer={plans.data && `${plans.data.filter((x) => x.is_active).length} active of ${plans.data.length}`}
+          >
+            <QueryBoundary query={plans} loading={<ListSkeleton />}>
+              {() =>
+                rows.length === 0 ? (
+                  <ListEmpty>{needle ? 'No plan matches' : 'No plans yet. Without one the whole fee falls due at once'}</ListEmpty>
+                ) : (
+                  <>
+                    {rows.map((x) => (
+                      <ListItem
+                        key={x.id}
+                        active={!dialogOpen && selected?.id === x.id}
+                        onClick={() => {
+                          setSelectedId(x.id)
+                          setDialogOpen(false)
+                        }}
+                        title={x.name}
+                        sub={x.instalments.map((l) => l.label).join(' · ')}
+                        muted={!x.is_active}
+                        right={
+                          x.is_default ? (
+                            <span className="text-primary">Default</span>
+                          ) : (
+                            <span className="tabular-nums text-muted-foreground">{countLabel(x.instalments.length, 'part')}</span>
+                          )
+                        }
+                      />
+                    ))}
+                  </>
+                )
+              }
+            </QueryBoundary>
+          </ListPane>
         }
-      >
-        {(rows) => (
-          <div className="space-y-3">
-            {rows.map((plan) => (
-              <Card key={plan.id} className="p-5">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-base font-semibold">{plan.name}</h3>
-                      {plan.is_default && (
-                        <Badge tone="primary" size="sm">
-                          Default
-                        </Badge>
-                      )}
-                      {!plan.is_active && (
-                        <Badge tone="neutral" size="sm">
-                          Inactive
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {plan.instalments.map((line, i) => (
-                        <Badge key={i} tone={line.term ? 'accent' : 'outline'} size="sm">
-                          {line.label}
-                          {line.term && line.label !== TERM_LABEL[line.term]
-                            ? ` (${TERM_LABEL[line.term]})`
-                            : ''}
-                          {line.percent != null ? ` · ${line.percent}%` : ''}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => {
-                        setEditing(plan)
-                        setDialogOpen(true)
-                      }}
-                    >
-                      <Pencil />
-                    </Button>
-                    <Button variant="ghost" size="icon-sm" onClick={() => setDeleting(plan)}>
-                      <Trash2 />
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        )}
-      </QueryBoundary>
-
-      <PlanDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        editing={editing}
-        academicYearId={academicYearId}
+        detail={
+          dialogOpen ? (
+            <PlanDialog open onOpenChange={setDialogOpen} editing={editing} academicYearId={academicYearId} />
+          ) : selected ? (
+            <>
+              <DetailHeader
+                title={selected.name}
+                badges={
+                  <>
+                    {selected.is_default && (
+                      <Badge tone="primary" size="sm">
+                        Default
+                      </Badge>
+                    )}
+                    {!selected.is_active && (
+                      <Badge tone="neutral" size="sm">
+                        Inactive
+                      </Badge>
+                    )}
+                  </>
+                }
+                sub={countLabel(selected.instalments.length, 'instalment')}
+                actions={
+                  <DetailActions
+                    onEdit={() => {
+                      setEditing(selected)
+                      setDialogOpen(true)
+                    }}
+                    onDelete={() => setDeleting(selected)}
+                  />
+                }
+              />
+              <Facts>
+                <Fact label="Grace after due date">{selected.grace_days != null ? countLabel(selected.grace_days, 'day') : 'School setting'}</Fact>
+                <Fact label="Used for">{selected.is_default ? 'Anyone without a plan of their own' : 'Only where chosen'}</Fact>
+                <Fact label="Shares add up to">
+                  <span className={cn(shareTotal > 0 && Math.abs(shareTotal - 100) > 0.01 && 'text-danger')}>
+                    {shareTotal > 0 ? `${shareTotal}%` : 'Fixed amounts'}
+                  </span>
+                </Fact>
+                <Fact label="Classes" wide>
+                  {selected.class_ids.length === 0 ? 'Every class' : selected.class_ids.map(className).join(', ')}
+                </Fact>
+                <Fact label="Admission types" wide>
+                  {selected.admission_category_ids.length === 0 ? 'Every admission type' : selected.admission_category_ids.map(typeName).join(', ')}
+                </Fact>
+              </Facts>
+              <DetailSection title={`Instalments · ${selected.instalments.length}`}>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className={DETAIL_TH}>
+                      <th className="w-10 py-1.5 pl-5 pr-2 font-medium">#</th>
+                      <th className="px-3 py-1.5 font-medium">Instalment</th>
+                      <th className="px-3 py-1.5 font-medium">Term</th>
+                      <th className="px-3 py-1.5 font-medium">Falls due</th>
+                      <th className="py-1.5 pl-3 pr-5 text-right font-medium">Share</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selected.instalments.map((line, i) => (
+                      <tr key={i} className="border-b border-border">
+                        <td className="py-1.5 pl-5 pr-2 tabular-nums text-muted-foreground">{i + 1}</td>
+                        <td className="px-3 py-1.5 font-medium text-foreground">{line.label}</td>
+                        <td className="px-3 py-1.5 text-muted-foreground">{line.term ? TERM_LABEL[line.term] : '—'}</td>
+                        <td className="px-3 py-1.5 text-muted-foreground">
+                          {line.due_date
+                            ? formatShortDate(line.due_date)
+                            : line.due_after_days != null
+                              ? `${countLabel(line.due_after_days, 'day')} after the bill`
+                              : 'On the bill date'}
+                        </td>
+                        <td className="py-1.5 pl-3 pr-5 text-right tabular-nums">
+                          {line.percent != null ? `${line.percent}%` : line.amount != null ? line.amount : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </DetailSection>
+            </>
+          ) : (
+            <NothingPicked>Create a plan to split the year&rsquo;s fee into instalments</NothingPicked>
+          )
+        }
       />
 
       <ConfirmDialog
@@ -1538,7 +1686,7 @@ function PlansTab({ academicYearId }: { academicYearId: number | null }) {
           setDeleting(null)
         }}
       />
-    </div>
+    </>
   )
 }
 
@@ -1719,7 +1867,7 @@ function DiscountDialog({
           )}
 
           {basisNeedsCategories(basis) && (
-            <div className="space-y-2 rounded-xl border border-border p-4">
+            <div className="space-y-2 rounded-md border border-border p-3">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Categories
               </p>
@@ -1743,7 +1891,7 @@ function DiscountDialog({
 
           {/* Stacking is off by default and that surprises people, so it is a
               switch with an explanation rather than a bare toggle. */}
-          <label className="flex items-start justify-between gap-4 rounded-xl border border-border p-4">
+          <label className="flex items-start justify-between gap-4 rounded-md border border-border p-3">
             <span className="min-w-0">
               <span className="text-sm font-medium">Stacks with other concessions</span>
               <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -1769,115 +1917,127 @@ function DiscountDialog({
 
 function DiscountsTab({ academicYearId, currency }: { academicYearId: number | null; currency: string }) {
   const rules = useDiscountRules({ includeInactive: true })
+  const classes = useClasses()
+  const categories = useAdmissionCategories()
+  const heads = useFeeHeads({ includeInactive: true })
   const remove = useDeleteDiscountRule()
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<DiscountRuleOut | null>(null)
   const [deleting, setDeleting] = React.useState<DiscountRuleOut | null>(null)
+  const [selectedId, setSelectedId] = React.useState<number | null>(null)
+  const [search, setSearch] = React.useState('')
+  const add = () => {
+    setEditing(null)
+    setDialogOpen(true)
+  }
+
+  const needle = search.trim().toLowerCase()
+  const rows = [...(rules.data ?? [])]
+    .filter((x) => !needle || `${x.name} ${DISCOUNT_BASIS_LABEL[x.basis]}`.toLowerCase().includes(needle))
+    .sort(byActiveThenName)
+  const selected = rows.find((x) => x.id === selectedId) ?? rows[0] ?? null
+  const off = (x: DiscountRuleOut) => (x.value_type === 'PERCENT' ? `${x.value}%` : formatMoney(x.value, currency))
+  const names = (ids: number[], list: { id: number; name: string }[] | undefined, every: string) =>
+    ids.length === 0 ? every : ids.map((id) => list?.find((x) => x.id === id)?.name ?? `#${id}`).join(', ')
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          A sibling concession counts children in a recorded household; a multi-registration
-          one counts subjects a single student takes at once. They are different rules — record
-          siblings on each student's <strong>Parents &amp; Siblings</strong> tab for the first to have anything to count.
-        </p>
-        <Button
-          onClick={() => {
-            setEditing(null)
-            setDialogOpen(true)
-          }}
-        >
-          <Plus />
-          Add a concession
-        </Button>
-      </div>
-
-      <QueryBoundary
-        query={rules}
-        loading={<Skeleton className="h-32 w-full rounded-xl" />}
-        isEmpty={(rows) => rows.length === 0}
-        empty={
-          <EmptyState
-            icon={<BadgePercent />}
-            title="No concessions yet"
-            description="Add one and it is applied automatically to every student it matches, with the reason recorded on their breakdown."
-            action={
-              <Button
-                onClick={() => {
-                  setEditing(null)
-                  setDialogOpen(true)
-                }}
-              >
-                <Plus />
-                Add a concession
-              </Button>
+    <>
+      <SplitView
+        list={
+          <ListPane
+            toolbar={
+              <div className="flex gap-2">
+                <ListSearch value={search} onChange={setSearch} placeholder="Find a concession" />
+                <AddButton onClick={add} label="Add a concession" />
+              </div>
             }
-          />
+            footer={rules.data && `${rules.data.filter((x) => x.is_active).length} active of ${rules.data.length} · applied automatically`}
+          >
+            <QueryBoundary query={rules} loading={<ListSkeleton />}>
+              {() =>
+                rows.length === 0 ? (
+                  <ListEmpty>{needle ? 'No concession matches' : 'No concessions yet'}</ListEmpty>
+                ) : (
+                  <>
+                    {rows.map((x) => (
+                      <ListItem
+                        key={x.id}
+                        active={!dialogOpen && selected?.id === x.id}
+                        onClick={() => {
+                          setSelectedId(x.id)
+                          setDialogOpen(false)
+                        }}
+                        title={x.name}
+                        sub={`${DISCOUNT_BASIS_LABEL[x.basis]}${x.is_active ? '' : ' · Inactive'}`}
+                        muted={!x.is_active}
+                        right={<span className="font-medium tabular-nums text-foreground">{off(x)} off</span>}
+                      />
+                    ))}
+                  </>
+                )
+              }
+            </QueryBoundary>
+          </ListPane>
         }
-      >
-        {(rows) => (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {rows.map((rule) => (
-              <Card key={rule.id} className="p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-sm font-semibold">{rule.name}</h3>
-                      {!rule.is_active && (
-                        <Badge tone="neutral" size="sm">
-                          Inactive
-                        </Badge>
-                      )}
+        detail={
+          dialogOpen ? (
+            <DiscountDialog open onOpenChange={setDialogOpen} editing={editing} academicYearId={academicYearId} />
+          ) : selected ? (
+            <>
+              <DetailHeader
+                title={selected.name}
+                badges={!selected.is_active && <Badge tone="neutral" size="sm">Inactive</Badge>}
+                sub={DISCOUNT_BASIS_LABEL[selected.basis]}
+                actions={
+                  <DetailActions
+                    onEdit={() => {
+                      setEditing(selected)
+                      setDialogOpen(true)
+                    }}
+                    onDelete={() => setDeleting(selected)}
+                  />
+                }
+              />
+              <p className="border-b border-border px-5 py-2.5 text-xs text-muted-foreground">{DISCOUNT_BASIS_HINT[selected.basis]}</p>
+              <Facts>
+                <Fact label="Off">
+                  <span className="text-base font-medium tabular-nums">{off(selected)}</span>
+                  {selected.max_amount != null && <span className="text-xs text-muted-foreground"> · at most {formatMoney(selected.max_amount, currency)}</span>}
+                </Fact>
+                <Fact label="With other concessions">{selected.is_stackable ? 'Stacks on top' : 'Only the best one applies'}</Fact>
+                {basisUsesNth(selected.basis) && <Fact label="Starts from">The {ordinal(selected.applies_from_nth)} one</Fact>}
+                {selected.min_count != null && <Fact label="Needs at least">{selected.min_count}</Fact>}
+                <Fact label="Valid">
+                  {selected.valid_from || selected.valid_until
+                    ? `${selected.valid_from ? formatShortDate(selected.valid_from) : 'Any time'} – ${selected.valid_until ? formatShortDate(selected.valid_until) : 'no end'}`
+                    : 'Always'}
+                </Fact>
+                <Fact label="Priority">{selected.priority}</Fact>
+              </Facts>
+              <DetailSection title="Who and what it covers">
+                <dl className="divide-y divide-border border-b border-border text-sm">
+                  {[
+                    ['Fees', names(selected.fee_head_ids, heads.data, 'Every fee that allows concessions')],
+                    ['Classes', names(selected.class_ids, classes.data, 'Every class')],
+                    ['Admission types', names(selected.admission_category_ids, categories.data, 'Every admission type')],
+                    ...(selected.student_ids.length > 0 ? [['Students', countLabel(selected.student_ids.length, 'named student')]] : []),
+                  ].map(([label, value]) => (
+                    <div key={label} className="grid grid-cols-[9rem_minmax(0,1fr)] gap-3 px-5 py-2">
+                      <dt className="text-muted-foreground">{label}</dt>
+                      <dd className="text-foreground">{value}</dd>
                     </div>
-                    <p className="mt-1 text-sm">
-                      <span className="font-medium tabular-nums">
-                        {rule.value_type === 'PERCENT'
-                          ? `${rule.value}% off`
-                          : `${formatMoney(rule.value, currency)} off`}
-                      </span>
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <Badge tone="info" size="sm">
-                        {DISCOUNT_BASIS_LABEL[rule.basis]}
-                      </Badge>
-                      {basisUsesNth(rule.basis) && (
-                        <Badge tone="outline" size="sm">
-                          From #{rule.applies_from_nth}
-                        </Badge>
-                      )}
-                      <Badge tone={rule.is_stackable ? 'success' : 'neutral'} size="sm">
-                        {rule.is_stackable ? 'Stacks' : 'Best-only'}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => {
-                        setEditing(rule)
-                        setDialogOpen(true)
-                      }}
-                    >
-                      <Pencil />
-                    </Button>
-                    <Button variant="ghost" size="icon-sm" onClick={() => setDeleting(rule)}>
-                      <Trash2 />
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        )}
-      </QueryBoundary>
-
-      <DiscountDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        editing={editing}
-        academicYearId={academicYearId}
+                  ))}
+                </dl>
+              </DetailSection>
+              {selected.notes && <p className="px-5 py-3 text-sm text-muted-foreground">{selected.notes}</p>}
+            </>
+          ) : (
+            <NothingPicked>
+              Add a concession and it is applied automatically to every student it matches. Record siblings on each student&rsquo;s Parents &amp;
+              Siblings tab for sibling concessions to have anything to count
+            </NothingPicked>
+          )
+        }
       />
 
       <ConfirmDialog
@@ -1893,113 +2053,183 @@ function DiscountsTab({ academicYearId, currency }: { academicYearId: number | n
           setDeleting(null)
         }}
       />
-    </div>
+    </>
   )
 }
 
+function ordinal(n: number) {
+  const rest = n % 100
+  const suffix = rest >= 11 && rest <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'
+  return `${n}${suffix}`
+}
+
+function formatShortDate(value: string) {
+  const d = new Date(`${value}T00:00:00`)
+  return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
 // ======================================================================= page
+
+type Section = 'invoices' | 'bulk' | 'reports' | 'heads' | 'structures' | 'plans' | 'discounts' | 'currencies' | 'settings'
+
+interface MenuItem {
+  key: Section
+  label: string
+  icon: LucideIcon
+  hint: string
+}
+
+const MENU: { group: string; items: MenuItem[] }[] = [
+  {
+    group: 'Billing',
+    items: [
+      { key: 'invoices', label: 'Bills', icon: Receipt, hint: 'Every student’s bill this session: billed, paid, left to pay' },
+      { key: 'bulk', label: 'Bulk billing', icon: ListChecks, hint: 'Issue or extend bills for a whole class at once' },
+      { key: 'reports', label: 'Reports', icon: BarChart3, hint: 'Students, dues by age, collections and every transaction' },
+    ],
+  },
+  {
+    group: 'Fee setup',
+    items: [
+      { key: 'heads', label: 'Fee heads', icon: Coins, hint: 'What can be charged' },
+      { key: 'structures', label: 'Fee structures', icon: Layers, hint: 'What each class or admission type is charged' },
+      { key: 'plans', label: 'Instalments', icon: CalendarClock, hint: 'When the fee falls due' },
+      { key: 'discounts', label: 'Concessions', icon: Percent, hint: 'Automatic discounts and who gets them' },
+      { key: 'currencies', label: 'Currencies', icon: Globe, hint: 'Rates for taking fees in other currencies' },
+      { key: 'settings', label: 'Settings', icon: Settings2, hint: 'Currency, tax, late fees, bill numbers and online payment' },
+    ],
+  },
+]
+const SECTIONS = MENU.flatMap((g) => g.items)
+/** Sections laid out as list + detail: they fill the pane and scroll inside it. */
+const SPLIT: Section[] = ['invoices', 'heads', 'structures', 'plans', 'discounts']
 
 export default function AdminFinancePage() {
   const settings = useFinanceSettings()
   const currentYear = useCurrentYear()
   const years = useAcademicYears()
+  const heads = useFeeHeads({ includeInactive: true })
+  const structures = useFeeStructures({ includeInactive: true })
+  const plans = useInstalmentPlans({ includeInactive: true })
+  const rules = useDiscountRules({ includeInactive: true })
+  const [params, setParams] = useSearchParams()
 
   const currency = settings.data?.currency ?? 'INR'
   const academicYearId = currentYear.data?.id ?? null
+  const asked = params.get('tab') as Section | null
+  const section: Section = asked && SECTIONS.some((x) => x.key === asked) ? asked : 'invoices'
+  const current = SECTIONS.find((x) => x.key === section)!
+  const go = (key: Section) => {
+    const next = new URLSearchParams(params)
+    if (key === 'invoices') next.delete('tab')
+    else next.set('tab', key)
+    setParams(next, { replace: true })
+  }
+
+  const counts: Partial<Record<Section, number | undefined>> = {
+    heads: heads.data?.filter((h) => h.is_active).length,
+    structures: structures.data?.filter((x) => x.is_active).length,
+    plans: plans.data?.filter((x) => x.is_active).length,
+    discounts: rules.data?.filter((x) => x.is_active).length,
+  }
 
   return (
-    <div>
-      <PageHeader
-        title="Fees & invoices"
-        description="Fee heads, what each class is charged, when it falls due, and what every student actually owes."
+    <div className="space-y-6">
+      <WorkspaceHeader
+        title="Fee Management"
+        description={`Fee setup and every bill it produces${currentYear.data?.name ? ` · ${currentYear.data.name}` : ''}`}
+        icon={Coins}
+        actions={
+          <Button size="sm" variant="outline" asChild>
+            <Link to="/admin/fee-collection">
+              <HandCoins />
+              Fee counter
+            </Link>
+          </Button>
+        }
       />
 
-      {/* Nothing downstream can be created without a year to hang it off, so
-          this is said once at the top rather than as four identical errors. */}
-      {!currentYear.isPending && !academicYearId && (
-        <div className="mb-5 flex gap-3 rounded-xl border border-warning/30 bg-warning/8 p-4">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
-          <p className="text-sm text-muted-foreground">
-            <strong className="text-foreground">No current session year.</strong> Structures,
-            plans and invoices all hang off one. Set a year as current under{' '}
-            <strong>Admissions</strong> first
-            {years.data?.length ? '' : ' — there are none recorded yet'}.
-          </p>
-        </div>
-      )}
+      <div className="!mt-0">
+        {/* Nothing downstream can be created without a year to hang it off, so
+            this is said once at the top rather than as four identical errors. */}
+        {!currentYear.isPending && !academicYearId && (
+          <Band className="border-b border-warning/40 bg-warning/5">
+            <p className="flex items-center gap-2 py-2 text-sm text-foreground">
+              <AlertTriangle className="size-4 shrink-0 text-warning" />
+              <span>
+                <strong className="font-medium">No current session year.</strong> Structures, plans and bills all hang off one. Set a year as
+                current under Admissions first{years.data?.length ? '' : ' — there are none recorded yet'}
+              </span>
+            </p>
+          </Band>
+        )}
 
-      <Tabs defaultValue="invoices">
-        <TabsList>
-          <TabsTrigger value="invoices">
-            <Receipt className="size-4" />
-            Invoices
-          </TabsTrigger>
-          <TabsTrigger value="bulk">
-            <ListChecks className="size-4" />
-            Bulk billing
-          </TabsTrigger>
-          <TabsTrigger value="reports">
-            <BarChart3 className="size-4" />
-            Reports
-          </TabsTrigger>
-          <TabsTrigger value="heads">
-            <Coins className="size-4" />
-            Fee heads
-          </TabsTrigger>
-          <TabsTrigger value="structures">
-            <Layers className="size-4" />
-            Structures
-          </TabsTrigger>
-          <TabsTrigger value="plans">
-            <CalendarClock className="size-4" />
-            Instalments
-          </TabsTrigger>
-          <TabsTrigger value="discounts">
-            <Percent className="size-4" />
-            Concessions
-          </TabsTrigger>
-          <TabsTrigger value="currencies">
-            <Globe className="size-4" />
-            Currencies
-          </TabsTrigger>
-          <TabsTrigger value="settings">
-            <Settings2 className="size-4" />
-            Settings
-          </TabsTrigger>
-        </TabsList>
+        <Band className="border-b border-border">
+          <div className="grid lg:h-[calc(100vh-12rem)] lg:min-h-[30rem] lg:grid-cols-[14rem_minmax(0,1fr)] lg:divide-x lg:divide-border">
+            <nav aria-label="Fee Management" className="-mx-4 border-b border-border sm:-mx-6 lg:mx-0 lg:-ml-8 lg:overflow-y-auto lg:border-b-0">
+              {MENU.map(({ group, items }) => (
+                <div key={group}>
+                  <p className="border-b border-border bg-muted/40 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground sm:px-6 lg:pl-8 lg:pr-4">
+                    {group}
+                  </p>
+                  {items.map((item) => {
+                    const active = item.key === section
+                    const Icon = item.icon
+                    const n = counts[item.key]
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => go(item.key)}
+                        aria-current={active ? 'page' : undefined}
+                        className={cn(
+                          'relative flex w-full items-center gap-2.5 border-b border-border py-2 pl-4 pr-4 text-left text-sm transition-colors sm:pl-6 lg:pl-8',
+                          active ? 'bg-primary/5 font-medium text-primary' : 'text-foreground hover:bg-muted/40',
+                        )}
+                      >
+                        {active && <span className="absolute inset-y-0 left-0 w-0.5 bg-primary" aria-hidden />}
+                        <Icon className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} strokeWidth={1.75} />
+                        <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                        {n != null && <span className="text-xs font-normal tabular-nums text-muted-foreground">{n}</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              ))}
+            </nav>
 
-        <TabsContent value="invoices">
-          <FinanceInvoicesTab academicYearId={academicYearId} />
-        </TabsContent>
-        <TabsContent value="bulk">
-          <FinanceBulkTab academicYearId={academicYearId} />
-        </TabsContent>
-        <TabsContent value="reports">
-          <FinanceReportsTab
-            academicYearId={academicYearId}
-            academicYearStart={currentYear.data?.start_date ?? null}
-          />
-        </TabsContent>
-        <TabsContent value="heads">
-          <HeadsTab currency={currency} />
-        </TabsContent>
-        <TabsContent value="structures">
-          <StructuresTab currency={currency} academicYearId={academicYearId} />
-        </TabsContent>
-        <TabsContent value="plans">
-          <PlansTab academicYearId={academicYearId} />
-        </TabsContent>
-        <TabsContent value="discounts">
-          <DiscountsTab academicYearId={academicYearId} currency={currency} />
-        </TabsContent>
-        <TabsContent value="currencies">
-          <FinanceCurrenciesTab />
-        </TabsContent>
-        <TabsContent value="settings">
-          <SettingsTab />
-        </TabsContent>
-      </Tabs>
+            <section className="-mx-4 flex min-w-0 flex-col sm:-mx-6 lg:mx-0 lg:-mr-8 lg:min-h-0" aria-label={current.label}>
+              {/* Bulk billing carries its own heading strip. */}
+              {section !== 'bulk' && (
+                <div className="border-b border-border px-4 py-3">
+                  <h2 className="text-base font-medium text-foreground">{current.label}</h2>
+                  <p className="text-xs text-muted-foreground">{current.hint}</p>
+                </div>
+              )}
+
+              <div className={cn('min-w-0 lg:min-h-0 lg:flex-1', SPLIT.includes(section) ? 'lg:overflow-hidden' : 'lg:overflow-y-auto')}>
+              {section === 'invoices' && <FinanceInvoicesTab academicYearId={academicYearId} />}
+              {section === 'bulk' && <FinanceBulkTab academicYearId={academicYearId} />}
+              {section === 'reports' && (
+                <div className="p-4">
+                  <FinanceReportsTab academicYearId={academicYearId} academicYearStart={currentYear.data?.start_date ?? null} />
+                </div>
+              )}
+              {section === 'heads' && <HeadsTab currency={currency} />}
+              {section === 'structures' && <StructuresTab currency={currency} academicYearId={academicYearId} />}
+              {section === 'plans' && <PlansTab academicYearId={academicYearId} />}
+              {section === 'discounts' && <DiscountsTab academicYearId={academicYearId} currency={currency} />}
+              {section === 'currencies' && (
+                <div className="p-4">
+                  <FinanceCurrenciesTab />
+                </div>
+              )}
+              {section === 'settings' && <SettingsTab />}
+              </div>
+            </section>
+          </div>
+        </Band>
+      </div>
     </div>
   )
 }
-

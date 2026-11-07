@@ -29,7 +29,6 @@ import { formatMoney } from '@/lib/tuition'
 import { PAYMENT_METHOD_LABEL } from '@/lib/school'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
 import { Combobox } from '@/components/ui/combobox'
 import { DatePicker } from '@/components/ui/date-picker'
 import {
@@ -117,7 +116,7 @@ function Stat({
   hint?: string
 }) {
   return (
-    <div className="rounded-lg border border-border bg-surface px-3 py-2.5">
+    <div className="min-w-0 border-l-2 border-border py-0.5 pl-3">
       <p className={`text-lg font-semibold tabular-nums ${tone ?? ''}`}>{value}</p>
       <p className="text-xs text-muted-foreground">{label}</p>
       {hint && <p className="text-2xs text-muted-foreground">{hint}</p>}
@@ -1148,7 +1147,7 @@ export function FinanceReportsTab({
         <QueryBoundary query={roll} loading={<Skeleton className="h-96 w-full rounded-xl" />}>
           {(data) => (
             <>
-              <Card className="p-4">
+              <div className="border-y border-border py-3">
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                   <Stat label="Students" value={data.summary.students} hint={data.academic_year_name ?? undefined} />
                   <Stat label="Paid in full" value={data.summary.paid} tone="text-success" />
@@ -1167,7 +1166,7 @@ export function FinanceReportsTab({
                     hint="What the rules would bill students with no invoice yet"
                   />
                 </div>
-              </Card>
+              </div>
               {data.rows.length === 0 ? (
                 <EmptyState
                   icon={<Users />}
@@ -1186,7 +1185,7 @@ export function FinanceReportsTab({
         <QueryBoundary query={dues} loading={<Skeleton className="h-96 w-full rounded-xl" />}>
           {(data) => (
             <>
-              <Card className="p-4">
+              <div className="border-y border-border py-3">
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                   <Stat label="Total due" value={formatMoney(data.summary.total_due, data.currency)} tone="text-warning" hint={`${data.summary.students} student${data.summary.students === 1 ? '' : 's'}`} />
                   <Stat label="Not yet due" value={formatMoney(data.summary.ageing.not_due, data.currency)} />
@@ -1200,7 +1199,7 @@ export function FinanceReportsTab({
                   due date; students not billed yet are counted under “not yet due” at what the
                   rules would charge them.
                 </p>
-              </Card>
+              </div>
               {data.rows.length === 0 ? (
                 <EmptyState icon={<BarChart3 />} title="Nothing owed" description="Every student in this year is settled." />
               ) : (
@@ -1215,7 +1214,7 @@ export function FinanceReportsTab({
         <QueryBoundary query={collections} loading={<Skeleton className="h-96 w-full rounded-xl" />}>
           {(data) => (
             <>
-              <Card className="p-4">
+              <div className="border-y border-border py-3">
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   {data.summary.head ? (
                     <Stat
@@ -1273,7 +1272,7 @@ export function FinanceReportsTab({
                     ))}
                   </div>
                 )}
-              </Card>
+              </div>
               {data.rows.length === 0 ? (
                 <EmptyState
                   icon={<Receipt />}

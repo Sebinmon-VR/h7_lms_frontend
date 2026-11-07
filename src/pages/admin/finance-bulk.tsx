@@ -225,7 +225,7 @@ export function FinanceBulkTab({ academicYearId }: { academicYearId: number | nu
   const running = !!runId && !runData && run.data?.status !== 'FAILED' && !run.isError
 
   return (
-    <div className="overflow-hidden rounded-md border border-border bg-card">
+    <div>
       {/* ------------------------------------------------- what */}
       <SheetStrip title="1 · What to bill" />
       <div className="space-y-3 px-4 py-4">

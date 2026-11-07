@@ -28,7 +28,6 @@ import { cn } from '@/lib/cn'
 import { formatMoney } from '@/lib/tuition'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
@@ -121,11 +120,11 @@ function CurrencyRow({
   return (
     <div
       className={cn(
-        'rounded-xl border transition-colors',
-        config.is_base ? 'border-primary/40 bg-primary/[0.03]' : 'border-border',
+        'border-b border-border transition-colors',
+        config.is_base && 'border-l-2 border-l-primary bg-primary/[0.03]',
       )}
     >
-      <div className="flex flex-wrap items-center gap-3 p-4">
+      <div className="flex flex-wrap items-center gap-3 px-1 py-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold">
             {config.symbol || config.code}
@@ -396,7 +395,7 @@ export function FinanceCurrenciesTab({ program = 'LMS' }: { program?: Program })
       {/* The live-rate cache, and the honest state of it. */}
       <QueryBoundary query={fx} loading={<Skeleton className="h-20 w-full rounded-xl" />}>
         {(status) => (
-          <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-y border-border py-3">
             <div className="flex items-center gap-3">
               <span
                 className={cn(
@@ -428,7 +427,7 @@ export function FinanceCurrenciesTab({ program = 'LMS' }: { program?: Program })
                 Refresh now
               </Button>
             )}
-          </Card>
+          </div>
         )}
       </QueryBoundary>
 
@@ -448,7 +447,7 @@ export function FinanceCurrenciesTab({ program = 'LMS' }: { program?: Program })
 
           return (
             <>
-              <Card className="space-y-3 p-5">
+              <div className="space-y-3 border-b border-border pb-4">
                 <div className="flex items-center gap-2">
                   <Coins className="size-4 text-muted-foreground" />
                   <h3 className="text-sm font-semibold">Base currency</h3>
@@ -473,9 +472,9 @@ export function FinanceCurrenciesTab({ program = 'LMS' }: { program?: Program })
                     </Select>
                   </Field>
                 </div>
-              </Card>
+              </div>
 
-              <div className="space-y-3">
+              <div className="border-t border-border">
                 {codes.map((code) => (
                   <CurrencyRow
                     key={code}
@@ -489,7 +488,7 @@ export function FinanceCurrenciesTab({ program = 'LMS' }: { program?: Program })
                 ))}
               </div>
 
-              <Card className="flex gap-3 p-4">
+              <div className="flex gap-3 border-l-2 border-info bg-info/5 px-3 py-2.5">
                 <Info className="mt-0.5 size-4 shrink-0 text-info" />
                 <div className="space-y-1.5 text-xs leading-relaxed text-muted-foreground">
                   <p>
@@ -518,7 +517,7 @@ export function FinanceCurrenciesTab({ program = 'LMS' }: { program?: Program })
                     it was sent.
                   </p>
                 </div>
-              </Card>
+              </div>
             </>
           )
         }}

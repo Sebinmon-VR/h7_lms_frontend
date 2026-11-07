@@ -1,11 +1,13 @@
-import { CalendarRange, Plus, Trash2, TriangleAlert, Upload, X } from 'lucide-react'
+import { CalendarRange, Plus, Trash2, TriangleAlert, Upload, Users, X } from 'lucide-react'
 import * as React from 'react'
 
 import type { ClassRoomOut, DayOfWeek, TimetableEntryCreate, TimetableEntryOut } from '@/api/types'
 import { ApiError } from '@/api/errors'
 import {
   useBulkCreateTimetable,
+  useClassTeachers,
   useClasses,
+  useCreateSubject,
   useCreateTimetableEntry,
   useDeleteTimetableEntry,
   useMappings,
@@ -581,6 +583,265 @@ function BulkDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: b
   )
 }
 
+// ========================================================== common period
+
+/** A subject picked from the list, or one to create by name. */
+const NEW_SUBJECT = '__new'
+
+/**
+ * One period added to many classes at once: an assembly, a prayer, a games
+ * hour. Each class gets it on the chosen days and time, taken by its own
+ * class teacher (or by one teacher for all). A class that already has a
+ * period then is reported, not double-booked, unless clashes are allowed.
+ */
+function CommonPeriodPanel({ onClose }: { onClose: () => void }) {
+  const classesQuery = useClasses()
+  const subjectsQuery = useSubjects()
+  const teachersQuery = useTeachingStaff()
+  const chartQuery = useClassTeachers()
+  const createSubject = useCreateSubject()
+  const bulkCreate = useBulkCreateTimetable()
+
+  const classes = React.useMemo(
+    () => [...(classesQuery.data ?? [])].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
+    [classesQuery.data],
+  )
+  const [chosen, setChosen] = React.useState<Set<number> | null>(null)
+  const picked = chosen ?? new Set(classes.map((c) => c.id))
+  const [days, setDays] = React.useState<Set<DayOfWeek>>(new Set(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY']))
+  const [start, setStart] = React.useState('')
+  const [end, setEnd] = React.useState('')
+  const assembly = (subjectsQuery.data ?? []).find((s) => s.name.trim().toLowerCase() === 'assembly')
+  const [subjectId, setSubjectId] = React.useState<string | null>(null)
+  const subject = subjectId ?? (assembly ? String(assembly.id) : NEW_SUBJECT)
+  const [newName, setNewName] = React.useState('Assembly')
+  const [who, setWho] = React.useState<'class-teacher' | 'one'>('class-teacher')
+  const [teacherId, setTeacherId] = React.useState<string | null>(null)
+  const [allowClashes, setAllowClashes] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  // Each class's class teacher; the first one where a class has two.
+  const leadOf = React.useMemo(() => {
+    const map = new Map<number, { id: number; name: string }>()
+    for (const c of chartQuery.data ?? []) if (!map.has(c.class_room.id)) map.set(c.class_room.id, { id: c.teacher.id, name: c.teacher.full_name })
+    return map
+  }, [chartQuery.data])
+
+  const chosenClasses = classes.filter((c) => picked.has(c.id))
+  const noLead = who === 'class-teacher' ? chosenClasses.filter((c) => !leadOf.has(c.id)) : []
+  const going = who === 'class-teacher' ? chosenClasses.filter((c) => leadOf.has(c.id)) : chosenClasses
+  const timesOk = !!start && !!end && minutesOfDay(end) > minutesOfDay(start)
+  const count = going.length * days.size
+  const ready = count > 0 && timesOk && (subject !== NEW_SUBJECT || newName.trim().length > 1) && (who === 'class-teacher' || !!teacherId)
+
+  const toggleClass = (id: number) => {
+    const next = new Set(picked)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setChosen(next)
+  }
+  const toggleDay = (d: DayOfWeek) => {
+    const next = new Set(days)
+    if (next.has(d)) next.delete(d)
+    else next.add(d)
+    setDays(next)
+  }
+
+  const submit = async () => {
+    if (!ready) return
+    setError(null)
+    try {
+      let sid = subject === NEW_SUBJECT ? null : Number(subject)
+      if (sid == null) {
+        const name = newName.trim()
+        const code = name.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 20) || 'COMMON'
+        const created = await createSubject.mutateAsync({ name, code, description: 'A period every class shares' })
+        sid = created.id
+        setSubjectId(String(created.id))
+      }
+      const label = subject === NEW_SUBJECT ? newName.trim() : tidy((subjectsQuery.data ?? []).find((s) => s.id === sid)?.name ?? 'Common period')
+      const entries: TimetableEntryCreate[] = going.flatMap((c) =>
+        [...days].map((day) => ({
+          class_id: c.id,
+          subject_id: sid!,
+          teacher_id: who === 'class-teacher' ? leadOf.get(c.id)!.id : Number(teacherId),
+          day_of_week: day,
+          start_time: start,
+          end_time: end,
+          room: null,
+          period_label: label,
+          effective_from: null,
+          effective_to: null,
+          is_active: true,
+        })),
+      )
+      await bulkCreate.mutateAsync({ body: { entries, replace_existing: false }, allowConflicts: allowClashes })
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not add the periods.')
+    }
+  }
+
+  const result = bulkCreate.data
+  const busy = createSubject.isPending || bulkCreate.isPending
+  const chip = (on: boolean) =>
+    cn(
+      'inline-flex h-7 items-center rounded-md border px-2.5 text-xs transition-colors',
+      on ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground',
+    )
+
+  return (
+    <Band className="border-b border-border bg-primary/[0.03]">
+      <div className="space-y-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-medium text-foreground">Common period for many classes</h2>
+            <p className="text-xs text-muted-foreground">An assembly, a prayer or a games hour: the same time for every class chosen, taken by each class&rsquo;s own class teacher</p>
+          </div>
+          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close" disabled={busy}>
+            <X />
+          </Button>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-foreground">Classes · {picked.size}</span>
+                <span className="flex gap-2 text-xs">
+                  <button type="button" className="text-primary hover:underline" onClick={() => setChosen(new Set(classes.map((c) => c.id)))}>
+                    All
+                  </button>
+                  <button type="button" className="text-muted-foreground hover:underline" onClick={() => setChosen(new Set())}>
+                    None
+                  </button>
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {classes.map((c) => (
+                  <button key={c.id} type="button" className={chip(picked.has(c.id))} onClick={() => toggleClass(c.id)} aria-pressed={picked.has(c.id)}>
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <span className="text-sm font-medium text-foreground">Days</span>
+              <div className="flex flex-wrap gap-1.5">
+                {DAYS.map((d) => (
+                  <button key={d} type="button" className={chip(days.has(d))} onClick={() => toggleDay(d)} aria-pressed={days.has(d)}>
+                    {DAY_LABEL[d].slice(0, 3)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-foreground">Starts</span>
+                <Input type="time" value={start} onChange={(e) => setStart(e.target.value)} className={COMPACT_INPUT} />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-foreground">Ends</span>
+                <Input type="time" value={end} onChange={(e) => setEnd(e.target.value)} className={COMPACT_INPUT} invalid={!!start && !!end && !timesOk} />
+              </label>
+            </div>
+            <div className="space-y-1">
+              <span className="text-sm font-medium text-foreground">Subject</span>
+              <div className="flex gap-2">
+                <Combobox
+                  value={subject}
+                  onChange={setSubjectId}
+                  options={[
+                    { value: NEW_SUBJECT, label: 'A new subject…', hint: 'Type its name' },
+                    ...[...(subjectsQuery.data ?? [])].sort((a, b) => a.name.localeCompare(b.name)).map((s) => ({ value: String(s.id), label: tidy(s.name), hint: s.code })),
+                  ]}
+                  searchPlaceholder="Search subjects"
+                  className="h-8 min-w-0 flex-1 text-sm"
+                />
+                {subject === NEW_SUBJECT && (
+                  <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Assembly" aria-label="New subject name" className={cn(COMPACT_INPUT, 'min-w-0 flex-1')} />
+                )}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <span className="text-sm font-medium text-foreground">Taken by</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex rounded-md border border-border p-0.5" role="radiogroup" aria-label="Taken by">
+                  {(
+                    [
+                      ['class-teacher', 'Each class teacher'],
+                      ['one', 'One teacher'],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-checked={who === value}
+                      onClick={() => setWho(value)}
+                      className={cn('rounded px-2.5 py-1 text-xs transition-colors', who === value ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {who === 'one' && (
+                  <Combobox
+                    value={teacherId}
+                    onChange={setTeacherId}
+                    options={(teachersQuery.data ?? []).filter((t) => t.is_active).map((t) => ({ value: String(t.id), label: tidy(t.full_name), hint: t.email }))}
+                    placeholder="Choose a teacher"
+                    searchPlaceholder="Search teachers"
+                    className="h-8 min-w-0 flex-1 text-sm"
+                  />
+                )}
+              </div>
+            </div>
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+              <Checkbox checked={allowClashes} onCheckedChange={(v) => setAllowClashes(v === true)} />
+              Add it even where a class already has a period then
+            </label>
+          </div>
+        </div>
+
+        {noLead.length > 0 && (
+          <p className="border-l-2 border-warning bg-warning/5 px-3 py-2 text-xs text-foreground">
+            {noLead.map((c) => c.name).join(', ')} {noLead.length === 1 ? 'has' : 'have'} no class teacher, so {noLead.length === 1 ? 'it is' : 'they are'} left out. Assign one under Classes &amp; Students, or choose One teacher.
+          </p>
+        )}
+        {error && <p className="text-sm text-danger">{error}</p>}
+        {result && (
+          <div className="border-l-2 border-success bg-success/5 px-3 py-2 text-xs">
+            <p className="font-medium text-foreground">{result.detail}</p>
+            {result.skipped.length > 0 && (
+              <ul className="mt-1 space-y-0.5 text-muted-foreground">
+                {result.skipped.slice(0, 8).map((s) => (
+                  <li key={s.index}>{s.reason}</li>
+                ))}
+                {result.skipped.length > 8 && <li>and {result.skipped.length - 8} more</li>}
+              </ul>
+            )}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-end gap-3 border-t border-border pt-3">
+          <span className="text-xs text-muted-foreground">
+            {count > 0 ? `${countLabel(going.length, 'class', 'classes')} × ${countLabel(days.size, 'day')} = ${countLabel(count, 'period')}` : 'Choose classes, days and a time'}
+          </span>
+          <Button variant="outline" size="sm" onClick={onClose} disabled={busy}>
+            {result ? 'Done' : 'Cancel'}
+          </Button>
+          <Button size="sm" icon={<Plus />} disabled={!ready} loading={busy} onClick={() => void submit()}>
+            Add {count > 0 ? countLabel(count, 'period') : 'periods'}
+          </Button>
+        </div>
+      </div>
+    </Band>
+  )
+}
+
 // ==================================================================== page
 
 export default function AdminTimetablePage() {
@@ -595,6 +856,7 @@ export default function AdminTimetablePage() {
   const klass = classes.find((c) => String(c.id) === classId) ?? classes[0] ?? null
 
   const [bulkOpen, setBulkOpen] = React.useState(false)
+  const [commonOpen, setCommonOpen] = React.useState(false)
   const [picked, setPicked] = React.useState<{ day: DayOfWeek; slot: Slot; index: number } | null>(null)
   const [extraSlots, setExtraSlots] = React.useState<Slot[]>([])
   const [addingSlot, setAddingSlot] = React.useState(false)
@@ -642,9 +904,14 @@ export default function AdminTimetablePage() {
         description="Pick a class and click a period to set its subject. The teacher comes from the subject allocation"
         icon={CalendarRange}
         actions={
-          <Button variant="outline" size="sm" icon={<Upload />} onClick={() => setBulkOpen(true)}>
-            Upload
-          </Button>
+          <>
+            <Button variant="outline" size="sm" icon={<Users />} onClick={() => setCommonOpen(true)}>
+              Common period
+            </Button>
+            <Button variant="outline" size="sm" icon={<Upload />} onClick={() => setBulkOpen(true)}>
+              Upload
+            </Button>
+          </>
         }
         tabs={
           classes.length > 0 && (
@@ -667,6 +934,8 @@ export default function AdminTimetablePage() {
       />
 
       <div className="!mt-0">
+        {commonOpen && <CommonPeriodPanel onClose={() => setCommonOpen(false)} />}
+
         {/* ------------------------------------------------------ toolbar */}
         <Band className="border-b border-border">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 py-2.5">
