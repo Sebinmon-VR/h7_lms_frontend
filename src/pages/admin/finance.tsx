@@ -2084,7 +2084,7 @@ const MENU: { group: string; items: MenuItem[] }[] = [
     group: 'Billing',
     items: [
       { key: 'invoices', label: 'Bills', icon: Receipt, hint: 'Every student’s bill this session: billed, paid, left to pay' },
-      { key: 'bulk', label: 'Bulk billing', icon: ListChecks, hint: 'Issue or extend bills for a whole class at once' },
+      { key: 'bulk', label: 'Bulk billing', icon: ListChecks, hint: 'Bill whole classes at once: the year’s fees, a fee held back, or an extra item' },
       { key: 'reports', label: 'Reports', icon: BarChart3, hint: 'Students, dues by age, collections and every transaction' },
     ],
   },
@@ -2102,7 +2102,7 @@ const MENU: { group: string; items: MenuItem[] }[] = [
 ]
 const SECTIONS = MENU.flatMap((g) => g.items)
 /** Sections laid out as list + detail: they fill the pane and scroll inside it. */
-const SPLIT: Section[] = ['invoices', 'heads', 'structures', 'plans', 'discounts']
+const SPLIT: Section[] = ['invoices', 'bulk', 'reports', 'heads', 'structures', 'plans', 'discounts']
 
 export default function AdminFinancePage() {
   const settings = useFinanceSettings()
@@ -2199,8 +2199,7 @@ export default function AdminFinancePage() {
             </nav>
 
             <section className="-mx-4 flex min-w-0 flex-col sm:-mx-6 lg:mx-0 lg:-mr-8 lg:min-h-0" aria-label={current.label}>
-              {/* Bulk billing carries its own heading strip. */}
-              {section !== 'bulk' && (
+              {section !== 'reports' && (
                 <div className="border-b border-border px-4 py-3">
                   <h2 className="text-base font-medium text-foreground">{current.label}</h2>
                   <p className="text-xs text-muted-foreground">{current.hint}</p>
@@ -2211,9 +2210,7 @@ export default function AdminFinancePage() {
               {section === 'invoices' && <FinanceInvoicesTab academicYearId={academicYearId} />}
               {section === 'bulk' && <FinanceBulkTab academicYearId={academicYearId} />}
               {section === 'reports' && (
-                <div className="p-4">
-                  <FinanceReportsTab academicYearId={academicYearId} academicYearStart={currentYear.data?.start_date ?? null} />
-                </div>
+                <FinanceReportsTab academicYearId={academicYearId} academicYearStart={currentYear.data?.start_date ?? null} />
               )}
               {section === 'heads' && <HeadsTab currency={currency} />}
               {section === 'structures' && <StructuresTab currency={currency} academicYearId={academicYearId} />}
