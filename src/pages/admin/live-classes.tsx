@@ -18,7 +18,7 @@ import { formatDateTime, formatRelative, parseApiDateTime } from '@/lib/datetime
 import { formatSchoolTime } from '@/lib/school-time'
 import { countLabel } from '@/lib/format'
 import { useCopyToClipboard } from '@/lib/hooks'
-import { shareableLink } from '@/lib/meeting-links'
+import { shareableLink, startJoin } from '@/lib/meeting-links'
 import { tidyName as tidy } from '@/lib/names'
 import { subjectName } from '@/lib/select'
 import { Avatar } from '@/components/ui/avatar'
@@ -468,14 +468,22 @@ function ClassDetail({ row }: { row: LiveClassBoardRow }) {
   const session = row.live_sessions.find((s) => s.timing.is_live) ?? row.live_sessions[0] ?? null
   const share = row.enrolled_count > 0 ? Math.round((row.students_joined_today / row.enrolled_count) * 100) : 0
 
-  const joinNow = () =>
+  const joinNow = () => {
+    const tab = startJoin()
     join.mutate(row.class_id, {
       onSuccess: (result) => {
-        if (result.room_link) window.open(result.room_link, '_blank', 'noopener')
-        else toast.warning('This class has no room link yet')
+        if (result.room_link) tab.go(result.room_link)
+        else {
+          tab.cancel()
+          toast.warning('This class has no room link yet')
+        }
       },
-      onError: (error) => toast.error(error instanceof ApiError ? error.message : 'Could not open the room.'),
+      onError: (error) => {
+        tab.cancel()
+        toast.error(error instanceof ApiError ? error.message : 'Could not open the room.')
+      },
     })
+  }
 
   const tabs: { key: DetailTab; label: string }[] = [
     { key: 'periods', label: `Today's periods (${row.periods_today.length})` },

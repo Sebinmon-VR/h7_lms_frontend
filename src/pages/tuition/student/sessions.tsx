@@ -1,5 +1,6 @@
 import { CalendarClock, Hourglass, Video } from 'lucide-react'
 import * as React from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import type { TuitionSessionOut, TuitionSessionStatus } from '@/api/types'
 import {
@@ -9,6 +10,7 @@ import {
   useTuitionSessions,
 } from '@/queries/tuition.queries'
 import { shiftApiDate, todayApiDate } from '@/lib/datetime'
+import { startJoin } from '@/lib/meeting-links'
 import { SESSION_STATUS_LABEL, isClosed, isLive } from '@/lib/tuition'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
@@ -63,13 +65,17 @@ export default function TuitionStudentSessionsPage() {
   })
 
   const join = useJoinTuitionSession()
+  const navigate = useNavigate()
 
   const openClass = (session: TuitionSessionOut) => {
+    const tab = startJoin(navigate)
     join.mutate(String(session.id), {
       onSuccess: (updated) => {
         const link = updated.meeting_link ?? session.meeting_link
-        if (link) window.open(link, '_blank', 'noopener')
+        if (link) tab.go(link)
+        else tab.cancel()
       },
+      onError: () => tab.cancel(),
     })
   }
 

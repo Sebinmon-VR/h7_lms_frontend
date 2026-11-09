@@ -1,10 +1,12 @@
 import { Hourglass, Play, Square, Video } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import type { ClassTimingOut } from '@/api/types'
 import { ApiError } from '@/api/errors'
 import { useClassTiming, useEndClass, useJoinClass, useStartClass } from '@/queries/classes.queries'
 import { joinState } from '@/lib/school'
+import { startJoin } from '@/lib/meeting-links'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -102,6 +104,7 @@ export function JoinClassButton({
 }) {
   const timing = useClassTiming(meetingId, enabled)
   const join = useJoinClass()
+  const navigate = useNavigate()
 
   if (timing.isPending) return <Skeleton className="h-8 w-24 rounded-lg" />
 
@@ -112,11 +115,13 @@ export function JoinClassButton({
   const state = joinState(timing.data)
 
   const open = () => {
+    const tab = startJoin(navigate)
     join.mutate(meetingId, {
       onSuccess: (result) => {
         if (result.meeting_link) {
-          window.open(result.meeting_link, '_blank', 'noopener')
+          tab.go(result.meeting_link)
         } else {
+          tab.cancel()
           // A class with no room is a real, non-error state: room creation
           // is best-effort and the schedule is saved either way.
           toast.warning('This class has no meeting link yet', {
@@ -125,6 +130,7 @@ export function JoinClassButton({
         }
       },
       onError: (error) => {
+        tab.cancel()
         // 409 is the expected outcome of pressing a button that went stale
         // between renders — the window closed, or the class ended. Refetch and
         // show the server's reason rather than reporting a crash.

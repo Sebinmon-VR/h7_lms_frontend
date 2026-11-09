@@ -9,6 +9,7 @@ import {
   Video,
 } from 'lucide-react'
 import * as React from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import type { AttendanceStatus, TuitionSessionOut, TuitionSessionStatus } from '@/api/types'
 import { TUITION_ATTENDANCE_OPTIONS } from '@/api/tuition.api'
@@ -24,6 +25,7 @@ import {
   useTuitionSessions,
 } from '@/queries/tuition.queries'
 import { shiftApiDate, todayApiDate } from '@/lib/datetime'
+import { startJoin } from '@/lib/meeting-links'
 import { ATTENDANCE_LABEL } from '@/lib/constants'
 import {
   CLASS_LENGTH_HINT,
@@ -336,6 +338,7 @@ export default function TuitionTeacherSessionsPage() {
 
   const start = useStartTuitionSession()
   const setLink = useSetTuitionMeetingLink('teacher')
+  const navigate = useNavigate()
   const cancel = useCancelTuitionSession('teacher')
 
   const [ending, setEnding] = React.useState<TuitionSessionOut | null>(null)
@@ -353,16 +356,19 @@ export default function TuitionTeacherSessionsPage() {
    * already had would skip the record of the teacher having arrived.
    */
   const openMeeting = (session: TuitionSessionOut) => {
+    const tab = startJoin(navigate)
     if (session.meeting_link) {
-      window.open(session.meeting_link, '_blank', 'noopener')
+      tab.go(session.meeting_link)
       return
     }
     setLink.mutate(
       { sessionId: String(session.id) },
       {
         onSuccess: (updated) => {
-          if (updated.meeting_link) window.open(updated.meeting_link, '_blank', 'noopener')
+          if (updated.meeting_link) tab.go(updated.meeting_link)
+          else tab.cancel()
         },
+        onError: () => tab.cancel(),
       },
     )
   }

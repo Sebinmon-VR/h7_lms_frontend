@@ -10,6 +10,7 @@ import {
   Video,
 } from 'lucide-react'
 import * as React from 'react'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import type { ClassRoomAccessOut, ScheduledPeriod } from '@/api/types'
@@ -24,7 +25,7 @@ import {
 import { cn } from '@/lib/cn'
 import { formatSchoolTime } from '@/lib/school-time'
 import { useCopyToClipboard } from '@/lib/hooks'
-import { shareableLink } from '@/lib/meeting-links'
+import { shareableLink, startJoin } from '@/lib/meeting-links'
 import { subjectName } from '@/lib/select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -159,20 +160,24 @@ export function JoinRoomButton({
   className?: string
 }) {
   const join = useJoinClassRoom()
+  const navigate = useNavigate()
   const state = roomJoinState(access)
 
   const open = () => {
+    const tab = startJoin(navigate)
     join.mutate(access.class_id, {
       onSuccess: (result) => {
         if (result.room_link) {
-          window.open(result.room_link, '_blank', 'noopener')
+          tab.go(result.room_link)
         } else {
+          tab.cancel()
           toast.warning('This class has no room link yet', {
             description: 'Ask the office to set one up under Classes.',
           })
         }
       },
       onError: (error) => {
+        tab.cancel()
         toast.error(
           error instanceof ApiError ? error.message : 'The room is not open right now.',
         )

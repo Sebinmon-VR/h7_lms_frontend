@@ -29,6 +29,67 @@ export function shareableLink(link: string | null | undefined): string {
   }
 }
 
+/** A tab being opened for a class, filled in once the server says the class may be joined. */
+export interface JoinTab {
+  /** Sends the tab (or, on a phone or tablet, this page) to the room. */
+  go: (link: string) => void
+  /** The server said no: close the blank tab again. */
+  cancel: () => void
+}
+
+/**
+ * Call this in the click handler itself, BEFORE asking the server to let the
+ * person in, and hand the link to `go` when it answers.
+ *
+ * Phones and tablets — Safari on iPhone and iPad, Chrome on Android — silently
+ * block a tab opened after a network round trip: by the time the answer comes
+ * back the tap no longer counts as the user's, so `window.open` does nothing
+ * and the Join button looks dead. Laptops allow a few seconds' grace, which is
+ * why joining worked there and nowhere else.
+ *
+ * So on a touch device the class opens in this same tab (the call page has its
+ * own way back), and elsewhere the new tab is opened during the click, blank,
+ * and pointed at the room once the server agrees.
+ */
+export function startJoin(navigate?: (to: string) => void): JoinTab {
+  const touch = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches
+  let tab: Window | null = null
+  if (!touch) {
+    try {
+      tab = window.open('', '_blank')
+    } catch {
+      tab = null
+    }
+    if (tab) {
+      try {
+        tab.document.title = 'Opening your class…'
+        tab.document.body.style.cssText = 'font: 14px system-ui, sans-serif; color: #555; display: grid; place-items: center; height: 100vh; margin: 0'
+        tab.document.body.textContent = 'Opening your class…'
+      } catch {
+        // Nothing to show: the tab is about to move on anyway.
+      }
+    }
+  }
+  return {
+    go: (link) => {
+      if (tab && !tab.closed) {
+        tab.location.href = shareableLink(link)
+        try {
+          tab.opener = null
+        } catch {
+          // Already cut off.
+        }
+        return
+      }
+      if (isAppPath(link) && navigate) navigate(link)
+      else window.location.assign(shareableLink(link))
+    },
+    cancel: () => {
+      if (tab && !tab.closed) tab.close()
+    },
+  }
+}
+
 /** What a meeting-link input accepts: empty, an https URL, or an LMS room path. */
 export function isValidMeetingLink(value: string): boolean {
   const v = value.trim()

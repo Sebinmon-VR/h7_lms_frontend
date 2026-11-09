@@ -1,5 +1,5 @@
 import { ArrowRight, BookOpen, CalendarClock, Hourglass, Video } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 import {
   useJoinTuitionSession,
@@ -10,6 +10,7 @@ import {
   useTuitionUpcoming,
 } from '@/queries/tuition.queries'
 import { greeting } from '@/lib/format'
+import { startJoin } from '@/lib/meeting-links'
 import { DAY_SHORT } from '@/lib/timetable'
 import { isClosed, isLive, shortTime, sortSlots } from '@/lib/tuition'
 import { useAuth } from '@/providers/auth-provider'
@@ -38,6 +39,7 @@ export default function TuitionStudentDashboardPage() {
   const timetable = useMyTuitionTimetable('student')
   const report = useTuitionStudentReport('student', null)
   const join = useJoinTuitionSession()
+  const navigate = useNavigate()
 
   const weekly = sortSlots(timetable.data ?? [])
 
@@ -98,14 +100,17 @@ export default function TuitionStudentDashboardPage() {
                         <Button
                           size="sm"
                           loading={join.isPending && join.variables === String(session.id)}
-                          onClick={() =>
+                          onClick={() => {
+                            const tab = startJoin(navigate)
                             join.mutate(String(session.id), {
                               onSuccess: (updated) => {
                                 const link = updated.meeting_link ?? session.meeting_link
-                                if (link) window.open(link, '_blank', 'noopener')
+                                if (link) tab.go(link)
+                                else tab.cancel()
                               },
+                              onError: () => tab.cancel(),
                             })
-                          }
+                          }}
                         >
                           <Video />
                           Join
