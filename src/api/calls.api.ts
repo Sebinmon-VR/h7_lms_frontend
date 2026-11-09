@@ -23,7 +23,8 @@ export interface CallSession {
   token: string
   expires_on: string
   display_name: string
-  role: 'Presenter' | 'Attendee'
+  /** Students are Collaborators in a class (they may share their screen) and Attendees in an exam. */
+  role: 'Presenter' | 'Collaborator' | 'Attendee'
   is_host: boolean
   /** Whether this person's connecting starts the recording. */
   records: boolean

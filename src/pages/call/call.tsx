@@ -34,6 +34,14 @@ import { StudentExamTakeView } from '@/pages/student/exam-take'
 // the close button drew as an empty, invisible box.
 const CALL_ICONS = { Cancel: <X className="size-4" /> } as unknown as CallCompositeIcons
 
+/**
+ * A class call's controls. The live text box ("Real-Time Text", in More) is off for
+ * everyone: once anybody starts it, the whole class can type into it, which turned the
+ * lesson into a chat. Screen sharing stays: teachers present, and students may show
+ * their work (they join a class as Collaborators, who are allowed to share).
+ */
+const CLASS_CALL_OPTIONS = { callControls: { realTimeTextButton: false } }
+
 // Its recording notice speaks of "consent to be transcribed"; classes are
 // recorded, not transcribed.
 const callStrings = COMPOSITE_LOCALE_EN_US.component.strings
@@ -402,6 +410,7 @@ export default function CallPage() {
   // exam needs: camera, microphone and a raised hand.
   const examStudentControls = {
     displayType: 'compact' as const,
+    realTimeTextButton: false,
     endCallButton: false,
     screenShareButton: false,
     moreButton: false,
@@ -421,7 +430,7 @@ export default function CallPage() {
       formFactor={window.matchMedia('(max-width: 640px)').matches ? 'mobile' : 'desktop'}
       options={
         isExam
-          ? { callControls: session.is_host ? { screenShareButton: false } : examStudentControls }
+          ? { callControls: session.is_host ? { screenShareButton: false, realTimeTextButton: false } : examStudentControls }
           : undefined
       }
     />
@@ -552,6 +561,7 @@ export default function CallPage() {
             locale={CALL_LOCALE}
             fluentTheme={resolved === 'dark' ? darkTheme : lightTheme}
             formFactor={window.matchMedia('(max-width: 640px)').matches ? 'mobile' : 'desktop'}
+            options={CLASS_CALL_OPTIONS}
           />
         </div>
       </div>
