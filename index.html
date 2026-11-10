@@ -19,9 +19,90 @@
         } catch (e) {}
       })()
     </script>
+    <script>
+      // Older iPads and iPhones (Safari before 16, which some cannot be updated past)
+      // lack a few newer built-ins that the app's libraries call, and stopped at a blank
+      // white page. These stand-ins fill them in before the app starts. Written in old
+      // JavaScript on purpose: it must run on exactly those browsers.
+      ;(function () {
+        function define(target, name, fn) {
+          if (target && !target[name]) {
+            try {
+              Object.defineProperty(target, name, { value: fn, writable: true, configurable: true })
+            } catch (e) {}
+          }
+        }
+        function at(index) {
+          var n = Math.trunc(index) || 0
+          if (n < 0) n += this.length
+          return n < 0 || n >= this.length ? undefined : this[n]
+        }
+        define(Array.prototype, 'at', at)
+        define(String.prototype, 'at', at)
+        define(Array.prototype, 'findLast', function (fn, self) {
+          for (var i = this.length - 1; i >= 0; i--) if (fn.call(self, this[i], i, this)) return this[i]
+          return undefined
+        })
+        define(Array.prototype, 'findLastIndex', function (fn, self) {
+          for (var i = this.length - 1; i >= 0; i--) if (fn.call(self, this[i], i, this)) return i
+          return -1
+        })
+        define(Array.prototype, 'toSorted', function (compare) {
+          return Array.prototype.slice.call(this).sort(compare)
+        })
+        define(Array.prototype, 'toReversed', function () {
+          return Array.prototype.slice.call(this).reverse()
+        })
+        define(Array.prototype, 'toSpliced', function () {
+          var copy = Array.prototype.slice.call(this)
+          Array.prototype.splice.apply(copy, arguments)
+          return copy
+        })
+        define(Array.prototype, 'with', function (index, value) {
+          var copy = Array.prototype.slice.call(this)
+          var n = Math.trunc(index) || 0
+          if (n < 0) n += copy.length
+          if (n < 0 || n >= copy.length) throw new RangeError('Invalid index')
+          copy[n] = value
+          return copy
+        })
+        define(Object, 'hasOwn', function (object, key) {
+          return Object.prototype.hasOwnProperty.call(object, key)
+        })
+        if (typeof window.structuredClone !== 'function') {
+          window.structuredClone = function (value) {
+            return value === undefined ? undefined : JSON.parse(JSON.stringify(value))
+          }
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // If the app still cannot start on some device, say so instead of leaving a
+      // blank white page, so the school knows what to tell the family.
+      ;(function () {
+        var shown = false
+        function explain() {
+          var root = document.getElementById('root')
+          if (shown || !root || root.childElementCount > 0) return
+          shown = true
+          root.innerHTML =
+            '<div style="font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:28rem;margin:15vh auto;padding:0 20px;color:#333;text-align:center">' +
+            '<p style="font-size:18px;font-weight:600;margin:0 0 8px">H7 LMS could not open on this device</p>' +
+            '<p style="margin:0 0 16px">This browser is too old for the school site. Update the device (Settings, General, Software Update), ' +
+            'or use a laptop or a newer phone.</p>' +
+            '<button onclick="location.reload()" style="font:inherit;padding:8px 16px;border-radius:6px;border:1px solid #bbb;background:#fff">Try again</button>' +
+            '</div>'
+        }
+        function later() {
+          setTimeout(explain, 1500)
+        }
+        window.addEventListener('error', later)
+        window.addEventListener('unhandledrejection', later)
+      })()
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
