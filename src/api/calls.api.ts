@@ -1,4 +1,4 @@
-import { getAccessToken, post } from './client'
+import { get, getAccessToken, post } from './client'
 import { API_BASE } from '@/lib/env'
 
 /**
@@ -12,6 +12,31 @@ import { API_BASE } from '@/lib/env'
 export type CallKind = 'class' | 'meeting' | 'tuition' | 'exam'
 
 export const CALL_KINDS: readonly CallKind[] = ['class', 'meeting', 'tuition', 'exam']
+
+/** One person's trouble in a class's calls on a day. */
+export interface CallQualityPerson {
+  user_id: number
+  name: string
+  role?: string | null
+  joins: number
+  rejoins: number
+  /** Calls that ended because the connection failed, not because they hung up. */
+  drops: number
+  network_warnings: number
+  device_warnings: number
+  /** ACS diagnostic name to how many times it was raised. */
+  issues: Record<string, number>
+  /** End codes of the dropped calls, "410/3112" to count. */
+  end_codes: Record<string, number>
+  last_problem_at?: string | null
+  score: number
+}
+
+export interface CallQualitySummary {
+  class_id: number
+  day: string
+  people: CallQualityPerson[]
+}
 
 export interface CallSession {
   kind: CallKind
@@ -46,8 +71,20 @@ export const callsApi = {
       { server_call_id: serverCallId },
     ),
 
-  /** "I have left": logged as the leave; stops any recording this person started. */
-  left: (kind: CallKind, id: string) => post<{ ok: boolean }>(`${base(kind, id)}/left`),
+  /**
+   * "I have left": logged as the leave; stops any recording this person started. `reason`
+   * is why the call ended, as ACS said: code 0 is hanging up, 4xx/5xx a dropped connection.
+   */
+  left: (kind: CallKind, id: string, reason?: { code?: number; sub_code?: number }) =>
+    post<{ ok: boolean }>(`${base(kind, id)}/left`, reason),
+
+  /** A problem on this person's side of the call, as ACS raised it: network, mic, camera. */
+  issue: (kind: CallKind, id: string, name: string, value: string) =>
+    post<{ ok: boolean }>(`${base(kind, id)}/issue`, { name, value }),
+
+  /** [Admin] Who had trouble in a class's calls on a day (today by default), worst first. */
+  quality: (classId: number, day?: string) =>
+    get<CallQualitySummary>(`/calls/quality/${classId}`, day ? { params: { day } } : undefined),
 
   recording: (kind: CallKind, id: string, action: 'start' | 'stop', serverCallId: string | null) =>
     post<{ ok: boolean; recording_active: boolean }>(`${base(kind, id)}/recording`, {

@@ -7,9 +7,11 @@ import {
   createStatefulCallClient,
   darkTheme,
   lightTheme,
+  onResolveDeepNoiseSuppressionDependencyLazy,
   onResolveVideoEffectDependencyLazy,
   type CallAdapter,
   type CallCompositeIcons,
+  type CallCompositeOptions,
   type CompositeLocale,
   type VideoBackgroundImage,
 } from '@azure/communication-react'
@@ -35,6 +37,74 @@ import { StudentExamTakeView } from '@/pages/student/exam-take'
 // The calling UI's notices close with an icon it never registers itself, so
 // the close button drew as an empty, invisible box.
 const CALL_ICONS = { Cancel: <X className="size-4" /> } as unknown as CallCompositeIcons
+
+/**
+ * A note, in this tab only, that its person is in a call and how their microphone and
+ * camera are. Kept while connected; a page that reloads within ten minutes of the last
+ * note goes straight back into the call with them as they were, instead of stopping at
+ * the join screen. Leaving on purpose clears it.
+ */
+const IN_CALL_FRESH_MS = 10 * 60_000
+const inCallKey = (kind: string, id: string) => `h7.in-call.${kind}.${id}`
+let lastInCallNote = ''
+
+function noteInCall(kind: string, id: string, media: { mic: boolean; cam: boolean }) {
+  // Written when the state changes and otherwise every half minute, not on every render.
+  const stamp = `${media.mic}${media.cam}${Math.floor(Date.now() / 30_000)}`
+  if (stamp === lastInCallNote) return
+  lastInCallNote = stamp
+  try {
+    sessionStorage.setItem(inCallKey(kind, id), JSON.stringify({ at: Date.now(), ...media }))
+  } catch {
+    // Private browsing: nothing kept, a reload goes to the join screen as before.
+  }
+}
+
+function readInCall(kind: string, id: string): { mic: boolean; cam: boolean } | null {
+  try {
+    const raw = sessionStorage.getItem(inCallKey(kind, id))
+    if (!raw) return null
+    const note = JSON.parse(raw) as { at?: number; mic?: boolean; cam?: boolean }
+    if (!note.at || Date.now() - note.at > IN_CALL_FRESH_MS) return null
+    return { mic: Boolean(note.mic), cam: Boolean(note.cam) }
+  } catch {
+    return null
+  }
+}
+
+function forgetInCall(kind: string, id: string) {
+  lastInCallNote = ''
+  try {
+    sessionStorage.removeItem(inCallKey(kind, id))
+  } catch {
+    // Nothing kept to forget.
+  }
+}
+
+/**
+ * The ACS warnings about a person's own side of the call that the office is told of:
+ * their network, and a microphone, camera or speaker that is missing or failing.
+ * "Speaking while muted" is left out - it is not a fault.
+ */
+const REPORTED_DIAGNOSTICS = new Set([
+  'networkReconnect',
+  'networkReceiveQuality',
+  'networkSendQuality',
+  'noNetwork',
+  'networkRelaysNotReachable',
+  'noSpeakerDevicesEnumerated',
+  'noMicrophoneDevicesEnumerated',
+  'microphoneNotFunctioning',
+  'microphoneMuteUnexpectedly',
+  'microphonePermissionDenied',
+  'cameraFreeze',
+  'cameraStartFailed',
+  'cameraStartTimedOut',
+  'cameraStoppedUnexpectedly',
+  'cameraPermissionDenied',
+  'capturerStartFailed',
+  'capturerStoppedUnexpectedly',
+])
 
 /**
  * A teacher's grid holds everybody in the call (no strip of hidden students below it),
@@ -71,7 +141,69 @@ const CALL_BACKGROUNDS: VideoBackgroundImage[] = [
  * lesson into a chat. Screen sharing stays: teachers present, and students may show
  * their work (they join a class as Collaborators, who are allowed to share).
  */
-const CLASS_CALL_OPTIONS = { callControls: { realTimeTextButton: false } }
+const CLASS_CALL_OPTIONS: CallCompositeOptions = {
+  callControls: { realTimeTextButton: false },
+  // Out of the box "Start call" stays greyed out until a microphone is allowed and
+  // found, so a student whose tablet has blocked the microphone could not get into the
+  // class at all. They come in anyway and can watch and listen; the banner over the call
+  // tells them how to allow the microphone and camera.
+  joinCallOptions: { microphoneCheck: 'skip' },
+}
+
+/** Opened inside another app's own browser (WhatsApp, Facebook, the Google app...). */
+const IN_APP_BROWSER = /; wv\)|FBAN|FBAV|Instagram|Line\/|WhatsApp|Snapchat|GSA\//i.test(
+  typeof navigator === 'undefined' ? '' : navigator.userAgent,
+)
+const APPLE_DEVICE =
+  typeof navigator !== 'undefined' &&
+  (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+
+/**
+ * Why this device cannot use its camera or microphone, and what the family should tap
+ * to fix it - over the call, from the join screen on, because the call's own screen only
+ * says "No speakers found" and greys its button.
+ */
+function DeviceHelp({
+  trouble,
+  isHost,
+  onDismiss,
+}: {
+  trouble: 'blocked' | 'none' | 'in-app'
+  isHost: boolean
+  onDismiss: () => void
+}) {
+  const steps =
+    trouble === 'in-app'
+      ? APPLE_DEVICE
+        ? 'This opened inside another app, which cannot use the camera or microphone. Tap the share or ••• button and choose "Open in Safari".'
+        : 'This opened inside another app, which cannot use the camera or microphone. Tap ⋮ (top right) and choose "Open in Chrome".'
+      : trouble === 'none'
+        ? 'No microphone was found. Connect the headset or check the device sound is on, then reload.'
+        : APPLE_DEVICE
+          ? 'The camera or microphone is blocked. Tap "aA" in the address bar → Website Settings → set Camera and Microphone to Allow, then reload. If they are already allowed: Settings app → Safari → Camera and Microphone → Allow.'
+          : 'The camera or microphone is blocked. Tap the lock or ⓘ left of the web address → Permissions → turn on Camera and Microphone, then reload. If they are already on: Android Settings → Apps → Chrome → Permissions → allow Camera and Microphone.'
+  return (
+    <div
+      className={cn(
+        'flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2 text-sm text-foreground',
+        isHost ? 'border-danger/30 bg-danger/10' : 'border-warning/30 bg-warning/10',
+      )}
+    >
+      <AlertCircle className={cn('size-4 shrink-0', isHost ? 'text-danger' : 'text-warning')} />
+      <p className="min-w-0 flex-1">
+        {isHost && <span className="font-medium">The class will not hear or see you. </span>}
+        {steps}{' '}
+        {!isHost && <span className="text-muted-foreground">You can still join to watch and listen.</span>}
+      </p>
+      <div className="flex shrink-0 gap-1.5">
+        <Button size="sm" variant="outline" icon={<RotateCcw />} onClick={() => window.location.reload()}>
+          Reload
+        </Button>
+        <Button size="sm" variant="ghost" icon={<X />} onClick={onDismiss} aria-label="Hide" />
+      </div>
+    </div>
+  )
+}
 
 // Its recording notice speaks of "consent to be transcribed"; classes are
 // recorded, not transcribed.
@@ -154,6 +286,19 @@ export default function CallPage() {
   // True between the call connecting and this person leaving it, so a leave is
   // reported exactly once however the page is exited.
   const inCallRef = React.useRef(false)
+  // Whether this person's microphone and camera are on, kept up to date while in the
+  // call, so a dropped call comes back the way it was.
+  const mediaRef = React.useRef({ mic: false, cam: false })
+  // Set when a dropped call is being rejoined by itself; read by the next start.
+  const resumeRef = React.useRef<{ mic: boolean; cam: boolean } | null>(null)
+  // When the recent automatic rejoins happened, to stop trying after a few in a row.
+  const rejoinsRef = React.useRef<number[]>([])
+  const [reconnecting, setReconnecting] = React.useState(false)
+  // Camera or microphone blocked or missing on this device, to explain over the call.
+  const [deviceTrouble, setDeviceTrouble] = React.useState<'blocked' | 'none' | 'in-app' | null>(
+    IN_APP_BROWSER ? 'in-app' : null,
+  )
+  const [deviceHelpHidden, setDeviceHelpHidden] = React.useState(false)
 
   const serverCallId = React.useCallback(async (): Promise<string | null> => {
     try {
@@ -218,10 +363,17 @@ export default function CallPage() {
           callClient,
           agent,
           { roomId: session.room_id },
-          // Teachers get the camera's Effects: blur, or one of the plain backgrounds.
-          // The effects code is fetched only when a teacher first opens them.
+          // Teachers only: the effects code is a 7 MB download, too much to put on every
+          // student's join over a weak connection. The teacher's voice is the one the whole
+          // class has to hear, so their microphone has fans, traffic and televisions taken
+          // out of it from the start; students start muted instead (see muteOnJoin).
+          // Teachers also get the camera's Effects: blur, or one of the backgrounds.
           session.is_host
             ? {
+                deepNoiseSuppressionOptions: {
+                  onResolveDependency: onResolveDeepNoiseSuppressionDependencyLazy,
+                  deepNoiseSuppressionOnByDefault: true,
+                },
                 videoBackgroundOptions: {
                   videoBackgroundImages: CALL_BACKGROUNDS,
                   onResolveDependency: onResolveVideoEffectDependencyLazy,
@@ -247,9 +399,56 @@ export default function CallPage() {
       agentRef.current = agent
       setRecording(session.recording_active)
 
+      // A rejoin after a dropped connection comes back as it was - and so does a page
+      // that reloaded while in the call (tablets and phones reload a tab that sat in the
+      // background), from what was noted in this tab while connected. A fresh join by a
+      // student starts with the microphone off, so a class is not twenty open lines.
+      const resume = resumeRef.current ?? readInCall(kind, entityId)
+      resumeRef.current = null
+      const muteOnJoin = !resume && !session.is_host && kind !== 'exam'
+      const callAdapter = adapter
+
+      // Warnings ACS raises about this person's own network and devices go to the
+      // office's Connection view, once each and then at most once a minute.
+      const lastSeen = new Map<string, string>()
+      const lastSent = new Map<string, number>()
+      const report = (latest: Record<string, { value: number | boolean; valueType: string } | undefined> | undefined) => {
+        if (!latest) return
+        for (const [name, entry] of Object.entries(latest)) {
+          if (!entry || !REPORTED_DIAGNOSTICS.has(name)) continue
+          const bad =
+            entry.valueType === 'DiagnosticQuality' ? Number(entry.value) >= 2 : entry.value === true
+          const label = !bad ? '' : entry.valueType === 'DiagnosticQuality' ? (Number(entry.value) >= 3 ? 'Bad' : 'Poor') : 'yes'
+          if (lastSeen.get(name) === label) continue
+          lastSeen.set(name, label)
+          if (!bad) continue
+          const now = Date.now()
+          if (now - (lastSent.get(name) ?? 0) < 60_000) continue
+          lastSent.set(name, now)
+          void callsApi.issue(kind, entityId, name, label).catch(() => undefined)
+        }
+      }
+
       let screenSharing = false
       adapter.onStateChange((state) => {
         setConnected(state.call?.state === 'Connected')
+        // Asked for and refused, or allowed with nothing to use.
+        const access = state.devices.deviceAccess
+        if (!IN_APP_BROWSER && access) {
+          setDeviceTrouble(
+            !access.audio || !access.video ? 'blocked' : state.devices.microphones.length === 0 ? 'none' : null,
+          )
+        }
+        if (state.call) {
+          mediaRef.current = {
+            mic: !state.call.isMuted,
+            cam: state.call.localVideoStreams.some((s) => s.mediaStreamType === 'Video'),
+          }
+          if (state.call.state === 'Connected') noteInCall(kind, entityId, mediaRef.current)
+          const diagnostics = state.call.diagnostics
+          report(diagnostics?.network.latest as Parameters<typeof report>[0])
+          report(diagnostics?.media.latest as Parameters<typeof report>[0])
+        }
         // Sharing stopped from the call's own controls (or by the browser)
         // takes the board off the class's screens too.
         const sharingNow = Boolean(state.call?.isScreenSharingOn)
@@ -260,6 +459,7 @@ export default function CallPage() {
         screenSharing = sharingNow
         if (state.call?.state === 'Connected' && !inCallRef.current) {
           inCallRef.current = true
+          if (muteOnJoin && !state.call.isMuted) void callAdapter.mute().catch(() => undefined)
           void serverCallId().then((id) =>
             callsApi
               .connected(kind, entityId, id)
@@ -271,18 +471,49 @@ export default function CallPage() {
           )
         }
       })
-      adapter.on('callEnded', () => {
+      adapter.on('callEnded', (event) => {
+        const code = event?.code
+        const subCode = event?.subCode
         if (inCallRef.current) {
           inCallRef.current = false
-          void callsApi.left(kind, entityId).catch(() => undefined)
+          void callsApi.left(kind, entityId, { code, sub_code: subCode }).catch(() => undefined)
         }
         setRecording(false)
         setConnected(false)
         releaseBoardStream()
+
+        // A call that dropped - the network went, not the person - comes back by itself:
+        // no "You left the class", no Rejoin to find. Hanging up (code 0), being turned
+        // away (401/403/404) or six drops in ten minutes still end on that screen.
+        const now = Date.now()
+        rejoinsRef.current = rejoinsRef.current.filter((t) => now - t < 10 * 60_000)
+        const dropped = code != null && code >= 400 && ![401, 403, 404].includes(code)
+        if (dropped && !cancelled && rejoinsRef.current.length < 6) {
+          rejoinsRef.current.push(now)
+          resumeRef.current = { ...mediaRef.current }
+          setReconnecting(true)
+          window.setTimeout(() => {
+            if (!cancelled) setAttempt((n) => n + 1)
+          }, 1500)
+          return
+        }
+        // Left on purpose (or gave up): a reload now should not put them back in.
+        forgetInCall(kind, entityId)
+        setReconnecting(false)
         setPhase({ name: 'left', session })
       })
 
       setPhase({ name: 'ready', session, adapter })
+      setReconnecting(false)
+
+      // Back into the call straight away after a drop, without the join screen.
+      if (resume && kind !== 'exam') {
+        try {
+          adapter.joinCall({ microphoneOn: resume.mic, cameraOn: resume.cam })
+        } catch (error) {
+          console.error('Could not rejoin the call', error)
+        }
+      }
 
       // An exam room joins by itself - nobody should be able to forget to press Start call.
       // Cameras come on for everyone; students' microphones start off, so a full class is
@@ -309,6 +540,10 @@ export default function CallPage() {
 
     return () => {
       cancelled = true
+      // Leaving the page inside the app is leaving the class. (A reload never gets here,
+      // so it keeps the note and comes straight back in; an automatic rejoin carries its
+      // own state in resumeRef.)
+      forgetInCall(kind, entityId)
       delete (globalThis as { __H7_CLASS_GRID__?: number }).__H7_CLASS_GRID__
       delete (globalThis as { __H7_CLASS_VIDEOS__?: number }).__H7_CLASS_VIDEOS__
       if (inCallRef.current) {
@@ -322,6 +557,37 @@ export default function CallPage() {
       agent?.dispose()
     }
   }, [kind, entityId, attempt, serverCallId, releaseBoardStream])
+
+  // Keep the screen on while in a call. A tablet or phone that dims and locks halfway
+  // through a lesson drops out of it; this is the commonest way students "lose" a class.
+  React.useEffect(() => {
+    const wakeLock = (navigator as Navigator & {
+      wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> }
+    }).wakeLock
+    if (!connected || !wakeLock) return
+    let lock: { release: () => Promise<void> } | null = null
+    let stopped = false
+    const acquire = async () => {
+      try {
+        const next = await wakeLock.request('screen')
+        if (stopped) void next.release().catch(() => undefined)
+        else lock = next
+      } catch {
+        // Refused (battery saver) or not allowed here: the call goes on regardless.
+      }
+    }
+    void acquire()
+    // The browser lets go of the lock when the tab is hidden; take it again on return.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && !stopped) void acquire()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      stopped = true
+      document.removeEventListener('visibilitychange', onVisible)
+      void lock?.release().catch(() => undefined)
+    }
+  }, [connected])
 
   // A closing tab cancels ordinary requests, so the leave goes out as a
   // keep-alive request instead.
@@ -419,7 +685,11 @@ export default function CallPage() {
       <div className="grid min-h-dvh place-items-center bg-background">
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
           <Loader2 className="size-5 animate-spin" />
-          {kind === 'exam' ? 'Opening the exam room…' : 'Opening your class…'}
+          {reconnecting
+            ? 'Connection lost. Reconnecting…'
+            : kind === 'exam'
+              ? 'Opening the exam room…'
+              : 'Opening your class…'}
         </div>
       </div>
     )
@@ -588,6 +858,9 @@ export default function CallPage() {
           </Button>
         )}
       </header>
+      {deviceTrouble && !deviceHelpHidden && (
+        <DeviceHelp trouble={deviceTrouble} isHost={session.is_host} onDismiss={() => setDeviceHelpHidden(true)} />
+      )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
         {boardMounted && kind && (
           <Whiteboard

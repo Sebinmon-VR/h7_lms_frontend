@@ -1,9 +1,11 @@
+import { useQuery } from '@tanstack/react-query'
 import { Check, Copy, MonitorPlay, Radio, RefreshCw, Video } from 'lucide-react'
 import * as React from 'react'
 import { toast } from 'sonner'
 
 import type { ClassRoomAttendanceOut, ClassRoomEventOut, LiveClassBoardRow, ScheduledPeriod } from '@/api/types'
 import { ApiError } from '@/api/errors'
+import { callsApi, type CallQualityPerson } from '@/api/calls.api'
 import {
   useClassRoomAttendance,
   useClassRoomEvents,
@@ -43,7 +45,7 @@ import { Band, Figure, Figures, TabStrip, TONE_FILL, TONE_TEXT, WorkspaceHeader,
  */
 
 type Filter = 'LIVE' | 'TODAY' | 'ALL'
-type DetailTab = 'periods' | 'log' | 'attendance'
+type DetailTab = 'periods' | 'log' | 'attendance' | 'connection'
 
 const ACTION_LABEL: Record<string, string> = {
   JOINED_ROOM: 'joined the room',
@@ -386,6 +388,100 @@ function RoomLog({ classId }: { classId: number }) {
   )
 }
 
+/** What each ACS warning means, in the office's words. */
+const ISSUE_LABEL: Record<string, string> = {
+  networkReconnect: 'Lost connection',
+  networkReceiveQuality: 'Poor download',
+  networkSendQuality: 'Poor upload',
+  noNetwork: 'No internet',
+  networkRelaysNotReachable: 'Network blocked',
+  noSpeakerDevicesEnumerated: 'No speaker',
+  noMicrophoneDevicesEnumerated: 'No microphone',
+  microphoneNotFunctioning: 'Microphone not working',
+  microphoneMuteUnexpectedly: 'Microphone cut out',
+  microphonePermissionDenied: 'Microphone blocked',
+  cameraFreeze: 'Camera froze',
+  cameraStartFailed: 'Camera failed',
+  cameraStartTimedOut: 'Camera failed',
+  cameraStoppedUnexpectedly: 'Camera stopped',
+  cameraPermissionDenied: 'Camera blocked',
+  capturerStartFailed: 'Screen share failed',
+  capturerStoppedUnexpectedly: 'Screen share stopped',
+}
+
+/** What to tell the family, from the worst of a person's problems. */
+function adviceFor(p: CallQualityPerson): string {
+  const has = (...names: string[]) => names.some((n) => (p.issues[n] ?? 0) > 0)
+  if (has('microphonePermissionDenied', 'cameraPermissionDenied')) return 'Allow the camera and microphone for the site in the browser settings'
+  if (has('noMicrophoneDevicesEnumerated', 'microphoneNotFunctioning', 'microphoneMuteUnexpectedly')) return 'Check the microphone or headset; try another device'
+  if (has('noSpeakerDevicesEnumerated')) return 'Check the speaker or headphones'
+  if (p.drops > 0 || p.rejoins >= 3 || has('noNetwork', 'networkReconnect', 'networkReceiveQuality', 'networkSendQuality')) {
+    return 'Weak internet: move nearer the Wi-Fi router, close other apps and videos, keep the class on screen'
+  }
+  if (has('cameraFreeze', 'cameraStartFailed', 'cameraStartTimedOut', 'cameraStoppedUnexpectedly')) return 'Close other apps using the camera, then rejoin'
+  return ''
+}
+
+/**
+ * Who had trouble in this class's calls today, worst first: how often they dropped out and
+ * came back, and what the call reported about their network and devices.
+ */
+function ConnectionTable({ classId }: { classId: number }) {
+  const quality = useQuery({
+    queryKey: ['admin', 'call-quality', classId],
+    queryFn: () => callsApi.quality(classId),
+    refetchInterval: 60_000,
+  })
+  if (quality.isPending) return <Skeleton className="h-40" />
+  if (quality.isError) return <ErrorState error={quality.error} onRetry={() => quality.refetch()} compact />
+  const people = quality.data.people
+  const troubled = people.filter((p) => p.score > 0)
+  if (people.length === 0) {
+    return <p className="border-y border-border py-8 text-center text-sm text-muted-foreground">Nobody has been in this class's calls today</p>
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">
+        {troubled.length === 0
+          ? 'No connection problems today.'
+          : `${troubled.length} of ${people.length} had problems today. "Dropped" means the call cut off; "rejoined" counts every time they came back in.`}
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
+          <thead>
+            <tr className="border-y border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+              <th className="py-1.5 pr-3 font-medium">Person</th>
+              <th className="px-3 py-1.5 text-right font-medium">Dropped</th>
+              <th className="px-3 py-1.5 text-right font-medium">Rejoined</th>
+              <th className="px-3 py-1.5 font-medium">Problems seen</th>
+              <th className="py-1.5 pl-3 font-medium">What to do</th>
+            </tr>
+          </thead>
+          <tbody>
+            {people.map((p) => {
+              const problems = Object.entries(p.issues)
+                .sort((a, b) => b[1] - a[1])
+                .map(([name, n]) => `${ISSUE_LABEL[name] ?? name}${n > 1 ? ` ×${n}` : ''}`)
+              return (
+                <tr key={p.user_id} className={cn('border-b border-border align-top', p.score === 0 && 'text-muted-foreground')}>
+                  <td className="py-1.5 pr-3">
+                    <span className="font-medium text-foreground">{tidy(p.name)}</span>
+                    {p.role && <span className="block text-xs text-muted-foreground">{ROLE_LABEL[p.role as keyof typeof ROLE_LABEL] ?? p.role}</span>}
+                  </td>
+                  <td className={cn('px-3 py-1.5 text-right tabular-nums', p.drops > 0 && 'font-medium text-danger')}>{p.drops || '—'}</td>
+                  <td className={cn('px-3 py-1.5 text-right tabular-nums', p.rejoins >= 3 && 'font-medium text-warning')}>{p.rejoins || '—'}</td>
+                  <td className="px-3 py-1.5 text-xs">{problems.length ? problems.join(', ') : '—'}</td>
+                  <td className="py-1.5 pl-3 text-xs text-muted-foreground">{adviceFor(p) || '—'}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 function attendanceWho(entry: ClassRoomAttendanceOut): string {
   if (entry.matched_role) return ROLE_LABEL[entry.matched_role as keyof typeof ROLE_LABEL] ?? entry.matched_role
   if (entry.user_kind === 'LMS') return 'Signed in'
@@ -489,6 +585,7 @@ function ClassDetail({ row }: { row: LiveClassBoardRow }) {
     { key: 'periods', label: `Today's periods (${row.periods_today.length})` },
     { key: 'log', label: 'Room log' },
     { key: 'attendance', label: 'Attendance' },
+    { key: 'connection', label: 'Connection' },
   ]
 
   return (
@@ -617,6 +714,7 @@ function ClassDetail({ row }: { row: LiveClassBoardRow }) {
       {tab === 'periods' && <PeriodsTable row={row} now={now} />}
       {tab === 'log' && <RoomLog classId={row.class_id} />}
       {tab === 'attendance' && <AttendanceTable row={row} />}
+      {tab === 'connection' && <ConnectionTable classId={row.class_id} />}
     </div>
   )
 }
