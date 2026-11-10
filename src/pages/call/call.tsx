@@ -7,9 +7,11 @@ import {
   createStatefulCallClient,
   darkTheme,
   lightTheme,
+  onResolveVideoEffectDependencyLazy,
   type CallAdapter,
   type CallCompositeIcons,
   type CompositeLocale,
+  type VideoBackgroundImage,
 } from '@azure/communication-react'
 import { AlertCircle, ArrowLeft, Circle, ClipboardCheck, Loader2, PhoneOff, Presentation, RotateCcw, Square, X } from 'lucide-react'
 import * as React from 'react'
@@ -33,6 +35,35 @@ import { StudentExamTakeView } from '@/pages/student/exam-take'
 // The calling UI's notices close with an icon it never registers itself, so
 // the close button drew as an empty, invisible box.
 const CALL_ICONS = { Cancel: <X className="size-4" /> } as unknown as CallCompositeIcons
+
+/**
+ * A teacher's grid holds everybody in the call (no strip of hidden students below it),
+ * and up to this many of them play live video. With the teacher's own camera that is
+ * 16, the most videos a desktop browser may show; anyone past it shows as their name.
+ */
+const TEACHER_GRID = 200
+const TEACHER_VIDEOS = 15
+
+/**
+ * The backgrounds a teacher can put behind themselves, from public/call-backgrounds.
+ * The photos are from Pexels, free to use under the Pexels licence; the plain ones are drawn.
+ */
+const CALL_BACKGROUNDS: VideoBackgroundImage[] = [
+  { key: 'classroom', url: '/call-backgrounds/classroom.jpg', tooltipText: 'Classroom' },
+  { key: 'classroom-chalkboard', url: '/call-backgrounds/classroom-chalkboard.jpg', tooltipText: 'Classroom with chalkboard' },
+  { key: 'office-bookshelf', url: '/call-backgrounds/office-bookshelf.jpg', tooltipText: 'Office with bookshelf' },
+  { key: 'bookshelf-plant', url: '/call-backgrounds/bookshelf-plant.jpg', tooltipText: 'Bookshelf and plant' },
+  { key: 'books', url: '/call-backgrounds/books.jpg', tooltipText: 'Books' },
+  { key: 'meeting-room', url: '/call-backgrounds/meeting-room.jpg', tooltipText: 'Meeting room' },
+  { key: 'conference-room', url: '/call-backgrounds/conference-room.jpg', tooltipText: 'Conference room' },
+  { key: 'living-room', url: '/call-backgrounds/living-room.jpg', tooltipText: 'Living room' },
+  { key: 'lounge', url: '/call-backgrounds/lounge.jpg', tooltipText: 'Lounge' },
+  { key: 'apartment', url: '/call-backgrounds/apartment.jpg', tooltipText: 'Apartment' },
+  { key: 'soft-blue', url: '/call-backgrounds/soft-blue.png', tooltipText: 'Soft blue' },
+  { key: 'off-white', url: '/call-backgrounds/off-white.png', tooltipText: 'Off white' },
+  { key: 'warm-sand', url: '/call-backgrounds/warm-sand.png', tooltipText: 'Warm sand' },
+  { key: 'slate', url: '/call-backgrounds/slate.png', tooltipText: 'Slate' },
+]
 
 /**
  * A class call's controls. The live text box ("Real-Time Text", in More) is off for
@@ -161,6 +192,17 @@ export default function CallPage() {
         return
       }
 
+      // A teacher sees every student in the main grid (see classGallery in
+      // vite.config.ts); students keep the usual few.
+      const grid = globalThis as { __H7_CLASS_GRID__?: number; __H7_CLASS_VIDEOS__?: number }
+      if (session.is_host) {
+        grid.__H7_CLASS_GRID__ = TEACHER_GRID
+        grid.__H7_CLASS_VIDEOS__ = TEACHER_VIDEOS
+      } else {
+        delete grid.__H7_CLASS_GRID__
+        delete grid.__H7_CLASS_VIDEOS__
+      }
+
       try {
         const credential = new AzureCommunicationTokenCredential({
           token: session.token,
@@ -172,9 +214,21 @@ export default function CallPage() {
         const userId = { communicationUserId: session.acs_user_id }
         const callClient = createStatefulCallClient({ userId })
         agent = await callClient.createCallAgent(credential, { displayName: session.display_name })
-        adapter = await createAzureCommunicationCallAdapterFromClient(callClient, agent, {
-          roomId: session.room_id,
-        })
+        adapter = await createAzureCommunicationCallAdapterFromClient(
+          callClient,
+          agent,
+          { roomId: session.room_id },
+          // Teachers get the camera's Effects: blur, or one of the plain backgrounds.
+          // The effects code is fetched only when a teacher first opens them.
+          session.is_host
+            ? {
+                videoBackgroundOptions: {
+                  videoBackgroundImages: CALL_BACKGROUNDS,
+                  onResolveDependency: onResolveVideoEffectDependencyLazy,
+                },
+              }
+            : undefined,
+        )
       } catch (error) {
         if (cancelled) return
         console.error('Could not start the call client', error)
@@ -255,6 +309,8 @@ export default function CallPage() {
 
     return () => {
       cancelled = true
+      delete (globalThis as { __H7_CLASS_GRID__?: number }).__H7_CLASS_GRID__
+      delete (globalThis as { __H7_CLASS_VIDEOS__?: number }).__H7_CLASS_VIDEOS__
       if (inCallRef.current) {
         inCallRef.current = false
         void callsApi.left(kind, entityId).catch(() => undefined)

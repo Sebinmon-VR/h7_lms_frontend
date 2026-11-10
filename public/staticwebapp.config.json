@@ -6,6 +6,7 @@
       "/assets/*",
       "/*.{css,js,mjs,map,svg,png,jpg,jpeg,ico,webp,woff,woff2}",
       "/legal/*",
+      "/call-backgrounds/*",
       "/arena/*"
     ]
   },

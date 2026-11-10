@@ -1,6 +1,54 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath, URL } from 'node:url'
+
+/**
+ * Lets a teacher see every student in the call's main grid.
+ *
+ * The Azure call screen keeps its grid to the "optimal video count" (about four)
+ * as soon as anyone's camera is on, and to nine otherwise; everybody else goes into
+ * a small paged strip, so a teacher sees four students out of a class. It also plays
+ * only that many videos. It has no option for either, so its two gallery layouts are
+ * changed here, in the production build. When the page sets them (the call page does,
+ * for a teacher):
+ *   - `globalThis.__H7_CLASS_GRID__`   - how many people the grid holds (everyone);
+ *   - `globalThis.__H7_CLASS_VIDEOS__` - how many of them play live video. Desktop
+ *     browsers may show 16 videos at once, so this stays under that; the rest of the
+ *     grid shows each person's name tile.
+ * Narrow or short windows - phones - keep the library's own limits.
+ *
+ * If a library update moves the code, the build fails here rather than quietly
+ * shrinking teachers' grids again.
+ */
+function classGallery(): Plugin {
+  const wide = '(!isNarrow && !isShort && typeof globalThis.__H7_CLASS_GRID__ === "number")'
+  const edits: [string, string][] = [
+    [
+      'maxGridParticipants: remoteVideosOn ? maxRemoteVideoStreams : MAX_GRID_PARTICIPANTS_NOT_LARGE_GALLERY,',
+      `maxGridParticipants: ${wide} ? globalThis.__H7_CLASS_GRID__ : (remoteVideosOn ? maxRemoteVideoStreams : MAX_GRID_PARTICIPANTS_NOT_LARGE_GALLERY),`,
+    ],
+    [
+      'renderTiles(gridParticipants, onRenderRemoteParticipant, maxRemoteVideoStreams,',
+      `renderTiles(gridParticipants, onRenderRemoteParticipant, (${wide} && typeof globalThis.__H7_CLASS_VIDEOS__ === "number") ? globalThis.__H7_CLASS_VIDEOS__ : maxRemoteVideoStreams,`,
+    ],
+  ]
+  const files = /communication-react[\\/].*VideoGallery[\\/](DefaultLayout|FloatingLocalVideoLayout)\.js$/
+  return {
+    name: 'h7-class-gallery',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!files.test(id.split('?')[0])) return null
+      let out = code
+      for (const [from, to] of edits) {
+        if (!out.includes(from)) {
+          this.error(`h7-class-gallery: "${from.slice(0, 40)}…" was not found in ${id}; the Azure call UI has changed.`)
+        }
+        out = out.replace(from, to)
+      }
+      return { code: out, map: null }
+    },
+  }
+}
 
 export default defineConfig(({ command, mode }) => {
   // `loadEnv` reads the .env files *and* matching `process.env` entries, which
@@ -55,7 +103,7 @@ export default defineConfig(({ command, mode }) => {
   }
 
   return {
-    plugins: [react()],
+    plugins: [react(), classGallery()],
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
