@@ -1,10 +1,7 @@
 import {
   ExternalLink,
   Film,
-  Grid3x3,
   Info,
-  LayoutList,
-  Library,
   Link2,
   MoreHorizontal,
   Pencil,
@@ -17,10 +14,8 @@ import * as React from 'react'
 
 import type { StudyMaterialOut } from '@/api/types'
 import {
-  useDeleteMaterial,
   useMyClasses,
   useShareLink,
-  useTeacherMaterials,
   useUpdateMaterial,
   useUploadMaterial,
 } from '@/queries/teacher.queries'
@@ -44,7 +39,6 @@ import { Combobox } from '@/components/ui/combobox'
 import { Input, Textarea } from '@/components/ui/input'
 import { ProgressBar } from '@/components/ui/progress'
 import { Segmented } from '@/components/ui/segmented'
-import { Skeleton } from '@/components/ui/skeleton'
 import {
   Dialog,
   DialogBody,
@@ -60,28 +54,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { FreeformBadge } from '@/components/domain/badges'
-import { ClassChips } from '@/components/domain/class-chips'
-import { CourseTabs } from '@/components/domain/course-tabs'
 import { FileTypeIcon } from '@/components/domain/file-type-icon'
 import { LinkSourceField, LinkTypeIcon, YouTubePreview } from '@/components/domain/link-preview'
 import { FiledBy } from '@/components/domain/filed-by'
-import { EmptyState } from '@/components/feedback/states'
-import { QueryBoundary } from '@/components/feedback/query-boundary'
-import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field, FormError } from '@/components/forms/field'
-import { PageHeader } from '@/components/layout/page-header'
 import { useClassSubjectSelection } from './class-subject-picker'
-import { AdminTeacherNotice, useIsAdminViewingTeacher } from './teacher-guard'
 
 /** In link mode: let the server pick VIDEO for YouTube and LINK otherwise. */
 export const AUTO_TYPE = '__auto'
 
 export type AddMode = 'file' | 'link'
 
-function UploadDialog({
+export function UploadDialog({
   open,
   onOpenChange,
   existing,
@@ -463,7 +449,8 @@ export function MaterialCard({
 
   return (
     <Card className="flex flex-col p-4">
-      {youtubeId && <YouTubePreview videoId={youtubeId} title={material.title} className="mb-3" />}
+      {/* A short strip rather than a full 16:9 frame, so a video does not tower over the other cards. */}
+      {youtubeId && <YouTubePreview videoId={youtubeId} title={material.title} className="mb-3 aspect-[21/9]" />}
       <div className="flex items-start gap-3">
         {isLink ? <LinkTypeIcon youtube={!!youtubeId} /> : <FileTypeIcon url={material.file_url} />}
         <div className="min-w-0 flex-1">
@@ -579,7 +566,7 @@ export function MaterialCard({
  * replace it you delete the material and upload again — so this deliberately
  * offers no file picker.
  */
-function EditMaterialDialog({
+export function EditMaterialDialog({
   material,
   onClose,
 }: {
@@ -730,234 +717,5 @@ function EditMaterialDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
-}
-
-export default function TeacherMaterialsPage() {
-  const isAdmin = useIsAdminViewingTeacher()
-  const materialsQuery = useTeacherMaterials(!isAdmin)
-  const deleteMaterial = useDeleteMaterial()
-  const [dialogOpen, setDialogOpen] = React.useState(false)
-  const [addMode, setAddMode] = React.useState<AddMode>('file')
-  const openAdd = (mode: AddMode) => {
-    setAddMode(mode)
-    setDialogOpen(true)
-  }
-  const [editing, setEditing] = React.useState<StudyMaterialOut | null>(null)
-  const [deleting, setDeleting] = React.useState<StudyMaterialOut | null>(null)
-  const [keepFile, setKeepFile] = React.useState(false)
-  const [view, setView] = React.useState<'grid' | 'list'>('grid')
-  const [classFilter, setClassFilter] = React.useState<string | null>(null)
-  const [subjectFilter, setSubjectFilter] = React.useState<string | null>(null)
-
-  // Default back to a full delete every time the dialog opens; leaving an
-  // orphaned file behind should always be a deliberate choice.
-  React.useEffect(() => {
-    if (deleting) setKeepFile(false)
-  }, [deleting])
-
-  const materials = React.useMemo(
-    () =>
-      [...(materialsQuery.data ?? [])].sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at)),
-    [materialsQuery.data],
-  )
-
-  const classOptions = React.useMemo(() => {
-    const map = new Map<string, string>()
-    for (const m of materials) map.set(String(m.class_id), m.class_room?.name ?? `Class ${m.class_id}`)
-    return [...map.entries()].map(([value, label]) => ({ value, label }))
-  }, [materials])
-
-  /** One class's materials at a time; the subject chips then cover only that class. */
-  const inClass = React.useMemo(
-    () => (classFilter ? materials.filter((m) => String(m.class_id) === classFilter) : materials),
-    [materials, classFilter],
-  )
-
-  const subjectOptions = React.useMemo(() => {
-    const map = new Map<string, string>()
-    for (const m of inClass) map.set(String(m.subject_id), subjectName(m))
-    return [...map.entries()].map(([value, label]) => ({ value, label }))
-  }, [inClass])
-
-  const filtered = React.useMemo(
-    () => (subjectFilter ? inClass.filter((m) => String(m.subject_id) === subjectFilter) : inClass),
-    [inClass, subjectFilter],
-  )
-
-  if (isAdmin) {
-    return (
-      <>
-        <PageHeader title="Materials" description="Notes and resources you have shared." />
-        <AdminTeacherNotice area="materials" />
-      </>
-    )
-  }
-
-  return (
-    <>
-      <PageHeader
-        title="Lessons & Materials"
-        description="Notes, books, worksheets and links shared with your classes."
-        actions={
-          <>
-            <Segmented
-              layoutId="materials-view"
-              value={view}
-              onChange={setView}
-              size="sm"
-              aria-label="Change view"
-              options={[
-                { value: 'grid', label: 'Grid', icon: <Grid3x3 /> },
-                { value: 'list', label: 'List', icon: <LayoutList /> },
-              ]}
-            />
-            <Button variant="outline" icon={<Link2 />} onClick={() => openAdd('link')}>
-              Share link
-            </Button>
-            <Button variant="primary" icon={<Upload />} onClick={() => openAdd('file')}>
-              Upload
-            </Button>
-          </>
-        }
-      >
-        {classOptions.length > 1 && (
-          <ClassChips
-            allowAll
-            label="Class"
-            options={classOptions}
-            value={classFilter}
-            onChange={(value) => {
-              setClassFilter(value)
-              setSubjectFilter(null)
-            }}
-          />
-        )}
-        {subjectOptions.length > 1 && (
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setSubjectFilter(null)}
-              className={cn(
-                'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-                subjectFilter === null
-                  ? 'border-primary bg-primary/12 text-primary'
-                  : 'border-border text-muted-foreground hover:border-primary/40',
-              )}
-            >
-              All subjects
-            </button>
-            {subjectOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setSubjectFilter(option.value)}
-                className={cn(
-                  'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-                  subjectFilter === option.value
-                    ? 'border-primary bg-primary/12 text-primary'
-                    : 'border-border text-muted-foreground hover:border-primary/40',
-                )}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </PageHeader>
-
-      <CourseTabs active="materials" lessonsTo="/teacher/topics" materialsTo="/teacher/materials" />
-
-      <QueryBoundary
-        query={materialsQuery}
-        loading={
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-44 rounded-xl" />
-            ))}
-          </div>
-        }
-        isEmpty={(data) => data.length === 0}
-        empty={
-          <EmptyState
-            icon={<Library />}
-            title="No materials yet"
-            description="Upload notes, a book chapter or a worksheet, or share a YouTube video, and every student in the class will see it."
-            action={
-              <Button variant="primary" icon={<Upload />} onClick={() => openAdd('file')}>
-                Upload material
-              </Button>
-            }
-          />
-        }
-      >
-        {() => (
-          <div
-            className={
-              view === 'grid' ? 'grid gap-4 sm:grid-cols-2 lg:grid-cols-3' : 'flex flex-col gap-3'
-            }
-          >
-            {filtered.map((material) => (
-              <MaterialCard
-                key={material.id}
-                material={material}
-                onEdit={setEditing}
-                onDelete={setDeleting}
-              />
-            ))}
-          </div>
-        )}
-      </QueryBoundary>
-
-      <UploadDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        existing={materials}
-        initialMode={addMode}
-      />
-      <EditMaterialDialog material={editing} onClose={() => setEditing(null)} />
-
-      <ConfirmDialog
-        open={!!deleting}
-        onOpenChange={(v) => !v && setDeleting(null)}
-        title={deleting && isClassVideo(deleting) ? 'Remove this class video?' : 'Delete this material?'}
-        description={
-          deleting
-            ? isClassVideo(deleting)
-              ? `“${deleting.title}” will be removed from the class library for ${subjectName(deleting)}. The video itself is kept in your Recordings, where you can publish it again.`
-              : `“${deleting.title}” will disappear from every student's materials list for ${subjectName(deleting)}.`
-            : undefined
-        }
-        confirmLabel={deleting && isClassVideo(deleting) ? 'Remove from library' : 'Delete material'}
-        destructive
-        loading={deleteMaterial.isPending}
-        onConfirm={() => {
-          if (!deleting) return
-          const classVideo = isClassVideo(deleting)
-          deleteMaterial.mutate(
-            { materialId: deleting.id, keepFile: classVideo ? false : keepFile, classVideo },
-            { onSettled: () => setDeleting(null) },
-          )
-        }}
-      >
-        {deleting && !isClassVideo(deleting) && !isLinkMaterial(deleting) && (
-          <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5">
-            <Checkbox
-              checked={keepFile}
-              onCheckedChange={(v) => setKeepFile(v === true)}
-              className="mt-0.5"
-            />
-            <span className="text-sm">
-              <span className="font-medium">Keep the stored file</span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">
-                Removes the LMS entry but leaves the file in {storageLabel(deleting?.storage_provider)}
-                . Use this only when something outside the LMS links to it — otherwise the file becomes
-                unreachable from here.
-              </span>
-            </span>
-          </label>
-        )}
-      </ConfirmDialog>
-    </>
   )
 }

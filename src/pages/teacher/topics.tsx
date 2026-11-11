@@ -1,5 +1,4 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ClipboardList, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
 import * as React from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
@@ -8,24 +7,19 @@ import type { TopicOut } from '@/api/types'
 import {
   useAddTopicAttachment,
   useCreateTopic,
-  useDeleteTopic,
   useMyClasses,
   useRemoveTopicAttachment,
   useTeacherTopics,
   useUpdateTopic,
 } from '@/queries/teacher.queries'
-import { syllabusProgress } from '@/lib/derive'
-import { formatDate, formatDayLabel, todayApiDate } from '@/lib/datetime'
+import { todayApiDate } from '@/lib/datetime'
 import { subjectName, className as classNameOf } from '@/lib/select'
 import { formatPercent } from '@/lib/format'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Combobox } from '@/components/ui/combobox'
 import { DatePicker } from '@/components/ui/date-picker'
 import { Input, Textarea } from '@/components/ui/input'
-import { ProgressBar, ProgressRing } from '@/components/ui/progress'
-import { Skeleton } from '@/components/ui/skeleton'
 import {
   Dialog,
   DialogBody,
@@ -37,26 +31,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { FiledBy } from '@/components/domain/filed-by'
-import { ClassChips } from '@/components/domain/class-chips'
-import { CourseTabs } from '@/components/domain/course-tabs'
-import { EmptyState } from '@/components/feedback/states'
-import { QueryBoundary } from '@/components/feedback/query-boundary'
-import {
   AttachmentList,
   AttachmentPicker,
   type PendingAttachment,
 } from '@/components/forms/attachment-picker'
-import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field, FormError } from '@/components/forms/field'
-import { PageHeader } from '@/components/layout/page-header'
 import { useClassSubjectSelection } from './class-subject-picker'
-import { AdminTeacherNotice, useIsAdminViewingTeacher } from './teacher-guard'
 
 const schema = z.object({
   class_id: z.string().min(1, 'Choose a class'),
@@ -384,253 +364,5 @@ export function TopicFormDialog({
         </DialogForm>
       </DialogContent>
     </Dialog>
-  )
-}
-
-function TopicTimeline({
-  topics,
-  onEdit,
-  onDelete,
-}: {
-  topics: TopicOut[]
-  onEdit: (topic: TopicOut) => void
-  onDelete: (topic: TopicOut) => void
-}) {
-  // The API returns topics newest-first, but never rely on server order.
-  const grouped = React.useMemo(() => {
-    const map = new Map<string, TopicOut[]>()
-    for (const t of topics) {
-      const list = map.get(t.date_covered)
-      if (list) list.push(t)
-      else map.set(t.date_covered, [t])
-    }
-    return [...map.entries()].sort(([a], [b]) => b.localeCompare(a))
-  }, [topics])
-
-  return (
-    <div className="space-y-6">
-      {grouped.map(([date, items]) => (
-        <div key={date} className="relative pl-6">
-          <span className="absolute left-0 top-1.5 size-2.5 rounded-full bg-primary ring-4 ring-primary/15" aria-hidden />
-          <span className="absolute bottom-0 left-[4.5px] top-6 w-px bg-border" aria-hidden />
-
-          <p className="text-sm font-semibold">{formatDayLabel(date)}</p>
-          <p className="text-xs text-muted-foreground">{formatDate(date)}</p>
-
-          <div className="mt-3 space-y-2">
-            {items.map((topic) => (
-              <Card key={topic.id} className="p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">{topic.topic_title}</p>
-                    {topic.description && (
-                      <p className="mt-1 text-sm text-muted-foreground">{topic.description}</p>
-                    )}
-                    <AttachmentList attachments={topic.attachments ?? []} compact className="mt-2" />
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <Badge tone="accent" size="sm">
-                        {subjectName(topic)}
-                      </Badge>
-                      <Badge tone="outline" size="sm">
-                        {classNameOf(topic)}
-                      </Badge>
-                      {/* Renders only when someone else logged it, which can
-                          only happen in a class this teacher leads. */}
-                      <FiledBy teacherId={topic.teacher_id} teacher={topic.teacher} />
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <ProgressRing value={topic.completion_percentage} size={48} strokeWidth={5}>
-                      <span className="text-2xs font-semibold tabular-nums">
-                        {Math.round(topic.completion_percentage)}%
-                      </span>
-                    </ProgressRing>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={`Actions for ${topic.topic_title}`}
-                        >
-                          <MoreHorizontal />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onSelect={() => onEdit(topic)}>
-                          <Pencil />
-                          Edit topic
-                        </DropdownMenuItem>
-                        <DropdownMenuItem destructive onSelect={() => onDelete(topic)}>
-                          <Trash2 />
-                          Delete topic
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-export default function TeacherTopicsPage() {
-  const isAdmin = useIsAdminViewingTeacher()
-  const topicsQuery = useTeacherTopics(!isAdmin)
-  const deleteTopic = useDeleteTopic()
-  const [dialogOpen, setDialogOpen] = React.useState(false)
-  const [editing, setEditing] = React.useState<TopicOut | null>(null)
-  const [deleting, setDeleting] = React.useState<TopicOut | null>(null)
-
-  const openCreate = () => {
-    setEditing(null)
-    setDialogOpen(true)
-  }
-
-  const openEdit = (topic: TopicOut) => {
-    setEditing(topic)
-    setDialogOpen(true)
-  }
-
-  const [classFilter, setClassFilter] = React.useState<string | null>(null)
-
-  const classOptions = React.useMemo(() => {
-    const map = new Map<string, string>()
-    for (const t of topicsQuery.data ?? []) map.set(String(t.class_id), t.class_room?.name ?? `Class ${t.class_id}`)
-    return [...map.entries()].map(([value, label]) => ({ value, label }))
-  }, [topicsQuery.data])
-
-  /** One class's topics at a time, so the progress and timeline below never mix classes. */
-  const inClass = React.useMemo(
-    () =>
-      classFilter
-        ? (topicsQuery.data ?? []).filter((t) => String(t.class_id) === classFilter)
-        : (topicsQuery.data ?? []),
-    [topicsQuery.data, classFilter],
-  )
-
-  const progress = React.useMemo(
-    () => syllabusProgress(inClass, (t) => subjectName(t)),
-    [inClass],
-  )
-
-  if (isAdmin) {
-    return (
-      <>
-        <PageHeader title="Syllabus" description="Topics you have covered with each class." />
-        <AdminTeacherNotice />
-      </>
-    )
-  }
-
-  return (
-    <>
-      <PageHeader
-        title="Lessons & Materials"
-        description="A running log of what you have taught. Students see this as their syllabus progress. If you are a class teacher, the topics other teachers logged for your class appear here too, marked with their name."
-        actions={
-          <Button variant="primary" icon={<Plus />} onClick={openCreate}>
-            Log topic
-          </Button>
-        }
-      />
-
-      <CourseTabs active="lessons" lessonsTo="/teacher/topics" materialsTo="/teacher/materials" />
-
-      {classOptions.length > 1 && (
-        <div className="mb-6">
-          <ClassChips
-            allowAll
-            label="Class"
-            options={classOptions}
-            value={classFilter}
-            onChange={setClassFilter}
-          />
-        </div>
-      )}
-
-      {progress.length > 0 && (
-        <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {progress.map((subject) => (
-            <Card key={subject.subjectId}>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">{subject.subjectName}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <div className="flex items-baseline justify-between">
-                  <span className="text-2xl font-semibold tabular-nums">
-                    {formatPercent(subject.completion, 0)}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {subject.topicCount} {subject.topicCount === 1 ? 'topic' : 'topics'}
-                  </span>
-                </div>
-                <ProgressBar value={subject.completion} />
-                {subject.lastCoveredDate && (
-                  <p className="text-xs text-muted-foreground">
-                    Last covered {formatDayLabel(subject.lastCoveredDate).toLowerCase()}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      <QueryBoundary
-        query={topicsQuery}
-        loading={
-          <div className="space-y-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-24 rounded-xl" />
-            ))}
-          </div>
-        }
-        isEmpty={(data) => data.length === 0}
-        empty={
-          <EmptyState
-            icon={<ClipboardList />}
-            title="No topics logged yet"
-            description="Record the first topic you covered — students see this as their syllabus progress."
-            action={
-              <Button variant="primary" icon={<Plus />} onClick={openCreate}>
-                Log topic
-              </Button>
-            }
-          />
-        }
-      >
-        {(topics) => (
-          <TopicTimeline
-            topics={classFilter ? topics.filter((t) => String(t.class_id) === classFilter) : topics}
-            onEdit={openEdit}
-            onDelete={setDeleting}
-          />
-        )}
-      </QueryBoundary>
-
-      <TopicFormDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} />
-
-      <ConfirmDialog
-        open={!!deleting}
-        onOpenChange={(v) => !v && setDeleting(null)}
-        title="Delete this topic?"
-        description={
-          deleting
-            ? `“${deleting.topic_title}” will be removed from the syllabus and from every student's progress for ${subjectName(deleting)}.`
-            : undefined
-        }
-        confirmLabel="Delete topic"
-        destructive
-        loading={deleteTopic.isPending}
-        onConfirm={() => {
-          if (!deleting) return
-          deleteTopic.mutate(deleting.id, { onSettled: () => setDeleting(null) })
-        }}
-      />
-    </>
   )
 }

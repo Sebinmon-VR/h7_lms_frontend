@@ -35,9 +35,13 @@ function Breadcrumbs() {
   const items = allNavItems(user)
 
   // Longest matching nav path wins, so nested routes resolve to their section.
+  // An item's `alsoActiveFor` paths count as its own (Lessons & Materials owns
+  // /teacher/materials as well as /teacher/topics).
+  const paths = (i: (typeof items)[number]) => [i.to, ...(i.alsoActiveFor ?? [])]
+  const hits = (p: string) => location.pathname === p || location.pathname.startsWith(`${p}/`)
   const match = items
-    .filter((i) => location.pathname === i.to || location.pathname.startsWith(`${i.to}/`))
-    .sort((a, b) => b.to.length - a.to.length)[0]
+    .flatMap((i) => paths(i).filter(hits).map((p) => ({ i, length: p.length })))
+    .sort((a, b) => b.length - a.length)[0]?.i
 
   if (!match) return null
 

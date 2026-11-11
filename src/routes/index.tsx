@@ -119,9 +119,13 @@ const TuitionStudentReportCardDetail = lazy(() =>
 const TeacherDashboard = lazy(() => import('@/pages/teacher/dashboard'))
 const TeacherClasses = lazy(() => import('@/pages/teacher/classes'))
 const TeacherAttendance = lazy(() => import('@/pages/teacher/attendance'))
-const TeacherTopics = lazy(() => import('@/pages/teacher/topics'))
+const TeacherTopics = lazy(() =>
+  import('@/pages/teacher/lessons-materials').then((m) => ({ default: m.TeacherLessonsPage })),
+)
 const TeacherMeetings = lazy(() => import('@/pages/teacher/meetings'))
-const TeacherMaterials = lazy(() => import('@/pages/teacher/materials'))
+const TeacherMaterials = lazy(() =>
+  import('@/pages/teacher/lessons-materials').then((m) => ({ default: m.TeacherMaterialsPage })),
+)
 const TeacherRecordings = lazy(() => import('@/pages/teacher/recordings'))
 const TeacherInsights = lazy(() => import('@/pages/teacher/insights'))
 const TeacherTimetable = lazy(() => import('@/pages/teacher/timetable'))

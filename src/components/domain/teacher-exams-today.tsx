@@ -36,26 +36,25 @@ export function TeacherExamsToday({ examPath }: { examPath: (examId: number) => 
   if (rows.length === 0) return null
 
   return (
-    <section className="mb-6 rounded-2xl border-2 border-primary/40 bg-primary/8 p-4 sm:p-5">
-      <div className="flex items-center gap-2">
-        <ClipboardCheck className="size-5 text-primary" />
-        <h2 className="text-base font-semibold">Exams today</h2>
+    <section>
+      <div className="mb-3 flex items-center gap-2">
+        <ClipboardCheck className="size-4 text-primary" />
+        <h2 className="text-[15px] font-semibold tracking-tight">Exams today</h2>
+        <span className="text-sm font-semibold tabular-nums text-primary">{rows.length}</span>
       </div>
-      <ul className="mt-3 space-y-2">
+      <ul className="divide-y divide-border border-y border-border">
         {rows.map(({ exam, live, roomOpen }) => (
-          <li
-            key={exam.id}
-            className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3 sm:flex-row sm:items-center"
-          >
+          <li key={exam.id} className="flex flex-col gap-2 py-2.5 sm:flex-row sm:items-center">
             <div className="min-w-0 flex-1">
-              <p className="font-semibold">
+              <p className="text-sm font-semibold">
+                {live && <span className="mr-2 text-xs font-semibold text-success">Running</span>}
                 {exam.title}
                 <span className="font-normal text-muted-foreground">
                   {' · '}
                   {[exam.class_room?.name, exam.subject?.name].filter(Boolean).join(' · ')}
                 </span>
               </p>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 {live
                   ? `Running now · closes ${formatDateTime(exam.ends_at)}`
                   : `Starts ${formatDateTime(exam.starts_at)} (${formatRelative(exam.starts_at)})`}
