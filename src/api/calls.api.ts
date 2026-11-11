@@ -61,8 +61,8 @@ const base = (kind: CallKind, id: string) => `/calls/${kind}/${encodeURIComponen
 
 export const callsApi = {
   /** "Let me in": 409 with the reason when the class is not open to this person now. */
-  open: (kind: CallKind, id: string) =>
-    post<CallSession>(`${base(kind, id)}/session`, undefined, { meta: { skipAuthRedirect: true } }),
+  open: (kind: CallKind, id: string, device?: { device: string; device_kind: 'phone' | 'tablet' | 'computer' }) =>
+    post<CallSession>(`${base(kind, id)}/session`, device ?? undefined, { meta: { skipAuthRedirect: true } }),
 
   /** "I am in": logged as the join; starts the teacher's recording. */
   connected: (kind: CallKind, id: string, serverCallId: string | null) =>

@@ -159,6 +159,35 @@ const APPLE_DEVICE =
   (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
 
 /**
+ * This browser's own id, kept in its storage. Each device joins a call as its own
+ * identity, so a teacher on a laptop and a phone at once shows the class both cameras
+ * (one identity per person would show only one of them). Falls back to an id for this
+ * page alone when storage is blocked: the call still works, it just is not remembered.
+ */
+const DEVICE_KEY = 'h7.device-id'
+const CALL_DEVICE: { device: string; device_kind: 'phone' | 'tablet' | 'computer' } = (() => {
+  const fresh = () =>
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+  let device = ''
+  try {
+    device = localStorage.getItem(DEVICE_KEY) ?? ''
+    if (!/^[A-Za-z0-9-]{8,64}$/.test(device)) {
+      device = fresh()
+      localStorage.setItem(DEVICE_KEY, device)
+    }
+  } catch {
+    device = fresh()
+  }
+  const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent
+  const ipad = typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1
+  const device_kind =
+    ipad || /iPad|Tablet|Android(?!.*Mobile)/i.test(ua) ? 'tablet' : /Mobi|iPhone|iPod|Android/i.test(ua) ? 'phone' : 'computer'
+  return { device, device_kind }
+})()
+
+/**
  * Why this device cannot use its camera or microphone, and what the family should tap
  * to fix it - over the call, from the join screen on, because the call's own screen only
  * says "No speakers found" and greys its button.
@@ -328,7 +357,7 @@ export default function CallPage() {
       setPhase({ name: 'loading' })
       let session: CallSession
       try {
-        session = await callsApi.open(kind, entityId)
+        session = await callsApi.open(kind, entityId, CALL_DEVICE)
       } catch (error) {
         if (cancelled) return
         const message =
@@ -354,7 +383,7 @@ export default function CallPage() {
           refreshProactively: true,
           // Renewed through the same gate: a class whose window has closed
           // stops handing out tokens, and the call ends with it.
-          tokenRefresher: async () => (await callsApi.open(kind, entityId)).token,
+          tokenRefresher: async () => (await callsApi.open(kind, entityId, CALL_DEVICE)).token,
         })
         const userId = { communicationUserId: session.acs_user_id }
         const callClient = createStatefulCallClient({ userId })
