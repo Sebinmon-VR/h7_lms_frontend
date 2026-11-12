@@ -140,9 +140,17 @@ const CALL_BACKGROUNDS: VideoBackgroundImage[] = [
  * everyone: once anybody starts it, the whole class can type into it, which turned the
  * lesson into a chat. Screen sharing stays: teachers present, and students may show
  * their work (they join a class as Collaborators, who are allowed to share).
+ *
+ * The share button is asked for outright: left unset, the call drops it from its phone
+ * layout, which it uses on any screen up to 640px wide - a tablet held upright, or a
+ * narrowed laptop window - so the teacher had no way to present. It is shown wherever the
+ * browser can share a screen at all; most phone and tablet browsers cannot (Chrome on
+ * Android, Safari on iPad), and there the Whiteboard is the way to show the class something.
  */
+const CAN_SHARE_SCREEN =
+  typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getDisplayMedia === 'function'
 const CLASS_CALL_OPTIONS: CallCompositeOptions = {
-  callControls: { realTimeTextButton: false },
+  callControls: { realTimeTextButton: false, screenShareButton: CAN_SHARE_SCREEN },
   // Out of the box "Start call" stays greyed out until a microphone is allowed and
   // found, so a student whose tablet has blocked the microphone could not get into the
   // class at all. They come in anyway and can watch and listen; the banner over the call
