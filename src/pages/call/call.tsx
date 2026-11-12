@@ -1,4 +1,4 @@
-import { LocalVideoStream, type CallAgent } from '@azure/communication-calling'
+import { LocalVideoStream, type Call, type CallAgent } from '@azure/communication-calling'
 import { AzureCommunicationTokenCredential } from '@azure/communication-common'
 import {
   CallComposite,
@@ -15,7 +15,22 @@ import {
   type CompositeLocale,
   type VideoBackgroundImage,
 } from '@azure/communication-react'
-import { AlertCircle, ArrowLeft, Circle, ClipboardCheck, Loader2, PhoneOff, Presentation, RotateCcw, Square, X } from 'lucide-react'
+import {
+  AlertCircle,
+  ArrowLeft,
+  Circle,
+  ClipboardCheck,
+  FileUp,
+  Loader2,
+  MicOff,
+  PhoneOff,
+  Presentation,
+  RotateCcw,
+  SmilePlus,
+  Square,
+  Volume2,
+  X,
+} from 'lucide-react'
 import * as React from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -28,7 +43,8 @@ import { formatDateTime } from '@/lib/datetime'
 import { roleHome, useAuth } from '@/providers/auth-provider'
 import { useTheme } from '@/providers/theme-provider'
 
-import { Whiteboard } from './whiteboard'
+import { PRESENT_ACCEPT, Whiteboard } from './whiteboard'
+import { ReactionLayer, ReactionPicker, useClassReactions } from './reactions'
 import { RegisterPanel, usePeriodRegister } from './register-panel'
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { InvigilatorPanel } from './invigilator-panel'
@@ -36,7 +52,11 @@ import { StudentExamTakeView } from '@/pages/student/exam-take'
 
 // The calling UI's notices close with an icon it never registers itself, so
 // the close button drew as an empty, invisible box.
-const CALL_ICONS = { Cancel: <X className="size-4" /> } as unknown as CallCompositeIcons
+// H7React is the React button's own icon, registered with the call's icons by that name.
+const CALL_ICONS = {
+  Cancel: <X className="size-4" />,
+  H7React: <SmilePlus className="size-5" />,
+} as unknown as CallCompositeIcons
 
 /**
  * A note, in this tab only, that its person is in a call and how their microphone and
@@ -70,6 +90,15 @@ function readInCall(kind: string, id: string): { mic: boolean; cam: boolean } | 
   } catch {
     return null
   }
+}
+
+/**
+ * Whether this page has been tapped or typed in since it loaded. Until it has, browsers
+ * (Safari and iPads above all) keep its sound off, so a call joined without a tap connects
+ * and then plays nothing. Browsers that cannot say are taken as not tapped.
+ */
+function pageWasTouched() {
+  return Boolean((navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation?.hasBeenActive)
 }
 
 function forgetInCall(kind: string, id: string) {
@@ -149,14 +178,45 @@ const CALL_BACKGROUNDS: VideoBackgroundImage[] = [
  */
 const CAN_SHARE_SCREEN =
   typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getDisplayMedia === 'function'
-const CLASS_CALL_OPTIONS: CallCompositeOptions = {
-  callControls: { realTimeTextButton: false, screenShareButton: CAN_SHARE_SCREEN },
-  // Out of the box "Start call" stays greyed out until a microphone is allowed and
-  // found, so a student whose tablet has blocked the microphone could not get into the
-  // class at all. They come in anyway and can watch and listen; the banner over the call
-  // tells them how to allow the microphone and camera.
-  joinCallOptions: { microphoneCheck: 'skip' },
+
+/** The React button's id, so the reactions row can tell a tap on it from a tap elsewhere. */
+const REACT_BUTTON_ID = 'h7-react-button'
+
+/**
+ * Made afresh for each layout, never shared: the call writes into the options it is given
+ * when it uses its phone layout, which would otherwise stick when the page goes wide again.
+ *
+ * `compact` drops the buttons' labels, for a call area too narrow for the labelled bar
+ * (with the whiteboard beside it, or a smaller laptop window).
+ */
+function classCallOptions(compact: boolean, onReact: () => void): CallCompositeOptions {
+  return {
+    callControls: {
+      realTimeTextButton: false,
+      screenShareButton: CAN_SHARE_SCREEN,
+      ...(compact ? { displayType: 'compact' as const } : {}),
+      onFetchCustomButtonProps: [
+        () => ({
+          placement: 'primary',
+          id: REACT_BUTTON_ID,
+          iconName: 'H7React',
+          disabled: false,
+          strings: { label: 'React', tooltipContent: 'Send a reaction', ariaLabel: 'Send a reaction' },
+          onItemClick: onReact,
+        }),
+      ],
+    },
+    // Out of the box "Start call" stays greyed out until a microphone is allowed and
+    // found, so a student whose tablet has blocked the microphone could not get into the
+    // class at all. They come in anyway and can watch and listen; the banner over the call
+    // tells them how to allow the microphone and camera.
+    joinCallOptions: { microphoneCheck: 'skip' },
+  }
 }
+
+/** Below these widths of the call area, the bar loses its labels, then takes the phone layout. */
+const COMPACT_BAR_BELOW = 960
+const PHONE_LAYOUT_BELOW = 600
 
 /** Opened inside another app's own browser (WhatsApp, Facebook, the Google app...). */
 const IN_APP_BROWSER = /; wv\)|FBAN|FBAV|Instagram|Line\/|WhatsApp|Snapchat|GSA\//i.test(
@@ -318,6 +378,24 @@ export default function CallPage() {
   // Show the board to the class as soon as the call connects, unless the
   // teacher hid it.
   const boardWantedRef = React.useRef(false)
+  // Present: a picture or PDF chosen in the header, handed to the board to show the class.
+  // The file input lives here, not in the board, so the tap that opens the picker is the
+  // button's own (tablets refuse a picker opened later).
+  const presentInputRef = React.useRef<HTMLInputElement | null>(null)
+  const [presented, setPresented] = React.useState<{ key: number; files: File[] } | null>(null)
+
+  // The call area's own width, which decides the control bar's layout. The window's width
+  // is not enough: the whiteboard beside the call narrows it with the window unchanged, and
+  // the bar, which only re-measures itself when the window resizes, laid its buttons over
+  // each other.
+  const [callArea, setCallArea] = React.useState<HTMLDivElement | null>(null)
+  const [callWidth, setCallWidth] = React.useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth))
+  React.useEffect(() => {
+    if (!callArea) return
+    const observer = new ResizeObserver(([entry]) => setCallWidth(Math.round(entry.contentRect.width)))
+    observer.observe(callArea)
+    return () => observer.disconnect()
+  }, [callArea])
 
   const agentRef = React.useRef<CallAgent | null>(null)
   // True between the call connecting and this person leaving it, so a leave is
@@ -331,6 +409,8 @@ export default function CallPage() {
   // When the recent automatic rejoins happened, to stop trying after a few in a row.
   const rejoinsRef = React.useRef<number[]>([])
   const [reconnecting, setReconnecting] = React.useState(false)
+  // Set after a reload in the middle of a call: the one tap that takes them back in with sound.
+  const [tapToRejoin, setTapToRejoin] = React.useState<(() => void) | null>(null)
   // Camera or microphone blocked or missing on this device, to explain over the call.
   const [deviceTrouble, setDeviceTrouble] = React.useState<'blocked' | 'none' | 'in-app' | null>(
     IN_APP_BROWSER ? 'in-app' : null,
@@ -440,6 +520,7 @@ export default function CallPage() {
       // that reloaded while in the call (tablets and phones reload a tab that sat in the
       // background), from what was noted in this tab while connected. A fresh join by a
       // student starts with the microphone off, so a class is not twenty open lines.
+      const afterDrop = resumeRef.current !== null
       const resume = resumeRef.current ?? readInCall(kind, entityId)
       resumeRef.current = null
       const muteOnJoin = !resume && !session.is_host && kind !== 'exam'
@@ -543,13 +624,20 @@ export default function CallPage() {
       setPhase({ name: 'ready', session, adapter })
       setReconnecting(false)
 
-      // Back into the call straight away after a drop, without the join screen.
+      // Back into the call without the join screen. After a drop the page has been tapped
+      // already (to join the first time), so it goes straight back in. After a reload it
+      // has not, and a call joined then is silent - the student is in the class and hears
+      // nothing - so it waits for one tap on "Tap to rejoin", which also lets the sound play.
       if (resume && kind !== 'exam') {
-        try {
-          adapter.joinCall({ microphoneOn: resume.mic, cameraOn: resume.cam })
-        } catch (error) {
-          console.error('Could not rejoin the call', error)
+        const rejoin = () => {
+          try {
+            callAdapter.joinCall({ microphoneOn: resume.mic, cameraOn: resume.cam })
+          } catch (error) {
+            console.error('Could not rejoin the call', error)
+          }
         }
+        if (afterDrop || pageWasTouched()) rejoin()
+        else setTapToRejoin(() => rejoin)
       }
 
       // An exam room joins by itself - nobody should be able to forget to press Start call.
@@ -590,10 +678,55 @@ export default function CallPage() {
       agentRef.current = null
       releaseBoardStream()
       setConnected(false)
+      setTapToRejoin(null)
       adapter?.dispose()
       agent?.dispose()
     }
   }, [kind, entityId, attempt, serverCallId, releaseBoardStream])
+
+  // The call itself while connected; a call rejoined after a drop is a new one.
+  const [activeCall, setActiveCall] = React.useState<Call | undefined>(undefined)
+  React.useEffect(() => {
+    setActiveCall(connected ? agentRef.current?.calls[0] : undefined)
+  }, [connected])
+
+  const myCallId = phase.name === 'ready' ? phase.session.acs_user_id : undefined
+  const reactions = useClassReactions(activeCall, myCallId)
+  const [reactOpen, setReactOpen] = React.useState(false)
+  const toggleReactions = React.useCallback(() => setReactOpen((open) => !open), [])
+  const closeReactions = React.useCallback(() => setReactOpen(false), [])
+
+  const phoneLayout = callWidth < PHONE_LAYOUT_BELOW
+  const compactBar = callWidth < COMPACT_BAR_BELOW
+  const classOptions = React.useMemo(
+    () => classCallOptions(compactBar, toggleReactions),
+    // A new object for each layout (see classCallOptions); phoneLayout is listed for that.
+    [compactBar, phoneLayout, toggleReactions],
+  )
+
+  // A teacher mutes every student at once. Students can unmute themselves to answer, as in
+  // any class call; other teachers in the room (presenters) are left alone.
+  const [mutingAll, setMutingAll] = React.useState(false)
+  const muteStudents = async () => {
+    const call = agentRef.current?.calls[0]
+    if (!call) return
+    const speaking = call.remoteParticipants.filter((p) => p.role !== 'Presenter' && !p.isMuted)
+    if (!speaking.length) {
+      toast.info('Every student is already muted.')
+      return
+    }
+    setMutingAll(true)
+    try {
+      const results = await Promise.allSettled(speaking.map((p) => p.mute()))
+      const failed = results.filter((r) => r.status === 'rejected').length
+      const done = speaking.length - failed
+      if (failed && !done) toast.error('The students could not be muted. Try again in a moment.')
+      else if (failed) toast.warning(`Muted ${done} students; ${failed} could not be muted.`)
+      else toast.success(done === 1 ? 'Muted 1 student.' : `Muted ${done} students.`)
+    } finally {
+      setMutingAll(false)
+    }
+  }
 
   // Keep the screen on while in a call. A tablet or phone that dims and locks halfway
   // through a lesson drops out of it; this is the commonest way students "lose" a class.
@@ -884,6 +1017,40 @@ export default function CallPage() {
           </Button>
         )}
         {session.is_host && (
+          <>
+            <Button variant="outline" size="sm" icon={<FileUp />} onClick={() => presentInputRef.current?.click()}>
+              Present
+            </Button>
+            <input
+              ref={presentInputRef}
+              type="file"
+              accept={PRESENT_ACCEPT}
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? [])
+                event.target.value = ''
+                if (!files.length) return
+                openBoard()
+                setPresented({ key: Date.now(), files })
+              }}
+            />
+          </>
+        )}
+        {session.is_host && (
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<MicOff />}
+            loading={mutingAll}
+            disabled={!connected}
+            onClick={() => void muteStudents()}
+            title="Mute every student's microphone. They can unmute themselves to answer."
+          >
+            Mute all
+          </Button>
+        )}
+        {session.is_host && (
           <Button
             variant="outline"
             size="sm"
@@ -910,10 +1077,12 @@ export default function CallPage() {
             onShare={() => void showBoard()}
             onStopSharing={() => void hideBoard()}
             onClose={closeBoard}
+            presented={presented}
             className="min-h-0 min-w-0 flex-[3]"
           />
         )}
         <div
+          ref={setCallArea}
           className={cn(
             'relative min-h-0 min-w-0 flex-1',
             // With the board open the call shrinks to a strip (phones) or a
@@ -926,9 +1095,38 @@ export default function CallPage() {
             icons={CALL_ICONS}
             locale={CALL_LOCALE}
             fluentTheme={resolved === 'dark' ? darkTheme : lightTheme}
-            formFactor={window.matchMedia('(max-width: 640px)').matches ? 'mobile' : 'desktop'}
-            options={CLASS_CALL_OPTIONS}
+            formFactor={phoneLayout ? 'mobile' : 'desktop'}
+            options={classOptions}
           />
+          <ReactionLayer floating={reactions.floating} />
+          <ReactionPicker
+            open={reactOpen && connected}
+            onPick={reactions.send}
+            onClose={closeReactions}
+            buttonId={REACT_BUTTON_ID}
+          />
+          {tapToRejoin && (
+            <div className="absolute inset-0 z-30 grid place-items-center bg-background/95 p-6 text-center">
+              <div className="flex max-w-sm flex-col items-center gap-3">
+                <Volume2 className="size-10 text-primary" />
+                <p className="text-lg font-semibold">The class is still on</p>
+                <p className="text-sm text-muted-foreground">
+                  The page reloaded. Tap below to go back in - the tap is what lets your device play the class's sound.
+                </p>
+                <Button
+                  size="lg"
+                  icon={<Volume2 />}
+                  onClick={() => {
+                    const rejoin = tapToRejoin
+                    setTapToRejoin(null)
+                    rejoin()
+                  }}
+                >
+                  Tap to rejoin the class
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

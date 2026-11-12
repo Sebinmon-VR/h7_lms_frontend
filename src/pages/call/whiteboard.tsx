@@ -6,8 +6,10 @@ import {
   Eraser,
   Eye,
   EyeOff,
+  FileUp,
   Grid3x3,
   Highlighter,
+  Loader2,
   Minus,
   MoveUpRight,
   Pencil,
@@ -20,6 +22,7 @@ import {
   X,
 } from 'lucide-react'
 import * as React from 'react'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -33,6 +36,20 @@ import {
 import { InfoTip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/cn'
 
+import { BOARD_HEIGHT, BOARD_WIDTH } from './board-size'
+import {
+  drawPicture,
+  importFiles,
+  MAX_PDF_PAGES,
+  onPictureReady,
+  peekPicture,
+  preparePicture,
+  type PictureRef,
+} from './presenting'
+
+/** What the Present buttons accept: pictures and PDFs. */
+export const PRESENT_ACCEPT = 'image/*,application/pdf,.pdf'
+
 /**
  * The teacher's whiteboard in a live class.
  *
@@ -42,10 +59,12 @@ import { cn } from '@/lib/cn'
  * server. Drawings are kept as shapes rather than pixels so they can be undone
  * and redrawn on any background, and are saved in this browser for the day so
  * a dropped connection does not wipe the board.
+ *
+ * A teacher can also present a file - a photo, a worksheet, a PDF of slides - which
+ * becomes board pages with the file under the ink (see presenting.ts). That is how a
+ * teacher on a tablet shows the class something, since a tablet's browser cannot
+ * share its screen.
  */
-
-export const BOARD_WIDTH = 1920
-export const BOARD_HEIGHT = 1080
 
 type Point = [number, number]
 type Tool = 'pen' | 'highlighter' | 'eraser' | 'line' | 'arrow' | 'rect' | 'ellipse' | 'text'
@@ -56,7 +75,8 @@ type Item =
   | { kind: 'shape'; shape: 'line' | 'arrow' | 'rect' | 'ellipse'; color: string; size: number; from: Point; to: Point }
   | { kind: 'text'; color: string; size: number; at: Point; text: string }
 
-type Page = { items: Item[]; background: Background }
+/** `picture`: a presented file's page (a photo, a PDF page) drawn under the ink. */
+type Page = { items: Item[]; background: Background; picture?: PictureRef }
 
 type History = { past: Page[][]; present: Page[]; future: Page[][] }
 type HistoryAction =
@@ -245,7 +265,7 @@ function savePages(storageKey: string, pages: Page[]) {
         window.localStorage.removeItem(key)
       }
     }
-    const empty = pages.length === 1 && pages[0].items.length === 0
+    const empty = pages.length === 1 && pages[0].items.length === 0 && !pages[0].picture
     if (empty) window.localStorage.removeItem(storageKey)
     else window.localStorage.setItem(storageKey, JSON.stringify(pages))
   } catch {
@@ -270,6 +290,8 @@ export interface WhiteboardProps {
   onShare: () => void
   onStopSharing: () => void
   onClose: () => void
+  /** Files chosen with the call's Present button, put on the board when `key` changes. */
+  presented?: { key: number; files: File[] } | null
   className?: string
 }
 
@@ -283,6 +305,7 @@ export function Whiteboard({
   onShare,
   onStopSharing,
   onClose,
+  presented,
   className,
 }: WhiteboardProps) {
   const [history, dispatch] = React.useReducer(historyReducer, undefined, () => ({
@@ -328,6 +351,8 @@ export function Whiteboard({
     for (const item of pageRef.current.items) drawItem(layer, item)
     if (draftRef.current) drawItem(layer, draftRef.current)
     paintBackground(ctx, pageRef.current.background)
+    const picture = pageRef.current.picture
+    if (picture) drawPicture(ctx, peekPicture(picture))
     ctx.drawImage(layerRef.current, 0, 0)
   }, [canvasRef])
 
@@ -340,6 +365,14 @@ export function Whiteboard({
   }, [page, paint])
 
   React.useEffect(() => () => cancelAnimationFrame(frameRef.current), [])
+
+  // A presented file's page is drawn from the file in the background; show it once it is,
+  // and get the pages either side ready so turning pages is quick.
+  React.useEffect(() => onPictureReady(requestPaint), [requestPaint])
+  React.useEffect(() => {
+    preparePicture(pages[index + 1]?.picture)
+    preparePicture(pages[index - 1]?.picture)
+  }, [pages, index])
 
   // A shared canvas only sends a picture when it is drawn on, so keep drawing
   // it while the class watches: someone who joins late still gets the board.
@@ -481,10 +514,55 @@ export function Whiteboard({
     setPageIndex(index + 1)
   }
 
+  // Presenting files: each picture or PDF page becomes a page after this one, or takes the
+  // place of this one when it is still blank.
+  const [importing, setImporting] = React.useState(false)
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null)
+  const indexRef = React.useRef(index)
+  indexRef.current = index
+  const pagesRef = React.useRef(pages)
+  pagesRef.current = pages
+  const presentFiles = async (files: File[]) => {
+    if (!files.length) return
+    commitText()
+    setImporting(true)
+    try {
+      const { pictures, skipped, truncated } = await importFiles(files)
+      if (skipped.length) {
+        toast.error(
+          `${skipped.length === 1 ? `"${skipped[0]}"` : `${skipped.length} files`} could not be opened. Choose a picture or a PDF.`,
+        )
+      }
+      if (truncated) toast.info(`Only the first ${MAX_PDF_PAGES} pages of a long PDF were put on the board.`)
+      if (!pictures.length) return
+      const at = Math.min(indexRef.current, pagesRef.current.length - 1)
+      const here = pagesRef.current[at]
+      const first = here && !here.items.length && !here.picture ? at : at + 1
+      const added = pictures.map((picture): Page => ({ items: [], background: 'plain', picture }))
+      dispatch({ type: 'commit', update: (all) => [...all.slice(0, first), ...added, ...all.slice(at + 1)] })
+      setPageIndex(first)
+      // White ink would not show on a white page.
+      setColor((c) => (c === '#ffffff' ? COLORS[0] : c))
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  // Each choice of files is presented once, however often this runs.
+  const presentedKey = presented?.key
+  const handledKeyRef = React.useRef<number | undefined>(undefined)
+  React.useEffect(() => {
+    if (!presented?.files.length || handledKeyRef.current === presented.key) return
+    handledKeyRef.current = presented.key
+    void presentFiles(presented.files)
+  }, [presentedKey])
+
+  // Clears the ink only; a presented page keeps its picture (delete the page to drop it).
   const clearPage = () => commitPage((p) => (p.items.length ? { ...p, items: [] } : p))
 
   const deletePage = () => {
-    if (pages.length === 1) return clearPage()
+    // The last page is never removed, only emptied - its picture too.
+    if (pages.length === 1) return commitPage((p) => (p.items.length || p.picture ? blankPage(p.background) : p))
     dispatch({ type: 'commit', update: (all) => all.filter((_, i) => i !== index) })
     setPageIndex(Math.max(0, index - 1))
   }
@@ -624,6 +702,29 @@ export function Whiteboard({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <InfoTip label="Present a picture or PDF" side="bottom">
+            <button
+              type="button"
+              className={toolButton(false)}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing}
+              aria-label="Present a picture or PDF"
+            >
+              {importing ? <Loader2 className="animate-spin" /> : <FileUp />}
+            </button>
+          </InfoTip>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={PRESENT_ACCEPT}
+            multiple
+            className="hidden"
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? [])
+              event.target.value = ''
+              void presentFiles(files)
+            }}
+          />
           <InfoTip label="Save this page as a picture" side="bottom">
             <button type="button" className={toolButton(false)} onClick={download} aria-label="Save this page as a picture">
               <Download />

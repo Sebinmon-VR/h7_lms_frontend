@@ -50,6 +50,48 @@ function classGallery(): Plugin {
   }
 }
 
+/**
+ * Keeps the call's control bar from laying its buttons over each other.
+ *
+ * The bar centres its main buttons over the whole bar and decides whether they fit beside
+ * the People button by measuring both - but only when the browser window resizes. When the
+ * call area narrows with the window unchanged (the whiteboard opening beside it) or the
+ * buttons change once the call connects, it kept centring them on top of People. Here it
+ * also re-measures whenever the bar or its button groups change size.
+ *
+ * As with classGallery, a library update that moves this code fails the build.
+ */
+function controlBarFit(): Plugin {
+  const edits: [string, string][] = [
+    [
+      "window.addEventListener('resize', handleResize);",
+      "window.addEventListener('resize', handleResize); " +
+        "const __h7Fit = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => handleResize()); " +
+        '[controlBarSizeRef.current, controlBarContainerRef.current, sidepaneControlsRef.current].forEach((el) => { if (el && __h7Fit) __h7Fit.observe(el); });',
+    ],
+    [
+      "return () => window.removeEventListener('resize', handleResize);",
+      "return () => { window.removeEventListener('resize', handleResize); if (__h7Fit) __h7Fit.disconnect(); };",
+    ],
+  ]
+  const file = /communication-react[\\/].*ControlBar[\\/]CommonCallControlBar\.js$/
+  return {
+    name: 'h7-control-bar-fit',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!file.test(id.split('?')[0])) return null
+      let out = code
+      for (const [from, to] of edits) {
+        if (!out.includes(from)) {
+          this.error(`h7-control-bar-fit: "${from.slice(0, 40)}…" was not found in ${id}; the Azure call UI has changed.`)
+        }
+        out = out.replace(from, to)
+      }
+      return { code: out, map: null }
+    },
+  }
+}
+
 export default defineConfig(({ command, mode }) => {
   // `loadEnv` reads the .env files *and* matching `process.env` entries, which
   // is how CI supplies these. Checked here rather than in `src/lib/env.ts`
@@ -103,7 +145,7 @@ export default defineConfig(({ command, mode }) => {
   }
 
   return {
-    plugins: [react(), classGallery()],
+    plugins: [react(), classGallery(), controlBarFit()],
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
