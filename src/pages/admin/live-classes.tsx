@@ -395,6 +395,7 @@ const ISSUE_LABEL: Record<string, string> = {
   networkSendQuality: 'Poor upload',
   noNetwork: 'No internet',
   networkRelaysNotReachable: 'Network blocked',
+  audioReceiveQuality: 'Choppy sound',
   noSpeakerDevicesEnumerated: 'No speaker',
   noMicrophoneDevicesEnumerated: 'No microphone',
   microphoneNotFunctioning: 'Microphone not working',
@@ -415,7 +416,7 @@ function adviceFor(p: CallQualityPerson): string {
   if (has('microphonePermissionDenied', 'cameraPermissionDenied')) return 'Allow the camera and microphone for the site in the browser settings'
   if (has('noMicrophoneDevicesEnumerated', 'microphoneNotFunctioning', 'microphoneMuteUnexpectedly')) return 'Check the microphone or headset; try another device'
   if (has('noSpeakerDevicesEnumerated')) return 'Check the speaker or headphones'
-  if (p.drops > 0 || p.rejoins >= 3 || has('noNetwork', 'networkReconnect', 'networkReceiveQuality', 'networkSendQuality')) {
+  if (p.drops > 0 || p.rejoins >= 3 || has('noNetwork', 'networkReconnect', 'networkReceiveQuality', 'networkSendQuality', 'audioReceiveQuality')) {
     return 'Weak internet: move nearer the Wi-Fi router, close other apps and videos, keep the class on screen'
   }
   if (has('cameraFreeze', 'cameraStartFailed', 'cameraStartTimedOut', 'cameraStoppedUnexpectedly')) return 'Close other apps using the camera, then rejoin'

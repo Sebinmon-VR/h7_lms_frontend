@@ -45,6 +45,7 @@ import { useTheme } from '@/providers/theme-provider'
 
 import { PRESENT_ACCEPT, Whiteboard } from './whiteboard'
 import { ReactionLayer, ReactionPicker, useClassReactions } from './reactions'
+import { isStrongDevice, startingLiveVideos, useCallLoad } from './load-control'
 import { RegisterPanel, usePeriodRegister } from './register-panel'
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { InvigilatorPanel } from './invigilator-panel'
@@ -136,12 +137,12 @@ const REPORTED_DIAGNOSTICS = new Set([
 ])
 
 /**
- * A teacher's grid holds everybody in the call (no strip of hidden students below it),
- * and up to this many of them play live video. With the teacher's own camera that is
- * 16, the most videos a desktop browser may show; anyone past it shows as their name.
+ * A teacher's grid holds everybody in the call (no strip of hidden students below it).
+ * How many of them play live video at once is set by the device and the call's health
+ * (see load-control.ts), and the live ones take turns; the rest show their name until
+ * their turn comes.
  */
 const TEACHER_GRID = 200
-const TEACHER_VIDEOS = 15
 
 /**
  * The backgrounds a teacher can put behind themselves, from public/call-backgrounds.
@@ -459,7 +460,7 @@ export default function CallPage() {
       const grid = globalThis as { __H7_CLASS_GRID__?: number; __H7_CLASS_VIDEOS__?: number }
       if (session.is_host) {
         grid.__H7_CLASS_GRID__ = TEACHER_GRID
-        grid.__H7_CLASS_VIDEOS__ = TEACHER_VIDEOS
+        grid.__H7_CLASS_VIDEOS__ = startingLiveVideos()
       } else {
         delete grid.__H7_CLASS_GRID__
         delete grid.__H7_CLASS_VIDEOS__
@@ -483,13 +484,15 @@ export default function CallPage() {
           // Teachers only: the effects code is a 7 MB download, too much to put on every
           // student's join over a weak connection. The teacher's voice is the one the whole
           // class has to hear, so their microphone has fans, traffic and televisions taken
-          // out of it from the start; students start muted instead (see muteOnJoin).
+          // out of it from the start - on a device strong enough to run it beside a class of
+          // videos; on a smaller one it is a choice in the microphone's menu, as the
+          // cleaning itself was breaking the voice up. Students start muted (muteOnJoin).
           // Teachers also get the camera's Effects: blur, or one of the backgrounds.
           session.is_host
             ? {
                 deepNoiseSuppressionOptions: {
                   onResolveDependency: onResolveDeepNoiseSuppressionDependencyLazy,
-                  deepNoiseSuppressionOnByDefault: true,
+                  deepNoiseSuppressionOnByDefault: isStrongDevice(),
                 },
                 videoBackgroundOptions: {
                   videoBackgroundImages: CALL_BACKGROUNDS,
@@ -518,12 +521,14 @@ export default function CallPage() {
 
       // A rejoin after a dropped connection comes back as it was - and so does a page
       // that reloaded while in the call (tablets and phones reload a tab that sat in the
-      // background), from what was noted in this tab while connected. A fresh join by a
-      // student starts with the microphone off, so a class is not twenty open lines.
+      // background), from what was noted in this tab while connected - except a student's
+      // microphone: a student comes into a class muted every time, a rejoin included, as
+      // in Google Meet once five are in, so a full class is not twenty open lines of echo
+      // and room noise. They unmute to speak.
       const afterDrop = resumeRef.current !== null
       const resume = resumeRef.current ?? readInCall(kind, entityId)
       resumeRef.current = null
-      const muteOnJoin = !resume && !session.is_host && kind !== 'exam'
+      const muteOnJoin = !session.is_host && kind !== 'exam'
       const callAdapter = adapter
 
       // Warnings ACS raises about this person's own network and devices go to the
@@ -631,7 +636,7 @@ export default function CallPage() {
       if (resume && kind !== 'exam') {
         const rejoin = () => {
           try {
-            callAdapter.joinCall({ microphoneOn: resume.mic, cameraOn: resume.cam })
+            callAdapter.joinCall({ microphoneOn: resume.mic && !muteOnJoin, cameraOn: resume.cam })
           } catch (error) {
             console.error('Could not rejoin the call', error)
           }
@@ -692,6 +697,29 @@ export default function CallPage() {
 
   const myCallId = phase.name === 'ready' ? phase.session.acs_user_id : undefined
   const reactions = useClassReactions(activeCall, myCallId)
+
+  // A full class's sound: small student cameras, a teacher's grid sized to the device and
+  // the call's health, and a word to the teacher when several students talk at once.
+  const hosting = phase.name === 'ready' && phase.session.is_host
+  const readyAdapter = phase.name === 'ready' ? phase.adapter : undefined
+  const load = useCallLoad({
+    call: activeCall,
+    isHost: hosting,
+    steerGrid: hosting && kind !== 'exam',
+    onIssue: (name, value) => {
+      if (kind) void callsApi.issue(kind, entityId, name, value).catch(() => undefined)
+    },
+    onLowestLevelStrain: () => {
+      if (!readyAdapter) return
+      void readyAdapter.stopNoiseSuppressionEffect().catch(() => undefined)
+      void readyAdapter.stopVideoBackgroundEffects().catch(() => undefined)
+      toast.info(
+        'Your device is struggling with the class, so noise suppression and background effects were turned off to keep your voice clear.',
+      )
+    },
+  })
+  const [openMicsSnoozedUntil, setOpenMicsSnoozedUntil] = React.useState(0)
+  const showOpenMics = load.tooManyOpenMics && Date.now() > openMicsSnoozedUntil
   const [reactOpen, setReactOpen] = React.useState(false)
   const toggleReactions = React.useCallback(() => setReactOpen((open) => !open), [])
   const closeReactions = React.useCallback(() => setReactOpen(false), [])
@@ -1064,6 +1092,35 @@ export default function CallPage() {
       </header>
       {deviceTrouble && !deviceHelpHidden && (
         <DeviceHelp trouble={deviceTrouble} isHost={session.is_host} onDismiss={() => setDeviceHelpHidden(true)} />
+      )}
+      {session.is_host && showOpenMics && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-warning/30 bg-warning/10 px-4 py-2 text-sm">
+          <MicOff className="size-4 shrink-0 text-warning" />
+          <p className="min-w-0 flex-1">
+            <span className="font-medium">{load.openMics} students have their microphones on.</span> Echo and room noise
+            from their devices make everyone harder to hear.
+          </p>
+          <div className="flex shrink-0 gap-1.5">
+            <Button
+              size="sm"
+              icon={<MicOff />}
+              loading={mutingAll}
+              onClick={() => {
+                setOpenMicsSnoozedUntil(Date.now() + 2 * 60_000)
+                void muteStudents()
+              }}
+            >
+              Mute all
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<X />}
+              aria-label="Not now"
+              onClick={() => setOpenMicsSnoozedUntil(Date.now() + 2 * 60_000)}
+            />
+          </div>
+        </div>
       )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
         {boardMounted && kind && (

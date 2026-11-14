@@ -92,6 +92,51 @@ function controlBarFit(): Plugin {
   }
 }
 
+/**
+ * Lets the live videos in a teacher's grid take turns.
+ *
+ * The grid hands its live slots to whoever is speaking, then to the first students with a
+ * camera on, so with more cameras than live slots the same students were always live and
+ * the rest only ever showed their names. When the page sets
+ * `globalThis.__H7_LIVE_OFFSET__` (the call page does, for a teacher, and moves it on every
+ * 20 seconds), the slots left after the speakers go to the students from that point in the
+ * list, round and round. Tiles stay where they are; only which ones play video changes.
+ */
+function liveVideoTurns(): Plugin {
+  const edits: [string, string][] = [
+    [
+      'const gridTiles = gridParticipants.map(p => {',
+      'const __h7Offset = globalThis.__H7_LIVE_OFFSET__; const __h7Live = new Set(); ' +
+        'if (typeof __h7Offset === "number" && streamsLeftToRender > 0) { ' +
+        'const __h7Others = participantWithStreamsToRenderInGrid.filter(q => !dominantSpeakerWithStreamsToRenderInGrid.includes(q.userId)); ' +
+        'if (__h7Others.length > streamsLeftToRender) { ' +
+        'for (let i = 0; i < streamsLeftToRender; i++) __h7Live.add(__h7Others[(__h7Offset + i) % __h7Others.length].userId); ' +
+        'streamsLeftToRender = 0; } } ' +
+        'const gridTiles = gridParticipants.map(p => {',
+    ],
+    [
+      'return onRenderRemoteParticipant(p, dominantSpeakerWithStreamsToRenderInGrid.includes(p.userId) ||',
+      'return onRenderRemoteParticipant(p, dominantSpeakerWithStreamsToRenderInGrid.includes(p.userId) || __h7Live.has(p.userId) ||',
+    ],
+  ]
+  const file = /communication-react[\\/].*VideoGallery[\\/]utils[\\/]videoGalleryLayoutUtils\.js$/
+  return {
+    name: 'h7-live-video-turns',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!file.test(id.split('?')[0])) return null
+      let out = code
+      for (const [from, to] of edits) {
+        if (!out.includes(from)) {
+          this.error(`h7-live-video-turns: "${from.slice(0, 40)}…" was not found in ${id}; the Azure call UI has changed.`)
+        }
+        out = out.replace(from, to)
+      }
+      return { code: out, map: null }
+    },
+  }
+}
+
 export default defineConfig(({ command, mode }) => {
   // `loadEnv` reads the .env files *and* matching `process.env` entries, which
   // is how CI supplies these. Checked here rather than in `src/lib/env.ts`
@@ -145,7 +190,7 @@ export default defineConfig(({ command, mode }) => {
   }
 
   return {
-    plugins: [react(), classGallery(), controlBarFit()],
+    plugins: [react(), classGallery(), controlBarFit(), liveVideoTurns()],
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
