@@ -149,6 +149,79 @@ function roomJoinState(access: ClassRoomAccessOut) {
   return { canJoin: false, label, live: false }
 }
 
+/** "ARABIC" as "Arabic", for a button. */
+export function subjectWords(name: string | null | undefined): string {
+  if (!name) return 'your class'
+  return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase()
+}
+
+/**
+ * Whether this person's join should go to a shared period's subject rooms
+ * rather than the class room: the period is on, and they are a student, the
+ * class teacher, or one of its subjects' teachers. Admins keep the class room.
+ */
+export function usesSplitRooms(access: ClassRoomAccessOut): boolean {
+  const split = access.split_period
+  if (!split?.is_current || access.is_admin) return false
+  const teacher = access.is_host && !access.leads_class
+  return !teacher || split.rooms.some((room) => room.mine)
+}
+
+/**
+ * The join for a period two subjects share (Grade 7's Arabic and Malayalam at
+ * once): each subject's own room, since one room cannot hold both lessons. A
+ * student picks the one they take; a teacher gets their own subject's.
+ */
+export function SplitRoomButtons({
+  access,
+  size = 'md',
+  className,
+  sameTab = false,
+}: {
+  access: ClassRoomAccessOut
+  size?: 'sm' | 'md' | 'lg'
+  className?: string
+  /** From inside a call: move this tab, rather than leave the class room's call open in it. */
+  sameTab?: boolean
+}) {
+  const navigate = useNavigate()
+  const split = access.split_period
+  if (!split) return null
+  const own = split.rooms.filter((room) => room.mine)
+  const rooms = own.length ? own : split.rooms
+  const go = (link: string) => (sameTab ? navigate(link) : startJoin(navigate).go(link))
+  return (
+    <span className={cn('inline-flex flex-wrap items-center gap-2', className)}>
+      {rooms.map((room) =>
+        room.link ? (
+          <Button
+            key={room.subject_id ?? room.subject_name ?? room.link}
+            variant="primary"
+            size={size}
+            onClick={() => go(room.link as string)}
+            title={room.teacher_name ? `With ${room.teacher_name}` : undefined}
+          >
+            <Video />
+            Join {subjectWords(room.subject_name)}
+          </Button>
+        ) : (
+          <Tooltip key={room.subject_id ?? room.subject_name ?? 'pending'}>
+            <TooltipTrigger asChild>
+              <span>
+                <Button variant="outline" size={size} disabled>
+                  <Hourglass />
+                  {subjectWords(room.subject_name)}: getting ready
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Its room is being made. Try again in a minute.</TooltipContent>
+          </Tooltip>
+        ),
+      )}
+    </span>
+  )
+}
+
 /** Join button for one class's room. `access` may come from any of the room queries. */
 export function JoinRoomButton({
   access,
@@ -162,6 +235,11 @@ export function JoinRoomButton({
   const join = useJoinClassRoom()
   const navigate = useNavigate()
   const state = roomJoinState(access)
+
+  // A shared period on now: the subjects' own rooms, not the class room.
+  if (usesSplitRooms(access)) {
+    return <SplitRoomButtons access={access} size={size} className={className} />
+  }
 
   const open = () => {
     const tab = startJoin(navigate)

@@ -32,7 +32,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ProgressBar } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
-import { JoinRoomButton, LeaveRoomButton, PresenceNote } from '@/components/domain/class-room'
+import {
+  JoinRoomButton,
+  LeaveRoomButton,
+  PresenceNote,
+  subjectWords,
+  usesSplitRooms,
+} from '@/components/domain/class-room'
 import { useCelebration } from '@/components/fun/celebrate'
 import { Appear, Pressable, Stagger, WaveDivider } from '@/components/fun/motion'
 import {
@@ -360,7 +366,13 @@ export default function StudentDashboardPage() {
                 {liveNow ? 'Happening now' : 'Coming up next'}
               </p>
               <p className="mt-0.5 truncate text-xl font-extrabold">
-                {nextPeriod ? subjectName(nextPeriod.entry) : upcomingMeeting!.title}
+                {/* A shared period (Arabic and Malayalam at once) is named by both:
+                    the student picks theirs with the buttons beside it. */}
+                {classRoom && usesSplitRooms(classRoom) && classRoom.split_period
+                  ? classRoom.split_period.rooms.map((room) => subjectWords(room.subject_name)).join(' / ')
+                  : nextPeriod
+                    ? subjectName(nextPeriod.entry)
+                    : upcomingMeeting!.title}
               </p>
               <p className="mt-0.5 text-sm text-muted-foreground">
                 {nextPeriod ? (

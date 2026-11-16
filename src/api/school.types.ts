@@ -1842,6 +1842,32 @@ export interface ClassRoomAccessOut {
    * URL for a manually pasted link.
    */
   room_link?: string | null
+  /**
+   * Today's period two subjects share (Grade 7's Arabic and Malayalam at
+   * once), still to come or on. Each subject has a room of its own for it;
+   * while `is_current`, join buttons offer those instead of the class room.
+   */
+  split_period?: SplitPeriod | null
+}
+
+/** One subject's own room in a shared period. `link` is null until it is made. */
+export interface SplitRoom {
+  subject_id?: number | null
+  subject_name?: string | null
+  teacher_id?: number | null
+  teacher_name?: string | null
+  meeting_id?: number | null
+  link?: string | null
+  /** The caller is this subject's teacher. */
+  mine: boolean
+}
+
+export interface SplitPeriod {
+  starts_at: ApiDateTime
+  ends_at: ApiDateTime
+  period_label?: string | null
+  is_current: boolean
+  rooms: SplitRoom[]
 }
 
 export interface JoinRoomOut {
@@ -2151,6 +2177,8 @@ export interface HomeworkOut {
   days_until_due?: number | null
   /** On a teacher's view. */
   submission_count?: number | null
+  /** Handed in and marked; absent from an older backend. */
+  graded_count?: number | null
   expected_count?: number | null
   /** On a student's view. */
   my_status?: HomeworkStatus | null

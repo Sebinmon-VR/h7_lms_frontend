@@ -28,6 +28,7 @@ import {
   RotateCcw,
   SmilePlus,
   Square,
+  Users,
   Volume2,
   X,
 } from 'lucide-react'
@@ -48,6 +49,8 @@ import { ReactionLayer, ReactionPicker, useClassReactions } from './reactions'
 import { isStrongDevice, startingLiveVideos, useCallLoad } from './load-control'
 import { RegisterPanel, usePeriodRegister } from './register-panel'
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { SplitRoomButtons, subjectWords, usesSplitRooms } from '@/components/domain/class-room'
+import { useClassRoomAccess } from '@/queries/classes.queries'
 import { InvigilatorPanel } from './invigilator-panel'
 import { StudentExamTakeView } from '@/pages/student/exam-take'
 
@@ -417,6 +420,10 @@ export default function CallPage() {
     IN_APP_BROWSER ? 'in-app' : null,
   )
   const [deviceHelpHidden, setDeviceHelpHidden] = React.useState(false)
+  // In a class room during a period two subjects share (Arabic and Malayalam at once), each
+  // subject has its own room: say so over the call, with the way to it.
+  const roomAccess = useClassRoomAccess(kind === 'class' ? Number(entityId) : null, kind === 'class')
+  const splitHere = roomAccess.data && usesSplitRooms(roomAccess.data) ? roomAccess.data : null
 
   const serverCallId = React.useCallback(async (): Promise<string | null> => {
     try {
@@ -1092,6 +1099,32 @@ export default function CallPage() {
       </header>
       {deviceTrouble && !deviceHelpHidden && (
         <DeviceHelp trouble={deviceTrouble} isHost={session.is_host} onDismiss={() => setDeviceHelpHidden(true)} />
+      )}
+      {splitHere?.split_period && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-info/30 bg-info/10 px-4 py-2 text-sm">
+          <Users className="size-4 shrink-0 text-info" />
+          <p className="min-w-0 flex-1">
+            {splitHere.split_period.rooms.some((room) => room.mine) ? (
+              <>
+                <span className="font-medium">
+                  Your{' '}
+                  {subjectWords(splitHere.split_period.rooms.find((room) => room.mine)?.subject_name)} class has its
+                  own room this period.
+                </span>{' '}
+                Your students go there, not here.
+              </>
+            ) : (
+              <>
+                <span className="font-medium">This period is split.</span>{' '}
+                {splitHere.split_period.rooms
+                  .map((room) => `${subjectWords(room.subject_name)}${room.teacher_name ? ` is with ${room.teacher_name}` : ''}`)
+                  .join(', ')}
+                . Go to the room for the subject you take.
+              </>
+            )}
+          </p>
+          <SplitRoomButtons access={splitHere} size="sm" sameTab />
+        </div>
       )}
       {session.is_host && showOpenMics && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-warning/30 bg-warning/10 px-4 py-2 text-sm">
