@@ -137,6 +137,44 @@ function liveVideoTurns(): Plugin {
   }
 }
 
+/**
+ * Lets a student's device pause cameras to keep the class's sound clear.
+ *
+ * On a weak connection the sound breaks up while the device keeps downloading every video
+ * it shows. When the page sets `globalThis.__H7_VIDEO_ONLY_FOR__` to a Set of people (the
+ * call page does, on a student's device whose incoming sound keeps breaking - see
+ * src/pages/call/data-saver.ts), only those people's cameras play; everyone else shows a
+ * name tile, and a tile that stops playing lets its video go, so it is no longer downloaded.
+ * An empty Set pauses every camera. Shared screens are drawn elsewhere and are not touched.
+ */
+function videoSaver(): Plugin {
+  const edits: [string, string][] = [
+    [
+      'let streamsLeftToRender = maxRemoteVideoStreams;',
+      'let streamsLeftToRender = maxRemoteVideoStreams; ' +
+        'const __h7Only = globalThis.__H7_VIDEO_ONLY_FOR__; ' +
+        'if (__h7Only instanceof Set) { const __h7Render = onRenderRemoteParticipant; ' +
+        'onRenderRemoteParticipant = (p, v) => __h7Render(p, Boolean(p && p.videoStream && p.videoStream.isAvailable && __h7Only.has(p.userId))); }',
+    ],
+  ]
+  const file = /communication-react[\\/].*VideoGallery[\\/]utils[\\/]videoGalleryLayoutUtils\.js$/
+  return {
+    name: 'h7-video-saver',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!file.test(id.split('?')[0])) return null
+      let out = code
+      for (const [from, to] of edits) {
+        if (!out.includes(from)) {
+          this.error(`h7-video-saver: "${from.slice(0, 40)}…" was not found in ${id}; the Azure call UI has changed.`)
+        }
+        out = out.replace(from, to)
+      }
+      return { code: out, map: null }
+    },
+  }
+}
+
 export default defineConfig(({ command, mode }) => {
   // `loadEnv` reads the .env files *and* matching `process.env` entries, which
   // is how CI supplies these. Checked here rather than in `src/lib/env.ts`
@@ -190,7 +228,7 @@ export default defineConfig(({ command, mode }) => {
   }
 
   return {
-    plugins: [react(), classGallery(), controlBarFit(), liveVideoTurns()],
+    plugins: [react(), classGallery(), controlBarFit(), liveVideoTurns(), videoSaver()],
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),

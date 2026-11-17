@@ -29,6 +29,7 @@ import {
   SmilePlus,
   Square,
   Users,
+  VideoOff,
   Volume2,
   X,
 } from 'lucide-react'
@@ -307,7 +308,8 @@ function DeviceHelp({
 }
 
 // Its recording notice speaks of "consent to be transcribed"; classes are
-// recorded, not transcribed.
+// recorded, not transcribed. The two mute notices say what to do, not just what happened:
+// students come in muted and are muted by the teacher's Mute all, and then talk unheard.
 const callStrings = COMPOSITE_LOCALE_EN_US.component.strings
 const CALL_LOCALE: CompositeLocale = {
   ...COMPOSITE_LOCALE_EN_US,
@@ -319,6 +321,14 @@ const CALL_LOCALE: CompositeLocale = {
         ...callStrings.notificationStack,
         recordingStarted: { title: 'This class is being recorded.', dismissButtonAriaLabel: 'Close' },
         recordingStopped: { title: 'Recording stopped.', dismissButtonAriaLabel: 'Close' },
+        speakingWhileMuted: {
+          title: 'You are muted. Nobody can hear you - tap the microphone button to speak.',
+          dismissButtonAriaLabel: 'Close',
+        },
+        mutedByRemoteParticipant: {
+          title: 'The teacher muted you. Tap the microphone button when you want to speak.',
+          dismissButtonAriaLabel: 'Close',
+        },
       },
     },
   },
@@ -713,6 +723,8 @@ export default function CallPage() {
     call: activeCall,
     isHost: hosting,
     steerGrid: hosting && kind !== 'exam',
+    // A student's device pauses videos when the sound breaks up; an exam's cameras stay on.
+    saveData: phase.name === 'ready' && !hosting && kind !== 'exam',
     onIssue: (name, value) => {
       if (kind) void callsApi.issue(kind, entityId, name, value).catch(() => undefined)
     },
@@ -1153,6 +1165,20 @@ export default function CallPage() {
               onClick={() => setOpenMicsSnoozedUntil(Date.now() + 2 * 60_000)}
             />
           </div>
+        </div>
+      )}
+      {!session.is_host && load.videosPaused > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-info/30 bg-info/10 px-4 py-2 text-sm">
+          <VideoOff className="size-4 shrink-0 text-info" />
+          <p className="min-w-0 flex-1">
+            <span className="font-medium">Your internet is weak, so videos are paused to keep the sound clear.</span>{' '}
+            {load.videosPaused === 1
+              ? 'You still see the teacher and anything they share. Classmates’ videos come back by themselves when the sound is steady.'
+              : 'You still hear the class and see anything the teacher shares. Videos come back by themselves when the sound is steady.'}
+          </p>
+          <Button size="sm" variant="outline" onClick={load.showVideos}>
+            Show videos
+          </Button>
         </div>
       )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">

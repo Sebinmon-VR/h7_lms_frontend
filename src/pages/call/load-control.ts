@@ -1,6 +1,8 @@
 import { Features, type Call, type MediaStatsCollector, type MediaStatsReportSample } from '@azure/communication-calling'
+import { toFlatCommunicationIdentifier } from '@azure/communication-react'
 import * as React from 'react'
 
+import { DataSaver, type SaverLevel } from './data-saver'
 import { LEVELS, LiveVideoGovernor } from './live-video-governor'
 
 /**
@@ -17,13 +19,22 @@ import { LEVELS, LiveVideoGovernor } from './live-video-governor'
  *    fits the device, lowered when the sound or the pictures start to suffer, raised again
  *    after a quiet minute. Everyone keeps a tile, and the live ones take turns, so every
  *    student is seen in turn.
- *  - Received sound is measured; poor sound goes to the office's Connection view.
+ *  - The teacher's camera sends a picture sized for a face on a screen (540p), not full HD:
+ *    it is the one video every student downloads all lesson. A shared screen or the
+ *    whiteboard still goes out in full, so writing stays sharp.
+ *  - Received sound is measured; poor sound goes to the office's Connection view. On a
+ *    student's device, sound that keeps breaking up pauses the videos there (data-saver.ts).
  *  - The teacher is told when several students have their microphones on at once.
  */
 
 export type Health = 'Good' | 'Poor' | 'Bad'
 
-const gallery = globalThis as { __H7_CLASS_VIDEOS__?: number; __H7_LIVE_OFFSET__?: number }
+const gallery = globalThis as {
+  __H7_CLASS_VIDEOS__?: number
+  __H7_LIVE_OFFSET__?: number
+  /** Set: only these people's cameras play on this device (see videoSaver in vite.config.ts). */
+  __H7_VIDEO_ONLY_FOR__?: Set<string>
+}
 
 /** How often the class's load is judged (the steps themselves: live-video-governor.ts). */
 const CHECK_MS = 5_000
@@ -32,6 +43,8 @@ const ROTATE_MS = 20_000
 
 /** What a student's camera sends: plenty for a class tile, a fraction of the default. */
 const STUDENT_CAMERA = { frameHeight: { max: 240 }, frameRate: { max: 15 }, bitrate: { max: 300_000 } }
+/** The teacher's camera: clear for a face or a book held up, a third of full HD's data. */
+const TEACHER_CAMERA = { frameHeight: { max: 540 }, frameRate: { max: 24 }, bitrate: { max: 900_000 } }
 /** 0 lifts a limit: a shared screen has to be readable. */
 const NO_LIMIT = { frameHeight: { max: 0 }, frameRate: { max: 0 }, bitrate: { max: 0 } }
 
@@ -88,6 +101,7 @@ export function useCallLoad({
   call,
   isHost,
   steerGrid,
+  saveData,
   onIssue,
   onLowestLevelStrain,
 }: {
@@ -96,6 +110,8 @@ export function useCallLoad({
   isHost: boolean
   /** The teacher's class grid, whose live videos this sizes and turns. */
   steerGrid: boolean
+  /** A student in a class: pause videos on this device when the sound coming in breaks up. */
+  saveData: boolean
   /** A warning for the office's Connection view, as the call's own warnings are sent. */
   onIssue: (name: string, value: string) => void
   /** The teacher's grid is as small as it goes and the call still struggles. */
@@ -104,6 +120,8 @@ export function useCallLoad({
   const [liveVideos, setLiveVideos] = React.useState(() => startingLiveVideos())
   const [openMics, setOpenMics] = React.useState(0)
   const [tooManyOpenMics, setTooManyOpenMics] = React.useState(false)
+  const [videosPaused, setVideosPaused] = React.useState<SaverLevel>(0)
+  const saverRef = React.useRef<DataSaver | null>(null)
 
   // The latest callbacks, so a re-render does not restart the measuring.
   const onIssueRef = React.useRef(onIssue)
@@ -111,11 +129,12 @@ export function useCallLoad({
   const onStrainRef = React.useRef(onLowestLevelStrain)
   onStrainRef.current = onLowestLevelStrain
 
-  // A student's camera sends a class-tile picture; their shared screen goes out in full.
+  // A student's camera sends a class-tile picture, a teacher's a face-sized one; a shared
+  // screen (or the whiteboard) goes out in full.
   React.useEffect(() => {
-    if (!call || isHost) return
+    if (!call) return
     const apply = () => {
-      const send = call.isScreenSharingOn ? NO_LIMIT : STUDENT_CAMERA
+      const send = call.isScreenSharingOn ? NO_LIMIT : isHost ? TEACHER_CAMERA : STUDENT_CAMERA
       void call.setConstraints({ video: { send } }).catch((error) => console.warn('Camera limits not set', error))
     }
     apply()
@@ -131,10 +150,29 @@ export function useCallLoad({
     let pressure = false
     const lastSent = new Map<string, number>()
 
+    // A student's device: which cameras may play, from how the sound is.
+    const saver = saveData ? new DataSaver(Date.now()) : null
+    saverRef.current = saver
+    const applySaver = (level: SaverLevel) => {
+      if (level === 0) delete gallery.__H7_VIDEO_ONLY_FOR__
+      else {
+        // Level 1 keeps the teachers' cameras (the room's presenters); level 2 keeps none.
+        const keep = new Set<string>()
+        if (level === 1) {
+          for (const p of call.remoteParticipants) {
+            if (p.role === 'Presenter') keep.add(toFlatCommunicationIdentifier(p.identifier))
+          }
+        }
+        gallery.__H7_VIDEO_ONLY_FOR__ = keep
+      }
+      setVideosPaused(level)
+    }
+
     let collector: MediaStatsCollector | null = null
     const onSample = (sample: MediaStatsReportSample) => {
       latestAudio = audioHealth(sample)
       latestLag = decodeLagging(sample)
+      if (saver) applySaver(saver.reading(latestAudio !== 'Good', Date.now()))
       if (latestAudio !== 'Good') {
         const now = Date.now()
         if (now - (lastSent.get(latestAudio) ?? 0) > 60_000) {
@@ -181,6 +219,11 @@ export function useCallLoad({
     return () => {
       window.clearInterval(timer)
       observer?.disconnect()
+      if (saver) {
+        saverRef.current = null
+        delete gallery.__H7_VIDEO_ONLY_FOR__
+        setVideosPaused(0)
+      }
       if (collector) {
         try {
           collector.off('sampleReported', onSample)
@@ -190,7 +233,7 @@ export function useCallLoad({
         }
       }
     }
-  }, [call, steerGrid])
+  }, [call, steerGrid, saveData])
 
   // Live videos take turns, so a class bigger than the grid's live count is all seen.
   React.useEffect(() => {
@@ -227,5 +270,14 @@ export function useCallLoad({
     return () => window.clearInterval(timer)
   }, [call, isHost])
 
-  return { liveVideos, openMics, tooManyOpenMics }
+  /** The student asked for the videos back. */
+  const showVideos = React.useCallback(() => {
+    const saver = saverRef.current
+    if (!saver) return
+    saver.showVideos(Date.now())
+    delete gallery.__H7_VIDEO_ONLY_FOR__
+    setVideosPaused(0)
+  }, [])
+
+  return { liveVideos, openMics, tooManyOpenMics, videosPaused, showVideos }
 }
