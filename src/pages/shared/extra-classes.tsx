@@ -24,6 +24,8 @@ import { Field, FormError } from '@/components/forms/field'
 import { ErrorState } from '@/components/feedback/states'
 import { Band, Figure, Figures, TabStrip, TONE_FILL, TONE_TEXT, WorkspaceHeader, type Tone } from '@/components/layout/workspace'
 
+import { TeacherExtraClasses } from './extra-classes-teacher'
+
 /**
  * Additional classes — classes held outside the timetable.
  *
@@ -307,7 +309,13 @@ function RequestDetail({ request, isAdmin, isMine }: { request: ExtraClassOut; i
 
 // ==================================================================== page
 
+/** Teachers get their own page (extra-classes-teacher.tsx); this one is the admin's. */
 export default function ExtraClassesPage() {
+  const { role } = useAuth()
+  return role === 'ADMIN' ? <AdminExtraClasses /> : <TeacherExtraClasses />
+}
+
+function AdminExtraClasses() {
   const { role, user } = useAuth()
   const isAdmin = role === 'ADMIN'
   const requests = useExtraClasses({ mineOnly: !isAdmin })

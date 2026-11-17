@@ -1,8 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ChevronDown, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { ArrowLeft, ChevronDown, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import * as React from 'react'
 import { useForm } from 'react-hook-form'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { z } from 'zod'
 
@@ -25,16 +25,6 @@ import { Input, Textarea } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogForm,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { Field, FormError } from '@/components/forms/field'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Band, Figure, Figures, WorkspaceHeader } from '@/components/layout/workspace'
@@ -102,38 +92,28 @@ const homeworkSchema = z.object({
 
 type HomeworkValues = z.infer<typeof homeworkSchema>
 
-function HomeworkDialog({
-  open,
-  onOpenChange,
+/**
+ * Setting or editing a piece of homework, as a page of its own in place of the list: the work
+ * on the left with room to write, when it is due and how it counts on the right, and the
+ * buttons along the foot.
+ */
+function HomeworkForm({
   editing,
+  onClose,
   onSaved,
 }: {
-  open: boolean
-  onOpenChange: (v: boolean) => void
   editing: HomeworkOut | null
+  onClose: () => void
   onSaved: (hw: HomeworkOut) => void
 }) {
   const create = useSetHomework()
   const update = useUpdateHomework()
   const myClasses = useMyClasses()
+  const [leaving, setLeaving] = React.useState(false)
 
   const form = useForm<HomeworkValues>({
     resolver: zodResolver(homeworkSchema),
     defaultValues: {
-      class_id: '',
-      subject_id: '',
-      title: '',
-      description: '',
-      due_date: '',
-      max_marks: '',
-      is_mandatory: true,
-      allow_late_submission: true,
-    },
-  })
-
-  React.useEffect(() => {
-    if (!open) return
-    form.reset({
       class_id: editing ? String(editing.class_id) : '',
       subject_id: editing ? String(editing.subject_id) : '',
       title: editing?.title ?? '',
@@ -142,8 +122,8 @@ function HomeworkDialog({
       max_marks: editing?.max_marks != null ? String(editing.max_marks) : '',
       is_mandatory: editing?.is_mandatory ?? true,
       allow_late_submission: editing?.allow_late_submission ?? true,
-    })
-  }, [open, editing, form])
+    },
+  })
 
   // Only the class and subject pairs this teacher takes, so the form cannot offer one the
   // backend would refuse.
@@ -164,6 +144,13 @@ function HomeworkDialog({
       })
   }, [myClasses.data])
 
+  // A teacher who takes one class and subject has nothing to pick.
+  React.useEffect(() => {
+    if (editing || pairs.length !== 1 || form.getValues('class_id')) return
+    form.setValue('class_id', String(pairs[0].classId))
+    form.setValue('subject_id', String(pairs[0].subjectId))
+  }, [editing, pairs, form])
+
   const selectedPair = `${form.watch('class_id')}:${form.watch('subject_id')}`
 
   const onSubmit = async (values: HomeworkValues) => {
@@ -180,105 +167,139 @@ function HomeworkDialog({
       const saved = editing
         ? await update.mutateAsync({ assignmentId: editing.id, body })
         : await create.mutateAsync({ class_id: Number(values.class_id), subject_id: Number(values.subject_id), ...body })
-      onOpenChange(false)
+      toast.success(editing ? 'Homework saved.' : 'Homework set. Everyone in the class can see it.')
       onSaved(saved)
     } catch (error) {
       form.setError('root', { message: (error as { message?: string })?.message ?? 'Could not save the homework.' })
     }
   }
 
+  const cancel = () => (form.formState.isDirty ? setLeaving(true) : onClose())
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{editing ? 'Edit homework' : 'Set homework'}</DialogTitle>
-          <DialogDescription>
-            Everyone in the class sees it. Who has handed in, and who has not, is on its marking list.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
-          <DialogBody className="space-y-5">
-            <FormError message={form.formState.errors.root?.message} />
+    <>
+      <WorkspaceHeader
+        title={editing ? 'Edit homework' : 'Set homework'}
+        description={
+          editing
+            ? `${editing.class_name} · ${editing.subject_name}. Students see the change straight away.`
+            : 'Everyone in the class sees it. Who has handed in, and who has not, is on its marking list.'
+        }
+        actions={
+          <Button size="sm" variant="outline" icon={<ArrowLeft />} onClick={cancel}>
+            Homework
+          </Button>
+        }
+      />
 
-            <Field id="hw_pair" label="Class and subject" required error={form.formState.errors.class_id?.message}>
-              <Select
-                value={selectedPair === ':' ? '' : selectedPair}
-                onValueChange={(v) => {
-                  const [classId, subjectId] = v.split(':')
-                  form.setValue('class_id', classId, { shouldValidate: true })
-                  form.setValue('subject_id', subjectId, { shouldValidate: true })
-                }}
-                disabled={!!editing}
-              >
-                <SelectTrigger id="hw_pair">
-                  <SelectValue placeholder="Pick one you teach…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {pairs.map((pair) => (
-                    <SelectItem key={`${pair.classId}:${pair.subjectId}`} value={`${pair.classId}:${pair.subjectId}`}>
-                      {pair.className} · {pair.subjectName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
+      <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
+        <Band className="border-b border-border">
+          <div className="grid gap-x-10 gap-y-6 py-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+            <div className="space-y-5">
+              <FormError message={form.formState.errors.root?.message} />
 
-            <Field id="hw_title" label="Title" required error={form.formState.errors.title?.message}>
-              <Input id="hw_title" placeholder="Exercise 4.2, questions 1–10" {...form.register('title')} />
-            </Field>
+              <Field id="hw_pair" label="Class and subject" required error={form.formState.errors.class_id?.message}>
+                <Select
+                  value={selectedPair === ':' ? '' : selectedPair}
+                  onValueChange={(v) => {
+                    const [classId, subjectId] = v.split(':')
+                    form.setValue('class_id', classId, { shouldValidate: true, shouldDirty: true })
+                    form.setValue('subject_id', subjectId, { shouldValidate: true, shouldDirty: true })
+                  }}
+                  disabled={!!editing}
+                >
+                  <SelectTrigger id="hw_pair">
+                    <SelectValue placeholder={myClasses.isPending ? 'Loading your classes…' : 'Pick one you teach…'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {pairs.map((pair) => (
+                      <SelectItem key={`${pair.classId}:${pair.subjectId}`} value={`${pair.classId}:${pair.subjectId}`}>
+                        {pair.className} · {pair.subjectName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
 
-            <Field id="hw_description" label="What to do">
-              <Textarea id="hw_description" rows={4} {...form.register('description')} />
-            </Field>
+              <Field id="hw_title" label="Title" required error={form.formState.errors.title?.message}>
+                <Input id="hw_title" autoFocus={!editing} placeholder="Exercise 4.2, questions 1–10" {...form.register('title')} />
+              </Field>
 
-            <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
+              <Field id="hw_description" label="What to do">
+                <Textarea
+                  id="hw_description"
+                  rows={7}
+                  placeholder="The pages, the questions, how to set it out – anything students need to do it at home."
+                  className="lg:min-h-80"
+                  {...form.register('description')}
+                />
+              </Field>
+            </div>
+
+            <div className="space-y-5 lg:border-l lg:border-border lg:pl-10">
               <Field id="hw_due" label="Due" required error={form.formState.errors.due_date?.message}>
                 <Input id="hw_due" type="date" {...form.register('due_date')} />
               </Field>
               <Field id="hw_marks" label="Out of" hint="Leave blank if it is not marked.">
                 <Input id="hw_marks" type="number" step="0.5" {...form.register('max_marks')} />
               </Field>
-            </div>
 
-            <div className="divide-y divide-border border-y border-border">
-              <label className="flex items-start justify-between gap-4 py-3">
-                <span className="min-w-0">
-                  <span className="text-sm font-medium">Counts as set homework</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    Turn off for optional practice. On, it counts towards the daily-homework obligation the oversight
-                    report tracks.
+              <div className="divide-y divide-border border-y border-border">
+                <label className="flex items-start justify-between gap-4 py-3">
+                  <span className="min-w-0">
+                    <span className="text-sm font-medium">Counts as set homework</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      Turn off for optional practice. On, it counts towards the daily-homework obligation the oversight
+                      report tracks.
+                    </span>
                   </span>
-                </span>
-                <Switch
-                  checked={form.watch('is_mandatory')}
-                  onCheckedChange={(v) => form.setValue('is_mandatory', v, { shouldDirty: true })}
-                />
-              </label>
-              <label className="flex items-start justify-between gap-4 py-3">
-                <span className="min-w-0">
-                  <span className="text-sm font-medium">Accept late work</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    Late hand-ins are flagged either way; this decides whether they are taken.
+                  <Switch
+                    checked={form.watch('is_mandatory')}
+                    onCheckedChange={(v) => form.setValue('is_mandatory', v, { shouldDirty: true })}
+                  />
+                </label>
+                <label className="flex items-start justify-between gap-4 py-3">
+                  <span className="min-w-0">
+                    <span className="text-sm font-medium">Accept late work</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      Late hand-ins are flagged either way; this decides whether they are taken.
+                    </span>
                   </span>
-                </span>
-                <Switch
-                  checked={form.watch('allow_late_submission')}
-                  onCheckedChange={(v) => form.setValue('allow_late_submission', v, { shouldDirty: true })}
-                />
-              </label>
+                  <Switch
+                    checked={form.watch('allow_late_submission')}
+                    onCheckedChange={(v) => form.setValue('allow_late_submission', v, { shouldDirty: true })}
+                  />
+                </label>
+              </div>
             </div>
-          </DialogBody>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          </div>
+        </Band>
+
+        <Band className="z-10 border-b border-border lg:sticky lg:bottom-0">
+          <div className="flex items-center justify-end gap-2 py-3">
+            <Button type="button" variant="outline" onClick={cancel}>
               Cancel
             </Button>
             <Button type="submit" loading={form.formState.isSubmitting}>
               {editing ? 'Save changes' : 'Set homework'}
             </Button>
-          </DialogFooter>
-        </DialogForm>
-      </DialogContent>
-    </Dialog>
+          </div>
+        </Band>
+      </form>
+
+      <ConfirmDialog
+        open={leaving}
+        onOpenChange={setLeaving}
+        title="Leave without saving?"
+        description={editing ? 'Your changes to this homework have not been saved.' : 'This homework has not been set yet.'}
+        confirmLabel="Leave without saving"
+        destructive
+        onConfirm={() => {
+          setLeaving(false)
+          onClose()
+        }}
+      />
+    </>
   )
 }
 
@@ -685,9 +706,9 @@ export function TeacherHomework() {
   const [params, setParams] = useSearchParams()
   const [search, setSearch] = React.useState('')
   const [filter, setFilter] = React.useState<ListFilter | null>(null)
-  const [dialogOpen, setDialogOpen] = React.useState(false)
-  const [editing, setEditing] = React.useState<HomeworkOut | null>(null)
   const [deleting, setDeleting] = React.useState<HomeworkOut | null>(null)
+  const navigate = useNavigate()
+  const location = useLocation()
 
   const all = homework.data ?? []
   const marksKnown = all.some((hw) => hw.graded_count != null)
@@ -729,9 +750,45 @@ export function TeacherHomework() {
   const totalMissing = all.reduce((n, hw) => n + missing(hw), 0)
   const handedIn = all.reduce((n, hw) => n + (hw.submission_count ?? 0), 0)
 
-  const openSet = () => {
-    setEditing(null)
-    setDialogOpen(true)
+  // Setting or editing opens as its own page (?form=new, or ?form=edit with the piece's hw),
+  // pushed onto the history so the browser's Back button returns to the list.
+  const formMode = params.get('form')
+  const openForm = (mode: 'new' | 'edit', id?: number) => {
+    const next = new URLSearchParams(params)
+    next.set('form', mode)
+    if (id != null) next.set('hw', String(id))
+    navigate({ search: next.toString() }, { state: { fromList: true } })
+  }
+  const openSet = () => openForm('new')
+  const closeForm = (savedId?: number) => {
+    if (savedId == null && (location.state as { fromList?: boolean } | null)?.fromList) {
+      navigate(-1)
+      return
+    }
+    const next = new URLSearchParams(params)
+    next.delete('form')
+    if (savedId != null) next.set('hw', String(savedId))
+    setParams(next, { replace: true })
+  }
+
+  if (formMode === 'new' || formMode === 'edit') {
+    const editing = formMode === 'edit' ? (all.find((hw) => hw.id === picked) ?? null) : null
+    if (formMode === 'edit' && !editing) {
+      return homework.isPending ? (
+        <div className="space-y-3 py-6">
+          <Skeleton className="h-10 w-64 rounded" />
+          <Skeleton className="h-72 rounded" />
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
+          <p className="text-sm text-muted-foreground">That homework could not be found. It may have been deleted.</p>
+          <Button size="sm" variant="outline" icon={<ArrowLeft />} onClick={() => closeForm()}>
+            Homework
+          </Button>
+        </div>
+      )
+    }
+    return <HomeworkForm key={editing?.id ?? 'new'} editing={editing} onClose={() => closeForm()} onSaved={(hw) => closeForm(hw.id)} />
   }
 
   const tabs: [ListFilter, string][] = [
@@ -772,7 +829,7 @@ export function TeacherHomework() {
       </Figures>
 
       <Band className="border-b border-border px-0 sm:px-0 lg:px-0">
-        <div className="lg:h-[calc(100vh-16rem)] lg:min-h-[30rem]">
+        <div className="max-lg:[&>div]:grid-cols-1 lg:h-[calc(100vh-16rem)] lg:min-h-[30rem]">
           <SplitView
             list={
               <ListPane
@@ -875,10 +932,7 @@ export function TeacherHomework() {
                 <HomeworkDetail
                   key={selected.id}
                   assignment={selected}
-                  onEdit={() => {
-                    setEditing(selected)
-                    setDialogOpen(true)
-                  }}
+                  onEdit={() => openForm('edit', selected.id)}
                   onDelete={() => setDeleting(selected)}
                 />
               )
@@ -886,8 +940,6 @@ export function TeacherHomework() {
           />
         </div>
       </Band>
-
-      <HomeworkDialog open={dialogOpen} onOpenChange={setDialogOpen} editing={editing} onSaved={(hw) => pick(hw.id)} />
 
       <ConfirmDialog
         open={!!deleting}

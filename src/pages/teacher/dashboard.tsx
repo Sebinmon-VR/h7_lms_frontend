@@ -18,7 +18,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import * as React from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 import { TeacherExamsToday } from '@/components/domain/teacher-exams-today'
 
@@ -62,7 +62,6 @@ import {
   minutesBetween,
 } from '@/components/domain/class-room'
 import { AdminTeacherNotice, useIsAdminViewingTeacher } from './teacher-guard'
-import { TopicFormDialog } from './topics'
 
 /*
  * Laid out like the admin dashboard: sections are a heading over open
@@ -626,7 +625,14 @@ export default function TeacherDashboardPage() {
   const { user } = useAuth()
   const isAdmin = useIsAdminViewingTeacher()
   const now = useNow(60_000)
-  const [logging, setLogging] = React.useState<PendingTopicOut | null>(null)
+  const navigate = useNavigate()
+  // "Log now" opens the Log a topic page with the class, subject and date already filled in;
+  // Back returns here.
+  const setLogging = (p: PendingTopicOut) =>
+    navigate(
+      `/teacher/topics?${new URLSearchParams({ topic: 'new', class: String(p.class_id), subject: String(p.subject_id), date: p.on_date })}`,
+      { state: { fromList: true } },
+    )
   const today = todayApiDate()
   const firstName = user?.full_name?.trim().split(/\s+/)[0]
 
@@ -1011,19 +1017,6 @@ export default function TeacherDashboardPage() {
           </Section>
         </div>
       </div>
-
-      {/* The syllabus form, opened from "Log topic" with class, subject and
-          date already filled in. */}
-      <TopicFormDialog
-        open={!!logging}
-        onOpenChange={(v) => !v && setLogging(null)}
-        editing={null}
-        preset={
-          logging
-            ? { class_id: logging.class_id, subject_id: logging.subject_id, date_covered: logging.on_date }
-            : null
-        }
-      />
     </div>
   )
 }

@@ -577,7 +577,7 @@ export default function TeacherClassesPage() {
       />
 
       <Band className="border-b border-border px-0 sm:px-0 lg:px-0">
-        <div className="lg:h-[calc(100vh-11rem)] lg:min-h-[30rem]">
+        <div className="max-lg:[&>div]:grid-cols-1 lg:h-[calc(100vh-11rem)] lg:min-h-[30rem]">
           <SplitView
             list={
               <ListPane

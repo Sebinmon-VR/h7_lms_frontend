@@ -25,7 +25,7 @@ import { Band, WorkspaceHeader } from '@/components/layout/workspace'
 import { DetailHeader, ListEmpty, ListItem, ListPane, ListSearch, SplitView } from '@/components/layout/split-view'
 import { EditMaterialDialog, MaterialCard, UploadDialog, type AddMode } from './materials'
 import { AdminTeacherNotice, useIsAdminViewingTeacher } from './teacher-guard'
-import { TopicFormDialog } from './topics'
+import { TopicFormPage } from './topics'
 
 /*
  * Lessons and materials together, list + detail: each class and subject on
@@ -224,8 +224,7 @@ function LessonsMaterials({ tab }: { tab: Tab }) {
   const deleteTopic = useDeleteTopic()
   const deleteMaterial = useDeleteMaterial()
 
-  const [topicDialog, setTopicDialog] = React.useState(false)
-  const [editingTopic, setEditingTopic] = React.useState<TopicOut | null>(null)
+  const location = useLocation()
   const [deletingTopic, setDeletingTopic] = React.useState<TopicOut | null>(null)
   const [uploadOpen, setUploadOpen] = React.useState(false)
   const [addMode, setAddMode] = React.useState<AddMode>('file')
@@ -305,9 +304,52 @@ function LessonsMaterials({ tab }: { tab: Tab }) {
   const q = search.trim().toLowerCase()
   const visibleCourses = q ? courses.filter((c) => `${c.cls} ${c.subject}`.toLowerCase().includes(q)) : courses
   const loading = mappingsQuery.isPending || topicsQuery.isPending || materialsQuery.isPending
-  const openTopic = () => {
-    setEditingTopic(null)
-    setTopicDialog(true)
+  // Logging or editing a topic opens as its own page (?topic=new, or ?topic=<id>), pushed
+  // onto the history so the browser's Back button returns to the list. The dashboard's
+  // "Log now" links here with &class=, &subject= and &date= to open it filled in.
+  const topicParam = params.get('topic')
+  const openTopicForm = (value: string) => {
+    const next = new URLSearchParams(params)
+    next.set('topic', value)
+    navigate({ pathname: PATH.lessons, search: next.toString() }, { state: { fromList: true } })
+  }
+  const openTopic = () => openTopicForm('new')
+  const closeTopicForm = () => {
+    if ((location.state as { fromList?: boolean } | null)?.fromList) {
+      navigate(-1)
+      return
+    }
+    const next = new URLSearchParams(params)
+    for (const k of ['topic', 'class', 'subject', 'date']) next.delete(k)
+    setParams(next, { replace: true })
+  }
+
+  if (topicParam) {
+    const editing = topicParam === 'new' ? null : (topics.find((t) => t.id === Number(topicParam)) ?? null)
+    if (topicParam !== 'new' && !editing) {
+      return topicsQuery.isPending ? (
+        <div className="space-y-3 py-6">
+          <Skeleton className="h-10 w-64 rounded" />
+          <Skeleton className="h-72 rounded" />
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
+          <p className="text-sm text-muted-foreground">That topic could not be found. It may have been deleted.</p>
+          <Button size="sm" variant="outline" onClick={closeTopicForm}>
+            Back to Lessons
+          </Button>
+        </div>
+      )
+    }
+    const fromLink = Number(params.get('class')) && Number(params.get('subject'))
+    const preset = editing
+      ? null
+      : fromLink
+        ? { class_id: Number(params.get('class')), subject_id: Number(params.get('subject')), date_covered: params.get('date') ?? undefined }
+        : active
+          ? { class_id: active.classId, subject_id: active.subjectId }
+          : null
+    return <TopicFormPage key={topicParam} editing={editing} preset={preset} onClose={closeTopicForm} />
   }
   const openUpload = (mode: AddMode) => {
     setAddMode(mode)
@@ -338,7 +380,7 @@ function LessonsMaterials({ tab }: { tab: Tab }) {
       />
 
       <Band className="border-b border-border px-0 sm:px-0 lg:px-0">
-        <div className="lg:h-[calc(100vh-11rem)] lg:min-h-[30rem]">
+        <div className="max-lg:[&>div]:grid-cols-1 lg:h-[calc(100vh-11rem)] lg:min-h-[30rem]">
           <SplitView
             list={
               <ListPane
@@ -481,10 +523,7 @@ function LessonsMaterials({ tab }: { tab: Tab }) {
                     <LessonsList
                       topics={shownTopics}
                       showCourse={!active}
-                      onEdit={(t) => {
-                        setEditingTopic(t)
-                        setTopicDialog(true)
-                      }}
+                      onEdit={(t) => openTopicForm(String(t.id))}
                       onDelete={setDeletingTopic}
                     />
                   )
@@ -513,12 +552,6 @@ function LessonsMaterials({ tab }: { tab: Tab }) {
         </div>
       </Band>
 
-      <TopicFormDialog
-        open={topicDialog}
-        onOpenChange={setTopicDialog}
-        editing={editingTopic}
-        preset={!editingTopic && active ? { class_id: active.classId, subject_id: active.subjectId } : null}
-      />
       <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} existing={materials} initialMode={addMode} />
       <EditMaterialDialog material={editingMaterial} onClose={() => setEditingMaterial(null)} />
 

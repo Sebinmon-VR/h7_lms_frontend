@@ -19,6 +19,8 @@ import { ErrorState } from '@/components/feedback/states'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field } from '@/components/forms/field'
 import { PageHeader } from '@/components/layout/page-header'
+import { Band, WorkspaceHeader } from '@/components/layout/workspace'
+import { ListEmpty, ListItem, ListPane, ListSearch, SplitView } from '@/components/layout/split-view'
 import { useExamCatalogue, useExamScope } from './exam-scope'
 
 /**
@@ -148,12 +150,18 @@ function MarkSheet({
   onSaved,
   onDeleted,
   onDirtyChange,
+  layout = 'grid',
 }: {
   register: PaperMarksRegister
   sheet: PaperMarkSheet | null
   onSaved: (name: string) => void
   onDeleted: () => void
   onDirtyChange: (dirty: boolean) => void
+  /**
+   * `grid`: every subject a column (the admin's page). `bySubject`: the teacher's page - the
+   * exam's subjects as a strip, and one subject's students at a time as a list of mark boxes.
+   */
+  layout?: 'grid' | 'bySubject'
 }) {
   const save = useSavePaperMarks()
   const remove = useDeletePaperMarks()
@@ -162,6 +170,11 @@ function MarkSheet({
   const [error, setError] = React.useState<string | null>(null)
   const [deleting, setDeleting] = React.useState(false)
   const tableRef = React.useRef<HTMLTableElement>(null)
+  // The teacher's layout: which subject's marks are open (or the totals), and whether the
+  // exam's name, date and subjects are being edited - always, for a new exam.
+  const [active, setActive] = React.useState<number | 'totals' | null>(null)
+  const [editingDetails, setEditingDetails] = React.useState(!sheet)
+  const listRef = React.useRef<HTMLUListElement>(null)
 
   // A fresh sheet, or the same sheet as saved, replaces what is on screen.
   React.useEffect(() => {
@@ -299,68 +312,305 @@ function MarkSheet({
     }
   }
 
+  const detailsFields = (
+    <>
+        <div className="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_200px]">
+          <Field id="pm-name" label="Exam" required hint="The name printed on the report card, e.g. Term 1 Examination.">
+            <Input
+              id="pm-name"
+              list="pm-names"
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder="Term 1 Examination"
+            />
+            <datalist id="pm-names">
+              {SUGGESTED_NAMES.filter((n) => !register.sheets.some((s) => sameName(s.exam_name, n))).map((n) => (
+                <option key={n} value={n} />
+              ))}
+            </datalist>
+          </Field>
+          <Field id="pm-date" label="Date written" required hint="Report cards count it by this date.">
+            <DatePicker id="pm-date" value={form.date} onChange={(v) => setForm((f) => ({ ...f, date: v }))} maxToday />
+          </Field>
+        </div>
+    </>
+  )
+  const subjectsPicker = (
+    <>
+        <div className="space-y-3 p-4">
+          {offered.length === 0 && addable.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              The school has no subjects set up yet. An administrator adds them under Subjects.
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2.5">
+              {offered.map((s) => (
+                <label key={s.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <Checkbox checked={form.chosen.includes(s.id)} onCheckedChange={(v) => toggleSubject(s.id, v === true)} />
+                  <span className={cn(!form.chosen.includes(s.id) && 'text-muted-foreground')}>{s.name}</span>
+                </label>
+              ))}
+              {addable.length > 0 && (
+                <div className="w-64">
+                  <Combobox
+                    value={null}
+                    onChange={(v) => v && toggleSubject(Number(v), true)}
+                    placeholder={offered.length === 0 ? 'Choose a subject' : 'Add a subject not taught in this class'}
+                    searchPlaceholder="Type a subject…"
+                    emptyMessage="No subject matches."
+                    options={addable.map((s) => ({ value: String(s.id), label: s.name, hint: s.code }))}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+          {dropping.length > 0 && (
+            <p className="flex items-start gap-2 text-sm text-warning">
+              <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+              The marks already saved for {dropping.join(', ')} will be removed when you save, because{' '}
+              {dropping.length === 1 ? 'it is' : 'they are'} no longer ticked.
+            </p>
+          )}
+        </div>
+    </>
+  )
+  const footerBar = (
+    <>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/40 px-4 py-3">
+          <div className="min-w-0 flex-1 text-sm">
+            {error ? (
+              <p className="flex items-start gap-2 text-danger" role="alert">
+                <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                {error}
+              </p>
+            ) : dirty ? (
+              <p className="text-warning">Unsaved changes.</p>
+            ) : sheet ? (
+              <p className="text-muted-foreground">Saved. These marks count on the next report card issued for this class.</p>
+            ) : null}
+          </div>
+          <div className="flex gap-2">
+            {sheet && (
+              <Button variant="ghost" icon={<Trash2 />} className="text-danger hover:bg-danger/10" onClick={() => setDeleting(true)}>
+                Delete
+              </Button>
+            )}
+            <Button variant="primary" icon={<Save />} loading={save.isPending} disabled={!dirty && !!sheet} onClick={submit}>
+              Save marks
+            </Button>
+          </div>
+        </div>
+    </>
+  )
+  const deleteConfirm = (
+    <>
+        <ConfirmDialog
+          open={deleting}
+          onOpenChange={setDeleting}
+          title={`Delete the marks for ${sheet?.exam_name ?? 'this exam'}?`}
+          description="Every mark on this sheet is removed, for every subject. Report cards already issued keep the marks they were issued with; re-issue them to leave this exam off."
+          confirmLabel="Delete marks"
+          destructive
+          loading={remove.isPending}
+          onConfirm={() => {
+            if (!sheet) return
+            remove.mutate(
+              { classId: register.class_id, examName: sheet.exam_name },
+              {
+                onSuccess: () => {
+                  setDeleting(false)
+                  onDeleted()
+                },
+              },
+            )
+          }}
+        />
+    </>
+  )
+
+  if (layout === 'bySubject') {
+    const current = active === 'totals' ? 'totals' : (columns.find((s) => s.id === active) ?? columns[0] ?? null)
+    const subject = current === 'totals' ? null : current
+    // Enter moves down this subject's list, as in a paper register; Shift+Enter moves up.
+    const onListKey = (event: React.KeyboardEvent<HTMLInputElement>, row: number) => {
+      if (event.key !== 'Enter') return
+      event.preventDefault()
+      const next = listRef.current?.querySelector<HTMLInputElement>(`input[data-row="${row + (event.shiftKey ? -1 : 1)}"]`)
+      next?.focus()
+      next?.select()
+    }
+
+    return (
+      <>
+        {/* The exam: its name and date, and editing them and its subjects on request. */}
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
+          <div className="min-w-0">
+            <h3 className="text-lg font-medium leading-tight text-foreground">{sheet ? form.name || sheet.exam_name : 'New exam'}</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {form.date ? `Written ${formatDate(form.date)}` : 'No date yet'} · {columns.length}{' '}
+              {columns.length === 1 ? 'subject' : 'subjects'} · {students.length} students
+              {sheet?.entered_by.length ? ` · entered by ${sheet.entered_by.join(', ')}` : ''}
+            </p>
+          </div>
+          {sheet && (
+            <div className="flex shrink-0 items-center gap-1.5">
+              <Button variant="outline" size="sm" onClick={() => setEditingDetails((v) => !v)} aria-pressed={editingDetails}>
+                {editingDetails ? 'Done' : 'Exam details'}
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {editingDetails && (
+          <div className="border-b border-border">
+            {detailsFields}
+            <p className="px-5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Subjects in this exam</p>
+            {subjectsPicker}
+          </div>
+        )}
+
+        {students.length === 0 ? (
+          <p className="px-5 py-6 text-sm text-muted-foreground">No students are enrolled in this class.</p>
+        ) : columns.length === 0 ? (
+          <p className="px-5 py-6 text-sm text-muted-foreground">Tick at least one subject the exam had to enter its marks.</p>
+        ) : (
+          <>
+            {/* The subjects, each with how many marks are in; picking one opens its list. */}
+            <div className="flex flex-wrap gap-1.5 border-b border-border px-5 py-3" role="tablist" aria-label="Subjects">
+              {columns.map((s) => {
+                const c = columnStats(s.id)
+                const on = subject?.id === s.id
+                const done = c.entered === students.length
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={on}
+                    onClick={() => setActive(s.id)}
+                    className={cn(
+                      'rounded-md border px-3 py-1.5 text-left text-sm transition-colors',
+                      on ? 'border-primary bg-primary/5 text-primary' : 'border-border hover:bg-muted/40',
+                    )}
+                  >
+                    <span className="font-medium">{s.name}</span>{' '}
+                    <span className={cn('text-xs tabular-nums', done ? 'text-success' : c.entered ? 'text-warning' : 'text-muted-foreground')}>
+                      {c.entered}/{students.length}
+                    </span>
+                  </button>
+                )
+              })}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={current === 'totals'}
+                onClick={() => setActive('totals')}
+                className={cn(
+                  'rounded-md border px-3 py-1.5 text-sm transition-colors',
+                  current === 'totals' ? 'border-primary bg-primary/5 text-primary' : 'border-dashed border-border text-muted-foreground hover:bg-muted/40',
+                )}
+              >
+                Totals
+              </button>
+            </div>
+
+            {subject ? (
+              <>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-muted/40 px-5 py-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{subject.name}</span>
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    out of
+                    <Input
+                      aria-label={`${subject.name} is out of`}
+                      inputMode="decimal"
+                      value={form.outOf[subject.id] ?? ''}
+                      invalid={badOutOf.some((b) => b.id === subject.id)}
+                      onChange={(e) => setForm((f) => ({ ...f, outOf: { ...f.outOf, [subject.id]: e.target.value } }))}
+                      className="h-7 w-16 px-2 text-right font-semibold tabular-nums"
+                    />
+                  </label>
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {columnStats(subject.id).entered} of {students.length} in
+                    {columnStats(subject.id).average != null && ` · class average ${formatPercent(columnStats(subject.id).average!, 0)}`}
+                  </span>
+                </div>
+                <p className="px-5 pt-2 text-xs text-muted-foreground">Leave a box empty, or type AB, for a student who was absent. Enter moves down.</p>
+                <ul ref={listRef} className="divide-y divide-border px-5 pb-2">
+                  {students.map((st, row) => {
+                    const raw = mark(subject.id, st.id)
+                    const bad = badCell(subject.id, st.id)
+                    return (
+                      <li key={st.id} className="flex items-center gap-2 py-1.5 sm:gap-3">
+                        <span className="w-8 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{st.roll_number ?? '—'}</span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{st.full_name}</span>
+                        <Input
+                          data-row={row}
+                          aria-label={`${st.full_name}, ${subject.name}`}
+                          inputMode="decimal"
+                          autoComplete="off"
+                          placeholder="AB"
+                          value={raw}
+                          invalid={bad}
+                          onChange={(e) => setMark(subject.id, st.id, e.target.value)}
+                          onKeyDown={(e) => onListKey(e, row)}
+                          className="h-8 w-16 px-2 text-right tabular-nums placeholder:text-muted-foreground/40 sm:w-20"
+                        />
+                        <span className="w-10 shrink-0 text-xs tabular-nums text-muted-foreground sm:w-12">/ {form.outOf[subject.id] || '…'}</span>
+                        <span className={cn('shrink-0 text-right text-xs sm:w-16', !bad && !/^ab$/i.test(raw.trim()) && 'hidden sm:block', bad ? 'font-medium text-danger' : /^ab$/i.test(raw.trim()) ? 'text-muted-foreground' : 'text-transparent')}>
+                          {bad ? 'Check' : /^ab$/i.test(raw.trim()) ? 'Absent' : '·'}
+                        </span>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </>
+            ) : (
+              <>
+                <div className="border-b border-border bg-muted/40 px-5 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Totals across {columns.length} {columns.length === 1 ? 'subject' : 'subjects'}
+                </div>
+                <ul className="divide-y divide-border px-5 pb-2">
+                  {students.map((st) => {
+                    const t = totals(st.id)
+                    const pct = t.max > 0 ? (t.got / t.max) * 100 : null
+                    return (
+                      <li key={st.id} className="flex items-center gap-3 py-2">
+                        <span className="w-8 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{st.roll_number ?? '—'}</span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{st.full_name}</span>
+                        <span className="text-xs text-warning">
+                          {t.papers < columns.length && `${columns.length - t.papers} not sat`}
+                        </span>
+                        <span className="w-24 shrink-0 text-right text-sm tabular-nums text-foreground">
+                          {t.papers > 0 ? `${+t.got.toFixed(2)} / ${+t.max.toFixed(2)}` : '—'}
+                        </span>
+                        <span className="w-14 shrink-0 text-right text-sm font-medium tabular-nums text-foreground">
+                          {pct != null ? formatPercent(pct, 1) : '—'}
+                        </span>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </>
+            )}
+          </>
+        )}
+
+        <div className="z-10 bg-card lg:sticky lg:bottom-0">{footerBar}</div>
+        {deleteConfirm}
+      </>
+    )
+  }
+
   const numberCell = 'px-2 py-1 text-right tabular-nums'
 
   return (
     <>
-      <div className="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_200px]">
-        <Field id="pm-name" label="Exam" required hint="The name printed on the report card, e.g. Term 1 Examination.">
-          <Input
-            id="pm-name"
-            list="pm-names"
-            value={form.name}
-            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-            placeholder="Term 1 Examination"
-          />
-          <datalist id="pm-names">
-            {SUGGESTED_NAMES.filter((n) => !register.sheets.some((s) => sameName(s.exam_name, n))).map((n) => (
-              <option key={n} value={n} />
-            ))}
-          </datalist>
-        </Field>
-        <Field id="pm-date" label="Date written" required hint="Report cards count it by this date.">
-          <DatePicker id="pm-date" value={form.date} onChange={(v) => setForm((f) => ({ ...f, date: v }))} maxToday />
-        </Field>
-      </div>
+      {detailsFields}
 
       <SectionBar title="Subjects in this exam">
         <span className="text-xs text-muted-foreground">Tick the subjects this exam had. Each one becomes a column below.</span>
       </SectionBar>
-      <div className="space-y-3 p-4">
-        {offered.length === 0 && addable.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            The school has no subjects set up yet. An administrator adds them under Subjects.
-          </p>
-        ) : (
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2.5">
-            {offered.map((s) => (
-              <label key={s.id} className="flex cursor-pointer items-center gap-2 text-sm">
-                <Checkbox checked={form.chosen.includes(s.id)} onCheckedChange={(v) => toggleSubject(s.id, v === true)} />
-                <span className={cn(!form.chosen.includes(s.id) && 'text-muted-foreground')}>{s.name}</span>
-              </label>
-            ))}
-            {addable.length > 0 && (
-              <div className="w-64">
-                <Combobox
-                  value={null}
-                  onChange={(v) => v && toggleSubject(Number(v), true)}
-                  placeholder={offered.length === 0 ? 'Choose a subject' : 'Add a subject not taught in this class'}
-                  searchPlaceholder="Type a subject…"
-                  emptyMessage="No subject matches."
-                  options={addable.map((s) => ({ value: String(s.id), label: s.name, hint: s.code }))}
-                />
-              </div>
-            )}
-          </div>
-        )}
-        {dropping.length > 0 && (
-          <p className="flex items-start gap-2 text-sm text-warning">
-            <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-            The marks already saved for {dropping.join(', ')} will be removed when you save, because{' '}
-            {dropping.length === 1 ? 'it is' : 'they are'} no longer ticked.
-          </p>
-        )}
-      </div>
+      {subjectsPicker}
 
       <SectionBar title="Marks">
         <span className="text-xs text-muted-foreground">
@@ -472,57 +722,14 @@ function MarkSheet({
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/40 px-4 py-3">
-        <div className="min-w-0 flex-1 text-sm">
-          {error ? (
-            <p className="flex items-start gap-2 text-danger" role="alert">
-              <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-              {error}
-            </p>
-          ) : dirty ? (
-            <p className="text-warning">Unsaved changes.</p>
-          ) : sheet ? (
-            <p className="text-muted-foreground">Saved. These marks count on the next report card issued for this class.</p>
-          ) : null}
-        </div>
-        <div className="flex gap-2">
-          {sheet && (
-            <Button variant="ghost" icon={<Trash2 />} className="text-danger hover:bg-danger/10" onClick={() => setDeleting(true)}>
-              Delete
-            </Button>
-          )}
-          <Button variant="primary" icon={<Save />} loading={save.isPending} disabled={!dirty && !!sheet} onClick={submit}>
-            Save marks
-          </Button>
-        </div>
-      </div>
+      {footerBar}
 
-      <ConfirmDialog
-        open={deleting}
-        onOpenChange={setDeleting}
-        title={`Delete the marks for ${sheet?.exam_name ?? 'this exam'}?`}
-        description="Every mark on this sheet is removed, for every subject. Report cards already issued keep the marks they were issued with; re-issue them to leave this exam off."
-        confirmLabel="Delete marks"
-        destructive
-        loading={remove.isPending}
-        onConfirm={() => {
-          if (!sheet) return
-          remove.mutate(
-            { classId: register.class_id, examName: sheet.exam_name },
-            {
-              onSuccess: () => {
-                setDeleting(false)
-                onDeleted()
-              },
-            },
-          )
-        }}
-      />
+      {deleteConfirm}
     </>
   )
 }
 
-export default function PaperMarksPage() {
+function AdminPaperMarks() {
   const scope = useExamScope()
   const catalogue = useExamCatalogue()
   const [params, setParams] = useSearchParams()
@@ -641,4 +848,211 @@ export default function PaperMarksPage() {
       />
     </div>
   )
+}
+
+/** How much of a saved sheet has marks: every student in every subject, or how many are in. */
+function sheetProgress(sheet: PaperMarkSheet, students: number) {
+  const entered = sheet.subjects.reduce((n, s) => n + Object.keys(s.marks).length, 0)
+  const expected = sheet.subjects.length * students
+  return { entered, expected, complete: expected > 0 && entered >= expected }
+}
+
+/**
+ * The class teacher's page: the exams entered for their class down the left (and New exam),
+ * and the open exam on the right - its subjects as a strip, one subject's students at a time.
+ */
+function TeacherPaperMarks() {
+  const scope = useExamScope()
+  const catalogue = useExamCatalogue()
+  const [params, setParams] = useSearchParams()
+  const [dirty, setDirty] = React.useState(false)
+  const [pending, setPending] = React.useState<{ classId: string | null; exam: string } | null>(null)
+  const [search, setSearch] = React.useState('')
+
+  const classes = catalogue.leadableClasses
+  const classParam = params.get('class')
+  const classId = classParam ?? (classes.length >= 1 ? String(classes[0].id) : null)
+  const register = usePaperMarks(classId ? Number(classId) : null)
+
+  const sheets = React.useMemo(
+    () => [...(register.data?.sheets ?? [])].sort((a, b) => (b.conducted_on ?? '').localeCompare(a.conducted_on ?? '')),
+    [register.data],
+  )
+  const examParam = params.get('exam')
+  const selected = examParam && sheets.some((s) => s.exam_name === examParam) ? examParam : NEW
+  const sheet = sheets.find((s) => s.exam_name === selected) ?? null
+  const students = register.data?.students.length ?? 0
+  const shown = sheets.filter((s) => !search.trim() || s.exam_name.toLowerCase().includes(search.trim().toLowerCase()))
+
+  const go = React.useCallback(
+    (next: { classId: string | null; exam: string }) => {
+      const q = new URLSearchParams()
+      if (next.classId) q.set('class', next.classId)
+      if (next.exam !== NEW) q.set('exam', next.exam)
+      setParams(q, { replace: true })
+    },
+    [setParams],
+  )
+  const ask = (next: { classId: string | null; exam: string }) => (dirty ? setPending(next) : go(next))
+  const onDirtyChange = React.useCallback((d: boolean) => setDirty(d), [])
+  const subjectName = (id: number) => register.data?.subjects.find((s) => s.id === id)?.name ?? 'Subject'
+
+  return (
+    <>
+      <WorkspaceHeader
+        title="Offline exam marks"
+        description="Marks from exams written on paper in school. Enter them here and they count on the class's report cards."
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link to={scope.reportCardsPath}>
+              <ArrowLeft className="size-4" />
+              Report cards
+            </Link>
+          </Button>
+        }
+      />
+
+      {!catalogue.isPending && classes.length === 0 ? (
+        <Band className="border-b border-border">
+          <p className="py-10 text-center text-sm text-muted-foreground">
+            Offline exam marks are entered by a class&rsquo;s class teacher, and you do not lead a class. Ask an administrator to assign you.
+          </p>
+        </Band>
+      ) : (
+        <>
+          {classes.length > 1 && (
+            <Band className="border-b border-border">
+              <div className="flex flex-wrap items-center gap-2 py-2.5">
+                <span className="text-xs text-muted-foreground">Class</span>
+                <div className="w-56">
+                  <Combobox
+                    value={classId}
+                    onChange={(v) => ask({ classId: v, exam: NEW })}
+                    placeholder="Select a class"
+                    options={classes.map((c) => ({ value: String(c.id), label: c.name, hint: c.code }))}
+                  />
+                </div>
+              </div>
+            </Band>
+          )}
+
+          <Band className="border-b border-border px-0 sm:px-0 lg:px-0">
+            <div className="max-lg:[&>div]:grid-cols-1 lg:h-[calc(100vh-14rem)] lg:min-h-[32rem]">
+              <SplitView
+                list={
+                  <ListPane
+                    toolbar={
+                      <>
+                        <Button size="sm" className="w-full" icon={<FilePlus2 />} disabled={selected === NEW || !register.data} onClick={() => ask({ classId, exam: NEW })}>
+                          New exam
+                        </Button>
+                        {sheets.length > 5 && <ListSearch value={search} onChange={setSearch} placeholder="Search exams" />}
+                      </>
+                    }
+                    footer={
+                      register.data
+                        ? `${register.data.class_room?.name ?? 'Class'} · ${students} students · ${sheets.length} ${sheets.length === 1 ? 'exam' : 'exams'}`
+                        : undefined
+                    }
+                  >
+                    {catalogue.isPending || register.isPending ? (
+                      <div className="space-y-2 p-4">
+                        {Array.from({ length: 4 }).map((_, i) => (
+                          <Skeleton key={i} className="h-10 rounded" />
+                        ))}
+                      </div>
+                    ) : register.isError ? (
+                      <ListEmpty>The exams could not be loaded. Try again in a moment.</ListEmpty>
+                    ) : (
+                      <>
+                        {selected === NEW && (
+                          <ListItem active onClick={() => undefined} title="New exam" sub="Not saved yet" />
+                        )}
+                        {sheets.length === 0 ? (
+                          <ListEmpty>No exams entered yet. Fill in the first one on the right.</ListEmpty>
+                        ) : shown.length === 0 ? (
+                          <ListEmpty>No exam matches that search.</ListEmpty>
+                        ) : (
+                          shown.map((s) => {
+                            const p = sheetProgress(s, students)
+                            return (
+                              <ListItem
+                                key={s.exam_name}
+                                active={s.exam_name === selected}
+                                onClick={() => ask({ classId, exam: s.exam_name })}
+                                title={s.exam_name}
+                                sub={
+                                  <>
+                                    {s.conducted_on ? formatDate(s.conducted_on) : 'No date'} · {s.subjects.length}{' '}
+                                    {s.subjects.length === 1 ? 'subject' : 'subjects'}
+                                    <span className="sr-only">: {s.subjects.map((x) => subjectName(x.subject_id)).join(', ')}</span>
+                                  </>
+                                }
+                                right={
+                                  p.complete ? (
+                                    <span className="text-success">All in</span>
+                                  ) : (
+                                    <span className="font-medium text-warning tabular-nums">
+                                      {p.entered}/{p.expected}
+                                    </span>
+                                  )
+                                }
+                              />
+                            )
+                          })
+                        )}
+                      </>
+                    )}
+                  </ListPane>
+                }
+                detail={
+                  !classId ? (
+                    <p className="px-5 py-16 text-center text-sm text-muted-foreground">Pick a class to enter its marks.</p>
+                  ) : register.isPending ? (
+                    <div className="space-y-3 p-5">
+                      <Skeleton className="h-8 w-1/2" />
+                      <Skeleton className="h-64 w-full" />
+                    </div>
+                  ) : register.isError || !register.data ? (
+                    <div className="p-5">
+                      <ErrorState error={register.error} onRetry={() => register.refetch()} />
+                    </div>
+                  ) : (
+                    <MarkSheet
+                      key={`${classId}|${selected}`}
+                      layout="bySubject"
+                      register={register.data}
+                      sheet={sheet}
+                      onDirtyChange={onDirtyChange}
+                      onSaved={(name) => go({ classId, exam: name })}
+                      onDeleted={() => go({ classId, exam: NEW })}
+                    />
+                  )
+                }
+              />
+            </div>
+          </Band>
+        </>
+      )}
+
+      <ConfirmDialog
+        open={!!pending}
+        onOpenChange={(open) => !open && setPending(null)}
+        title="Leave without saving?"
+        description="The marks you have typed for this exam have not been saved."
+        confirmLabel="Leave without saving"
+        destructive
+        onConfirm={() => {
+          if (pending) go(pending)
+          setPending(null)
+          setDirty(false)
+        }}
+      />
+    </>
+  )
+}
+
+export default function PaperMarksPage() {
+  const scope = useExamScope()
+  return scope.isAdmin ? <AdminPaperMarks /> : <TeacherPaperMarks />
 }

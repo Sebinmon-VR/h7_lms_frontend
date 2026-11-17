@@ -10,6 +10,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import * as React from 'react'
+import { toast } from 'sonner'
 
 import type {
   AffectedPeriod,
@@ -66,6 +67,17 @@ import {
   WorkspaceHeader,
   type Tone,
 } from '@/components/layout/workspace'
+import {
+  DETAIL_TH,
+  DetailHeader,
+  DetailSection,
+  Fact as DetailFact,
+  Facts,
+  ListEmpty,
+  ListItem,
+  ListPane,
+  SplitView,
+} from '@/components/layout/split-view'
 
 /**
  * Staff leave and substitutes — applying, deciding, and covering the day.
@@ -727,6 +739,254 @@ function ApplyForm({ onClose }: { onClose: () => void }) {
   )
 }
 
+// ============================================================ teacher, flat
+
+/*
+ * A teacher's own leave, in the same flat List + detail as their other pages (My classes,
+ * Homework, Extra Classes): ruled rows, status as a plain coloured word, no dots or boxes.
+ * The office's screens above are unchanged.
+ */
+
+const STATUS_WORD: Record<LeaveStatus, string> = {
+  PENDING: 'font-medium text-warning',
+  APPROVED: 'text-success',
+  REJECTED: 'font-medium text-danger',
+  WITHDRAWN: 'text-muted-foreground',
+  CANCELLED: 'text-muted-foreground',
+}
+
+const FLAT_TH = cn(DETAIL_TH, 'whitespace-nowrap px-2 py-2 font-semibold first:pl-5 last:pr-5')
+const FLAT_TD = 'px-2 py-2.5 align-middle first:pl-5 last:pr-5'
+
+type MyLeaveFilter = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'
+
+function TeacherLeaveDetail({ request }: { request: LeaveRequestOut }) {
+  const withdraw = useWithdrawLeave()
+  const planFor = (p: AffectedPeriod) => request.cover_plan?.find((c) => c.timetable_entry_id === p.timetable_entry_id)
+  const periods = request.affected_periods
+
+  return (
+    <>
+      <DetailHeader
+        title={LEAVE_TYPE_LABEL[request.leave_type]}
+        badges={<span className={cn('text-xs', STATUS_WORD[request.status])}>{LEAVE_STATUS_LABEL[request.status]}</span>}
+        sub={`${dateRange(request, 'EEE d MMM yyyy')} · ${daysLabel(request)}`}
+        actions={
+          request.status === 'PENDING' ? (
+            <Button
+              variant="outline"
+              size="sm"
+              icon={<Undo2 />}
+              loading={withdraw.isPending}
+              onClick={() =>
+                withdraw.mutate(request.id, {
+                  onError: (error) => toast.error((error as { message?: string })?.message ?? 'It could not be withdrawn.'),
+                })
+              }
+            >
+              Withdraw
+            </Button>
+          ) : undefined
+        }
+      />
+
+      <Facts>
+        <DetailFact label="Kind">{LEAVE_TYPE_LABEL[request.leave_type]}</DetailFact>
+        <DetailFact label="Days">{daysLabel(request)}</DetailFact>
+        <DetailFact label="Periods">{periods.length}</DetailFact>
+        <DetailFact label="Applied">{request.created_at ? formatDate(request.created_at, 'd MMM yyyy') : '—'}</DetailFact>
+        <DetailFact label="Contact while away">{request.contact_during_leave || '—'}</DetailFact>
+        <DetailFact label="Decided">
+          {request.decided_at ? (
+            <>
+              {formatDate(request.decided_at, 'd MMM')}
+              {request.decided_by_name && <span className="text-muted-foreground"> · {request.decided_by_name}</span>}
+            </>
+          ) : (
+            <span className="text-muted-foreground">Not yet</span>
+          )}
+        </DetailFact>
+      </Facts>
+
+      {request.reason && (
+        <DetailSection title="Reason">
+          <p className="whitespace-pre-wrap px-5 py-3 text-sm text-foreground">{request.reason}</p>
+        </DetailSection>
+      )}
+
+      <DetailSection title="The office's reply">
+        {request.decision_note ? (
+          <p className={cn('whitespace-pre-wrap px-5 py-3 text-sm', request.status === 'REJECTED' ? 'text-danger' : 'text-foreground')}>
+            {request.decision_note}
+          </p>
+        ) : (
+          <p className="px-5 py-3 text-sm text-muted-foreground">
+            {request.status === 'PENDING' ? 'Nothing yet. Their decision shows here.' : 'No note.'}
+          </p>
+        )}
+      </DetailSection>
+
+      <DetailSection title={`Periods you are out for${periods.length ? ` · ${periods.length}` : ''}`}>
+        {periods.length === 0 ? (
+          <p className="px-5 py-3 text-sm text-muted-foreground">Not timetabled on those dates, so nothing needs covering.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[560px] text-sm">
+              <thead>
+                <tr>
+                  <th className={FLAT_TH}>Date</th>
+                  <th className={FLAT_TH}>Time</th>
+                  <th className={FLAT_TH}>Class</th>
+                  <th className={FLAT_TH}>Subject</th>
+                  <th className={FLAT_TH}>Cover</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {periods.map((period, i) => {
+                  const plan = planFor(period)
+                  return (
+                    <tr key={i}>
+                      <td className={cn(FLAT_TD, 'whitespace-nowrap')}>{formatDate(period.date, 'EEE d MMM')}</td>
+                      <td className={cn(FLAT_TD, 'whitespace-nowrap tabular-nums text-muted-foreground')}>
+                        {[period.start_time, period.end_time].filter(Boolean).join('–') || '—'}
+                      </td>
+                      <td className={cn(FLAT_TD, 'font-medium text-foreground')}>{period.class_name ?? '—'}</td>
+                      <td className={FLAT_TD}>{period.subject_name ?? '—'}</td>
+                      <td className={FLAT_TD}>
+                        {plan?.substitute_teacher_name ? (
+                          <span className="text-success">{plan.substitute_teacher_name}</span>
+                        ) : plan ? (
+                          <span className="font-medium text-warning">Not chosen yet</span>
+                        ) : (
+                          <span className="text-muted-foreground">No cover asked</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {(request.cover_gaps?.length ?? 0) > 0 && (
+          <div className="border-t border-border px-5 py-3 text-sm">
+            <p className="font-medium text-warning">Still needs a substitute</p>
+            <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+              {request.cover_gaps!.map((gap, i) => (
+                <li key={i}>
+                  {formatDate(gap.date, 'EEE d MMM')} · {gap.class_name ?? 'Class'}: {gap.reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </DetailSection>
+    </>
+  )
+}
+
+function TeacherLeaveTab({ applying, setApplying }: { applying: boolean; setApplying: (v: boolean) => void }) {
+  const [filter, setFilter] = React.useState<MyLeaveFilter>('ALL')
+  const requests = useMyLeave(filter === 'ALL' ? undefined : filter)
+  const [selectedId, setSelectedId] = React.useState<number | null>(null)
+  const rows = React.useMemo(
+    () => [...(requests.data ?? [])].sort((a, b) => b.start_date.localeCompare(a.start_date)),
+    [requests.data],
+  )
+  const selected = rows.find((r) => r.id === selectedId) ?? rows[0] ?? null
+  const filters: [MyLeaveFilter, string][] = [
+    ['ALL', 'All'],
+    ['PENDING', 'Waiting'],
+    ['APPROVED', 'Approved'],
+    ['REJECTED', LEAVE_STATUS_LABEL.REJECTED],
+  ]
+
+  return (
+    <>
+      <BalanceStrip />
+      <Band className="border-b border-border px-0 sm:px-0 lg:px-0">
+        <div className="max-lg:[&>div]:grid-cols-1 lg:h-[calc(100vh-21rem)] lg:min-h-[28rem]">
+          <SplitView
+            list={
+              <ListPane
+                toolbar={
+                  <div className="flex items-center gap-0.5 rounded-md bg-muted/60 p-0.5" role="radiogroup" aria-label="Show">
+                    {filters.map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        role="radio"
+                        aria-checked={filter === key}
+                        onClick={() => {
+                          setFilter(key)
+                          setSelectedId(null)
+                        }}
+                        className={cn(
+                          'flex-auto whitespace-nowrap rounded px-1.5 py-1 text-xs transition-colors',
+                          filter === key ? 'bg-background font-medium text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                }
+                footer={requests.data ? countLabel(rows.length, 'request') : undefined}
+              >
+                {requests.isPending ? (
+                  <div className="space-y-2 p-4">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <Skeleton key={i} className="h-9 rounded" />
+                    ))}
+                  </div>
+                ) : requests.isError ? (
+                  <ListEmpty>Your leave could not be loaded. Try again in a moment.</ListEmpty>
+                ) : rows.length === 0 ? (
+                  <ListEmpty>{filter === 'ALL' ? 'You have not applied for leave yet.' : 'Nothing here.'}</ListEmpty>
+                ) : (
+                  rows.map((r) => (
+                    <ListItem
+                      key={r.id}
+                      active={!applying && selected?.id === r.id}
+                      onClick={() => {
+                        setSelectedId(r.id)
+                        setApplying(false)
+                      }}
+                      title={LEAVE_TYPE_LABEL[r.leave_type]}
+                      sub={`${dateRange(r)} · ${daysLabel(r)}`}
+                      muted={r.status === 'WITHDRAWN' || r.status === 'CANCELLED'}
+                      right={<span className={STATUS_WORD[r.status]}>{LEAVE_STATUS_LABEL[r.status]}</span>}
+                    />
+                  ))
+                )}
+              </ListPane>
+            }
+            detail={
+              applying ? (
+                <div className="px-5 py-4">
+                  <ApplyForm onClose={() => setApplying(false)} />
+                </div>
+              ) : selected ? (
+                <TeacherLeaveDetail key={selected.id} request={selected} />
+              ) : (
+                <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
+                  <p className="max-w-md text-sm text-muted-foreground">
+                    Applying attaches the periods you are timetabled for on those days, so the office sees what needs
+                    covering.
+                  </p>
+                  <Button size="sm" icon={<PlaneTakeoff />} onClick={() => setApplying(true)}>
+                    Apply for leave
+                  </Button>
+                </div>
+              )
+            }
+          />
+        </div>
+      </Band>
+    </>
+  )
+}
+
 // ===================================================================== tabs
 
 function RequestsTab() {
@@ -1018,23 +1278,34 @@ function PeriodRow({
       </td>
       <td className="px-3 py-2 font-medium text-foreground">{period.entry.class_room?.name ?? 'Class'}</td>
       <td className="px-3 py-2">{period.entry.subject?.name ?? 'Period'}</td>
-      <td className="px-3 py-2">
-        <span className={cn(away && 'text-muted-foreground line-through decoration-muted-foreground/50')}>{teacher}</span>
-        {away && <span className="ml-1.5 text-xs text-danger">away</span>}
-      </td>
+      {/* A teacher's own day: every period is theirs, so no teacher column. */}
+      {isAdmin && (
+        <td className="px-3 py-2">
+          <span className={cn(away && 'text-muted-foreground line-through decoration-muted-foreground/50')}>{teacher}</span>
+          {away && <span className="ml-1.5 text-xs text-danger">away</span>}
+        </td>
+      )}
       <td className="px-3 py-2">
         {coveredBy ? (
-          <span className="inline-flex items-center gap-1.5 text-foreground">
-            <span className="size-2 rounded-full bg-success" aria-hidden />
-            {coveredBy}
-          </span>
+          isAdmin ? (
+            <span className="inline-flex items-center gap-1.5 text-foreground">
+              <span className="size-2 rounded-full bg-success" aria-hidden />
+              {coveredBy}
+            </span>
+          ) : (
+            <span className="text-success">{coveredBy}</span>
+          )
         ) : gap ? (
-          <span className="inline-flex items-center gap-1.5 font-medium text-danger">
-            <span className="size-2 rounded-full bg-danger" aria-hidden />
-            Needs cover
-          </span>
+          isAdmin ? (
+            <span className="inline-flex items-center gap-1.5 font-medium text-danger">
+              <span className="size-2 rounded-full bg-danger" aria-hidden />
+              Needs cover
+            </span>
+          ) : (
+            <span className="font-medium text-danger">Needs cover</span>
+          )
         ) : (
-          <span className="text-muted-foreground">—</span>
+          <span className="text-muted-foreground">{isAdmin ? '—' : 'You'}</span>
         )}
       </td>
       <td className="whitespace-nowrap px-3 py-1.5 text-right">
@@ -1172,8 +1443,8 @@ function CoverTab({
                           <th className="px-3 py-2 text-left font-medium lg:pl-8">Time</th>
                           <th className="px-3 py-2 text-left font-medium">Class</th>
                           <th className="px-3 py-2 text-left font-medium">Subject</th>
-                          <th className="px-3 py-2 text-left font-medium">Teacher</th>
-                          <th className="px-3 py-2 text-left font-medium">Substitute</th>
+                          {isAdmin && <th className="px-3 py-2 text-left font-medium">Teacher</th>}
+                          <th className="px-3 py-2 text-left font-medium">{isAdmin ? 'Substitute' : 'Taken by'}</th>
                           <th className="px-3 py-2 text-right font-medium">
                             <span className="sr-only">Actions</span>
                           </th>
@@ -1278,13 +1549,17 @@ export default function LeavePage() {
     setTab('mine')
   }
 
-  const tabs: { key: TabKey; label: string; count?: number; alert?: boolean; tone?: Tone }[] = [
-    ...(isAdmin
-      ? [{ key: 'requests' as const, label: 'Leave requests', count: pending.data?.length, alert: true, tone: 'warning' as const }]
-      : []),
-    { key: 'cover', label: 'Daily cover', tone: 'info' },
-    { key: 'mine', label: 'My leave', tone: 'primary' },
-  ]
+  // A teacher's own leave comes first, and their tabs are plain words like their other pages.
+  const tabs: { key: TabKey; label: string; count?: number; alert?: boolean; tone?: Tone }[] = isAdmin
+    ? [
+        { key: 'requests' as const, label: 'Leave requests', count: pending.data?.length, alert: true, tone: 'warning' as const },
+        { key: 'cover', label: 'Daily cover', tone: 'info' },
+        { key: 'mine', label: 'My leave', tone: 'primary' },
+      ]
+    : [
+        { key: 'mine', label: 'My leave' },
+        { key: 'cover', label: 'Daily cover' },
+      ]
 
   return (
     <div className="space-y-6">
@@ -1295,7 +1570,7 @@ export default function LeavePage() {
             ? 'Decide leave requests, see who is away on a day, and arrange who takes each period'
             : 'Apply for leave, and arrange a substitute for any of your periods, for leave or anything else'
         }
-        icon={CalendarOff}
+        icon={isAdmin ? CalendarOff : undefined}
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => arrange()}>
@@ -1315,7 +1590,12 @@ export default function LeavePage() {
         {isAdmin ? <AdminFigures pending={pending.data?.length} /> : <TeacherFigures />}
 
         {tab === 'requests' && isAdmin && <RequestsTab />}
-        {tab === 'mine' && <MyLeaveTab applying={applying} setApplying={setApplying} />}
+        {tab === 'mine' &&
+          (isAdmin ? (
+            <MyLeaveTab applying={applying} setApplying={setApplying} />
+          ) : (
+            <TeacherLeaveTab applying={applying} setApplying={setApplying} />
+          ))}
         {tab === 'cover' && (
           <CoverTab
             isAdmin={isAdmin}

@@ -52,6 +52,7 @@ import { ErrorState } from '@/components/feedback/states'
 import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field } from '@/components/forms/field'
 import { Band, Figure, Figures, WorkspaceHeader } from '@/components/layout/workspace'
+import { DetailHeader, DetailSection, ListEmpty, ListItem, ListPane, ListSearch, SplitView } from '@/components/layout/split-view'
 import { tidyName as tidy } from '@/lib/names'
 import { useExamCatalogue, useExamScope } from './exam-scope'
 
@@ -328,7 +329,462 @@ function CardPreview({ card, onDeleted }: { card: ReportCardOut; onDeleted: () =
   )
 }
 
+// ================================================================= teacher
+
+/*
+ * A class teacher's report cards in the List + detail layout of their other pages: the set's
+ * students on the left (rank, name, score, released or not), the picked student's card on the
+ * right at full size with what a class teacher does to it above. The class and set are chosen
+ * at the top. The admin's page (below) and the card students see are unchanged.
+ */
+
+/** A score's colour, the same steps as the class page's attendance. */
+function scoreTone(pct: number | null): { bar: string; text: string } {
+  if (pct == null) return { bar: 'bg-muted-foreground/30', text: 'text-muted-foreground' }
+  if (pct >= 80) return { bar: 'bg-success', text: 'text-success' }
+  if (pct >= 60) return { bar: 'bg-info', text: 'text-foreground' }
+  if (pct >= 40) return { bar: 'bg-warning', text: 'text-warning' }
+  return { bar: 'bg-danger', text: 'text-danger' }
+}
+
+/**
+ * One student's card as the class teacher works on it: the figures that matter, each subject
+ * as a line with its score, and the remark written right here - not the decorated card the
+ * student sees, which is one click away ("Student's view") with its Print button.
+ */
+function TeacherCardDetail({
+  card,
+  onDeleted,
+  onNext,
+  nextName,
+}: {
+  card: ReportCardOut
+  onDeleted: () => void
+  /** The next student in the list, for "Save and next". */
+  onNext?: () => void
+  nextName?: string
+}) {
+  const scope = useExamScope()
+  const update = useUpdateReportCard()
+  const remove = useDeleteReportCard()
+  const [deleting, setDeleting] = React.useState(false)
+  const [studentView, setStudentView] = React.useState(false)
+  const [remark, setRemark] = React.useState(card.remarks ?? '')
+  React.useEffect(() => setRemark(card.remarks ?? ''), [card.id, card.remarks])
+  const totals = withRowTotals(card)
+  const name = tidy(card.student?.full_name ?? `Student #${String(card.student_id).slice(-6)}`)
+  const dirty = remark.trim() !== (card.remarks ?? '').trim()
+
+  const saveRemark = async (thenNext: boolean) => {
+    try {
+      if (dirty) await update.mutateAsync({ cardId: card.id, body: { remarks: remark.trim() } })
+      if (thenNext) onNext?.()
+    } catch {
+      // The query reports the failure; the typed remark stays to try again.
+    }
+  }
+
+  return (
+    <>
+      <DetailHeader
+        title={name}
+        badges={
+          <span className={cn('text-xs', card.is_published ? 'text-success' : 'font-medium text-warning')}>
+            {card.is_published ? 'Released' : 'Not released'}
+          </span>
+        }
+        sub={`${card.title} · ${card.class_room?.name ?? ''}`}
+        actions={
+          <>
+            <Button
+              variant={card.is_published ? 'outline' : 'primary'}
+              size="sm"
+              icon={card.is_published ? <EyeOff /> : <Eye />}
+              loading={update.isPending && update.variables?.body.is_published !== undefined}
+              onClick={() => update.mutate({ cardId: card.id, body: { is_published: !card.is_published } })}
+            >
+              {card.is_published ? 'Withdraw' : 'Release'}
+            </Button>
+            <Button variant="outline" size="sm" icon={<FileBadge />} onClick={() => setStudentView((v) => !v)} aria-pressed={studentView}>
+              {studentView ? 'Back to review' : "Student's view"}
+            </Button>
+            <Button variant="ghost" size="icon-sm" className="hover:text-danger" aria-label="Delete this report card" onClick={() => setDeleting(true)}>
+              <Trash2 />
+            </Button>
+          </>
+        }
+      />
+
+      {studentView ? (
+        <div className="px-5 py-5">
+          <ReportCardView card={card} actions={<PrintReportCardButton />} />
+          <p className="mt-3 text-center text-xs">
+            <Link to={scope.reportCardPath(card.id)} className="text-primary hover:underline">
+              Open it on its own page
+            </Link>
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* The result in one line of figures. */}
+          <div className="grid grid-cols-3 border-b border-border sm:grid-cols-6 sm:divide-x sm:divide-border">
+            {[
+              { label: 'Score', value: formatPercent(totals.overall_percentage, 0), tone: scoreTone(totals.overall_percentage).text },
+              { label: 'Grade', value: totals.overall_grade ?? '—' },
+              { label: 'Marks', value: `${totals.total_marks} / ${totals.total_max_marks}` },
+              { label: 'Rank', value: card.rank != null ? `${card.rank}${card.class_size ? ` of ${card.class_size}` : ''}` : '—' },
+              { label: 'Attendance', value: card.attendance_percentage != null ? formatPercent(card.attendance_percentage, 0) : '—' },
+              { label: 'Exams', value: `${totals.exams_counted}${totals.exams_missed ? `, ${totals.exams_missed} missed` : ''}` },
+            ].map((f) => (
+              <div key={f.label} className="min-w-0 px-5 py-3">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{f.label}</p>
+                <p className={cn('mt-0.5 truncate text-lg font-medium tabular-nums', f.tone ?? 'text-foreground')}>{f.value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* The remark, written here: the step most cards are waiting on. */}
+          <DetailSection
+            title="Class teacher's remark"
+            action={
+              !(card.remarks ?? '').trim() ? <span className="text-[11px] font-medium text-warning">Not written yet</span> : undefined
+            }
+          >
+            <div className="space-y-2 px-5 py-3">
+              <Textarea
+                rows={3}
+                value={remark}
+                onChange={(e) => setRemark(e.target.value)}
+                placeholder={`A line or two about ${name.split(' ')[0]}'s term: what went well, what to work on.`}
+                aria-label="Class teacher's remark"
+                className="text-sm"
+              />
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button size="sm" variant={dirty ? 'solid' : 'outline'} disabled={!dirty} loading={update.isPending && !!update.variables?.body.remarks} onClick={() => void saveRemark(false)}>
+                  Save remark
+                </Button>
+                {onNext && (
+                  <Button size="sm" variant="ghost" onClick={() => void saveRemark(true)}>
+                    {dirty ? 'Save and next' : 'Next'}
+                    {nextName ? `: ${nextName.split(' ')[0]}` : ''} →
+                  </Button>
+                )}
+              </div>
+            </div>
+          </DetailSection>
+
+          {/* Each subject as a line: its score as a bar, marks, percentage and grade. */}
+          <DetailSection title={`Subjects · ${totals.subjects.length}`}>
+            <ul className="divide-y divide-border">
+              {totals.subjects.map((s) => {
+                const pct = s.percentage
+                const tone = scoreTone(pct)
+                return (
+                  <li key={s.subject_id} className="px-5 py-2.5">
+                    <div className="flex items-center gap-3">
+                      <span className="w-32 shrink-0 truncate text-sm font-medium text-foreground sm:w-40">{tidy(s.subject_name ?? 'Subject')}</span>
+                      <span className="relative h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden>
+                        <span className={cn('absolute inset-y-0 left-0 rounded-full', tone.bar)} style={{ width: `${Math.max(0, Math.min(100, pct ?? 0))}%` }} />
+                      </span>
+                      <span className="w-16 shrink-0 text-right text-sm tabular-nums text-muted-foreground">
+                        {s.total_marks} / {s.total_max_marks}
+                      </span>
+                      <span className={cn('w-12 shrink-0 text-right text-sm font-medium tabular-nums', tone.text)}>
+                        {pct != null ? formatPercent(pct, 0) : '—'}
+                      </span>
+                      <span className="w-8 shrink-0 text-sm text-muted-foreground">{s.grade ?? ''}</span>
+                    </div>
+                    {(s.exams_missed > 0 || s.teacher_remarks) && (
+                      <p className="mt-1 pl-0 text-xs text-muted-foreground sm:pl-44">
+                        {s.exams_missed > 0 && <span className="text-warning">{s.exams_missed} missed · </span>}
+                        {s.teacher_remarks}
+                      </p>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          </DetailSection>
+        </>
+      )}
+
+      <ConfirmDialog
+        open={deleting}
+        onOpenChange={setDeleting}
+        title="Delete this report card?"
+        description={`${name}’s “${card.title}” will be withdrawn. The exam marks it was built from are untouched, so it can be re-issued.`}
+        confirmLabel="Delete card"
+        destructive
+        loading={remove.isPending}
+        onConfirm={() => remove.mutate(card.id, { onSuccess: onDeleted, onSettled: () => setDeleting(false) })}
+      />
+    </>
+  )
+}
+
+function TeacherReportCards() {
+  const scope = useExamScope()
+  const catalogue = useExamCatalogue()
+  const cardsQuery = useReportCards()
+  const update = useUpdateReportCard()
+
+  const led = catalogue.leadableClasses
+  const [classId, setClassId] = React.useState<number | null>(null)
+  const activeClassId = classId ?? led[0]?.id ?? null
+  const [setTitle, setSetTitle] = React.useState<string | null>(null)
+  const [selectedId, setSelectedId] = React.useState<string | null>(null)
+  const [search, setSearch] = React.useState('')
+  const [issuing, setIssuing] = React.useState(false)
+  const [warnings, setWarnings] = React.useState<string[]>([])
+  const [releasing, setReleasing] = React.useState(false)
+  const debounced = useDebouncedValue(search.trim().toLowerCase())
+
+  const cards = React.useMemo(() => (cardsQuery.data ?? []).filter((c) => c.class_id === activeClassId), [cardsQuery.data, activeClassId])
+  // The class's sets, newest first; inside one, by rank then name.
+  const sets = React.useMemo(() => {
+    const map = new Map<string, ReportCardOut[]>()
+    for (const c of cards) map.set(c.title, [...(map.get(c.title) ?? []), c])
+    for (const list of map.values())
+      list.sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999) || (a.student?.full_name ?? '').localeCompare(b.student?.full_name ?? ''))
+    return [...map.entries()].sort((a, b) => (b[1][0].generated_at ?? '').localeCompare(a[1][0].generated_at ?? ''))
+  }, [cards])
+  const current = sets.find(([title]) => title === setTitle) ?? sets[0] ?? null
+  const list = current?.[1] ?? []
+  const shown = debounced ? list.filter((c) => (c.student?.full_name ?? '').toLowerCase().includes(debounced)) : list
+  const selected = issuing ? null : (shown.find((c) => c.id === selectedId) ?? shown[0] ?? null)
+
+  // The next student after the one open, for "Save and next".
+  const nextCard = selected ? (shown[shown.findIndex((c) => c.id === selected.id) + 1] ?? null) : null
+  const released = list.filter((c) => c.is_published).length
+  const average = list.length ? list.reduce((sum, c) => sum + withRowTotals(c).overall_percentage, 0) / list.length : null
+  const loading = cardsQuery.isPending || catalogue.isPending
+
+  const releaseAll = async () => {
+    setReleasing(true)
+    try {
+      for (const c of list.filter((x) => !x.is_published)) {
+        await update.mutateAsync({ cardId: c.id, body: { is_published: true } })
+      }
+    } finally {
+      setReleasing(false)
+    }
+  }
+
+  return (
+    <>
+      <WorkspaceHeader
+        title="Report Cards"
+        description="One card per student in the class you lead. Read each, add a remark, then release it."
+        actions={
+          led.length > 0 ? (
+            <>
+              <Button asChild variant="outline" size="sm">
+                <Link to={scope.paperMarksPath}>
+                  <ClipboardPen className="size-4" />
+                  Offline exam marks
+                </Link>
+              </Button>
+              <Button size="sm" icon={<Plus />} onClick={() => setIssuing(true)}>
+                Issue report cards
+              </Button>
+            </>
+          ) : undefined
+        }
+      />
+
+      {!catalogue.isPending && led.length === 0 ? (
+        <Band className="border-b border-border">
+          <p className="py-10 text-center text-sm text-muted-foreground">
+            Report cards are issued by a class&rsquo;s class teacher, and you do not lead a class. Ask an administrator to
+            assign you, or to issue them.
+          </p>
+        </Band>
+      ) : (
+        <>
+          {/* Which class and which set. */}
+          <Band className="border-b border-border">
+            <div className="flex flex-wrap items-center gap-2 py-2.5">
+              {led.length > 1 ? (
+                <Combobox
+                  value={String(activeClassId ?? '')}
+                  onChange={(v) => {
+                    setClassId(Number(v))
+                    setSetTitle(null)
+                    setSelectedId(null)
+                  }}
+                  options={led.map((c) => ({ value: String(c.id), label: c.name }))}
+                  searchPlaceholder="Search classes"
+                  className="h-8 w-40 text-sm"
+                />
+              ) : (
+                <span className="text-sm font-medium text-foreground">{led[0]?.name ?? ''}</span>
+              )}
+              {sets.length > 0 && (
+                <>
+                  <span className="text-muted-foreground">·</span>
+                  <Combobox
+                    value={current?.[0] ?? ''}
+                    onChange={(v) => {
+                      setSetTitle(v)
+                      setSelectedId(null)
+                    }}
+                    options={sets.map(([title, l]) => ({ value: title, label: `${title} (${l.length})` }))}
+                    searchPlaceholder="Search sets"
+                    className="h-8 w-48 text-sm"
+                  />
+                  {current && <span className="text-xs text-muted-foreground">issued {formatDateShort(current[1][0].generated_at)}</span>}
+                </>
+              )}
+            </div>
+          </Band>
+
+          <Figures>
+            <Figure label="Cards" value={loading ? '…' : String(list.length)} context={current ? current[0] : undefined} tone="primary" />
+            <Figure label="Released" value={loading ? '…' : String(released)} context="students can see them" tone="success" />
+            <Figure label="Not released" value={loading ? '…' : String(list.length - released)} context="waiting for you" tone="warning" alert={list.length - released > 0} />
+            <Figure label="Class average" value={loading ? '…' : average == null ? '—' : formatPercent(average, 0)} tone="info" />
+          </Figures>
+
+          {warnings.length > 0 && (
+            <Band className="border-b border-border">
+              <div className="flex items-start gap-3 py-2.5 text-sm">
+                <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-warning">Issued with notes</p>
+                  <ul className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
+                    {warnings.map((w) => (
+                      <li key={w}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => setWarnings([])}>
+                  Dismiss
+                </Button>
+              </div>
+            </Band>
+          )}
+
+          <Band className="border-b border-border px-0 sm:px-0 lg:px-0">
+            <div className="max-lg:[&>div]:grid-cols-1 lg:h-[calc(100vh-19rem)] lg:min-h-[30rem]">
+              <SplitView
+                list={
+                  <ListPane
+                    toolbar={
+                      <>
+                        <ListSearch value={search} onChange={setSearch} placeholder="Search students" />
+                        {list.length > released && (
+                          <Button size="sm" variant="outline" className="w-full" icon={<Eye />} loading={releasing} onClick={() => void releaseAll()}>
+                            Release the {list.length - released === list.length ? `${list.length} cards` : `other ${list.length - released}`}
+                          </Button>
+                        )}
+                      </>
+                    }
+                    footer={list.length ? `${released} of ${list.length} released` : undefined}
+                  >
+                    {loading ? (
+                      <div className="space-y-2 p-4">
+                        {Array.from({ length: 6 }).map((_, i) => (
+                          <Skeleton key={i} className="h-9 rounded" />
+                        ))}
+                      </div>
+                    ) : cardsQuery.isError ? (
+                      <ListEmpty>The report cards could not be loaded. Try again in a moment.</ListEmpty>
+                    ) : list.length === 0 ? (
+                      <ListEmpty>No report cards for this class yet.</ListEmpty>
+                    ) : shown.length === 0 ? (
+                      <ListEmpty>Nobody matches that search.</ListEmpty>
+                    ) : (
+                      shown.map((c) => {
+                        const totals = withRowTotals(c)
+                        return (
+                          <ListItem
+                            key={c.id}
+                            active={selected?.id === c.id}
+                            onClick={() => {
+                              setSelectedId(c.id)
+                              setIssuing(false)
+                            }}
+                            title={
+                              <>
+                                <span className="mr-2 inline-block w-5 text-right text-xs tabular-nums text-muted-foreground">{c.rank ?? '—'}</span>
+                                {tidy(c.student?.full_name ?? `Student #${String(c.student_id).slice(-6)}`)}
+                              </>
+                            }
+                            sub={
+                              <span className="pl-7">
+                                {formatPercent(totals.overall_percentage, 0)}
+                                {totals.overall_grade ? ` · ${totals.overall_grade}` : ''}
+                                {!(c.remarks ?? '').trim() && <span className="text-warning"> · no remark</span>}
+                              </span>
+                            }
+                            right={
+                              <span className={c.is_published ? 'text-success' : 'font-medium text-warning'}>
+                                {c.is_published ? 'Released' : 'Not yet'}
+                              </span>
+                            }
+                          />
+                        )
+                      })
+                    )}
+                  </ListPane>
+                }
+                detail={
+                  issuing ? (
+                    <div className="px-5 py-5">
+                      <IssuePanel
+                        onClose={() => setIssuing(false)}
+                        onDone={(batch) => {
+                          setWarnings(batch.warnings)
+                          setIssuing(false)
+                          setSetTitle(null)
+                        }}
+                      />
+                    </div>
+                  ) : selected ? (
+                    <TeacherCardDetail
+                      key={selected.id}
+                      card={selected}
+                      onDeleted={() => setSelectedId(null)}
+                      onNext={nextCard ? () => setSelectedId(nextCard.id) : undefined}
+                      nextName={nextCard ? tidy(nextCard.student?.full_name ?? "") : undefined}
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center gap-3 px-5 py-16 text-center">
+                      <p className="max-w-md text-sm text-muted-foreground">
+                        {list.length === 0
+                          ? 'Enter the offline marks, then issue the cards. They start unreleased, so you can read each one first.'
+                          : 'Pick a student to see their card.'}
+                      </p>
+                      {list.length === 0 && (
+                        <Button size="sm" icon={<Plus />} onClick={() => setIssuing(true)}>
+                          Issue report cards
+                        </Button>
+                      )}
+                    </div>
+                  )
+                }
+              />
+            </div>
+          </Band>
+        </>
+      )}
+    </>
+  )
+}
+
+function formatDateShort(value: string | null | undefined) {
+  if (!value) return ''
+  const d = new Date(/[zZ]$|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`)
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+}
+
+/** A teacher gets the list and card above; an admin, the page below. */
 export default function ReportCardsPage() {
+  const scope = useExamScope()
+  return scope.isAdmin ? <AdminReportCards /> : <TeacherReportCards />
+}
+
+function AdminReportCards() {
   const scope = useExamScope()
   const catalogue = useExamCatalogue()
   const cardsQuery = useReportCards()

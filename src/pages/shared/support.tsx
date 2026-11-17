@@ -33,7 +33,7 @@ import {
 } from '@/queries/support.queries'
 import { useAuth } from '@/providers/auth-provider'
 import { formatRelative } from '@/lib/datetime'
-import { isTeachingOrAdmin } from '@/lib/constants'
+import { isTeachingOrAdmin, isTeachingRole } from '@/lib/constants'
 import {
   TICKET_CATEGORIES,
   TICKET_CATEGORY_LABEL,
@@ -78,6 +78,8 @@ import { Field, FormError } from '@/components/forms/field'
 import { EmptyState } from '@/components/feedback/states'
 import { QueryBoundary } from '@/components/feedback/query-boundary'
 import { PageHeader } from '@/components/layout/page-header'
+
+import { TeacherSupport } from './support-teacher'
 
 /**
  * Support — a threaded ticket, and the phone number to ring instead.
@@ -486,7 +488,13 @@ function TicketRow({ ticket, onOpen }: { ticket: TicketOut; onOpen: () => void }
   )
 }
 
+/** A teacher gets their own help-desk page (support-teacher.tsx); everyone else, this one. */
 export default function SupportPage() {
+  const { role } = useAuth()
+  return isTeachingRole(role) ? <TeacherSupport /> : <EveryoneSupport />
+}
+
+function EveryoneSupport() {
   const { role } = useAuth()
   const isAdmin = role === 'ADMIN'
   const contact = useSupportContact()

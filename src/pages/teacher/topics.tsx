@@ -1,4 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
+import { ArrowLeft } from 'lucide-react'
 import * as React from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
@@ -15,28 +16,18 @@ import {
 import { todayApiDate } from '@/lib/datetime'
 import { subjectName, className as classNameOf } from '@/lib/select'
 import { formatPercent } from '@/lib/format'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import { DatePicker } from '@/components/ui/date-picker'
 import { Input, Textarea } from '@/components/ui/input'
 import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogForm,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
   AttachmentList,
   AttachmentPicker,
   type PendingAttachment,
 } from '@/components/forms/attachment-picker'
+import { ConfirmDialog } from '@/components/forms/confirm-dialog'
 import { Field, FormError } from '@/components/forms/field'
-import { useClassSubjectSelection } from './class-subject-picker'
+import { Band, WorkspaceHeader } from '@/components/layout/workspace'
 
 const schema = z.object({
   class_id: z.string().min(1, 'Choose a class'),
@@ -48,7 +39,7 @@ const schema = z.object({
 })
 type FormValues = z.infer<typeof schema>
 
-/** Values the dashboard's "class over" prompt hands in, so the form opens filled. */
+/** Values the page opens filled with: the course picked on Lessons, or the dashboard's "class over" prompt. */
 export type TopicPreset = {
   class_id: number
   subject_id: number
@@ -56,24 +47,24 @@ export type TopicPreset = {
 }
 
 /**
- * Logs a topic, or edits one when `editing` is set. Class and subject are
- * fixed on edit — `TopicUpdate` does not accept them.
+ * Logs a topic, or edits one when `editing` is set, as a page of its own in place of the
+ * Lessons list (like the teacher's Set homework page): what was taught on the left with room
+ * to write and attach, when and how far on the right, the buttons along the foot. Class and
+ * subject are fixed on edit — `TopicUpdate` does not accept them.
  *
  * Attachments (notes, images, voice notes) are uploaded AFTER the topic is
  * saved, one by one, because the topic has to exist to hang them on. If one
- * fails the dialog stays open on the saved topic with the failed files still
+ * fails the page stays open on the saved topic with the failed files still
  * listed, so a retry uploads only those and never logs the topic twice.
  */
-export function TopicFormDialog({
-  open,
-  onOpenChange,
+export function TopicFormPage({
   editing,
   preset = null,
+  onClose,
 }: {
-  open: boolean
-  onOpenChange: (v: boolean) => void
   editing: TopicOut | null
   preset?: TopicPreset | null
+  onClose: () => void
 }) {
   const mappingsQuery = useMyClasses()
   const topicsQuery = useTeacherTopics()
@@ -81,9 +72,8 @@ export function TopicFormDialog({
   const updateTopic = useUpdateTopic()
   const addAttachment = useAddTopicAttachment()
   const removeAttachment = useRemoveTopicAttachment()
-  const selection = useClassSubjectSelection(mappingsQuery.data)
 
-  // The topic this dialog is working on once it exists: the one being edited,
+  // The topic this page is working on once it exists: the one being edited,
   // or the one a first submit created. Read live from the cache so an
   // attachment removed a moment ago is gone from the list.
   const [saved, setSaved] = React.useState<TopicOut | null>(null)
@@ -96,46 +86,42 @@ export function TopicFormDialog({
   const [pending, setPending] = React.useState<PendingAttachment[]>([])
   const [uploadNote, setUploadNote] = React.useState<string | null>(null)
   const [removingId, setRemovingId] = React.useState<string | null>(null)
+  const [leaving, setLeaving] = React.useState(false)
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      class_id: '',
-      subject_id: '',
-      topic_title: '',
-      description: '',
-      date_covered: todayApiDate(),
-      completion_percentage: 100,
-    },
+    defaultValues: editing
+      ? {
+          class_id: String(editing.class_id),
+          subject_id: String(editing.subject_id),
+          topic_title: editing.topic_title,
+          description: editing.description ?? '',
+          date_covered: editing.date_covered,
+          completion_percentage: editing.completion_percentage,
+        }
+      : {
+          class_id: preset ? String(preset.class_id) : '',
+          subject_id: preset ? String(preset.subject_id) : '',
+          topic_title: '',
+          description: '',
+          date_covered: preset?.date_covered ?? todayApiDate(),
+          completion_percentage: 100,
+        },
   })
 
+  const classes = React.useMemo(() => {
+    const map = new Map<number, { id: number; name: string; code: string }>()
+    for (const m of mappingsQuery.data ?? []) map.set(m.class_room.id, m.class_room)
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+  }, [mappingsQuery.data])
+
+  // A teacher with one class and one subject has nothing to pick.
   React.useEffect(() => {
-    if (!open) return
-    setSaved(null)
-    setPending([])
-    setUploadNote(null)
-    form.reset(
-      editing
-        ? {
-            class_id: String(editing.class_id),
-            subject_id: String(editing.subject_id),
-            topic_title: editing.topic_title,
-            description: editing.description ?? '',
-            date_covered: editing.date_covered,
-            completion_percentage: editing.completion_percentage,
-          }
-        : {
-            class_id: preset ? String(preset.class_id) : selection.classId ? String(selection.classId) : '',
-            subject_id: preset ? String(preset.subject_id) : selection.subjectId ? String(selection.subjectId) : '',
-            topic_title: '',
-            description: '',
-            date_covered: preset?.date_covered ?? todayApiDate(),
-            completion_percentage: 100,
-          },
-    )
-    // Only re-seed when the dialog opens or the target changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, editing, preset])
+    const all = mappingsQuery.data ?? []
+    if (editing || form.getValues('class_id') || all.length !== 1) return
+    form.setValue('class_id', String(all[0].class_room.id))
+    form.setValue('subject_id', String(all[0].subject.id))
+  }, [editing, mappingsQuery.data, form])
 
   const classId = form.watch('class_id')
 
@@ -168,7 +154,7 @@ export function TopicFormDialog({
         if (Object.keys(patch).length > 0) {
           await updateTopic.mutateAsync({ topicId: target.id, body: patch })
         } else if (pending.length === 0) {
-          onOpenChange(false)
+          onClose()
           return
         }
       } else {
@@ -215,7 +201,7 @@ export function TopicFormDialog({
       return
     }
     setPending([])
-    onOpenChange(false)
+    onClose()
   }
 
   const removeExisting = async (attachmentId: string) => {
@@ -228,80 +214,99 @@ export function TopicFormDialog({
     }
   }
 
+  // Typed words or picked files not yet saved: ask before throwing them away.
+  const unsaved = (form.formState.isDirty && !saved) || pending.length > 0
+  const cancel = () => (unsaved && !form.formState.isSubmitting ? setLeaving(true) : onClose())
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{editing ? 'Edit topic' : 'Log a topic'}</DialogTitle>
-          <DialogDescription>
-            {editing
-              ? 'Students see this update in their syllabus progress straight away.'
-              : 'Record what you covered so students can follow the syllabus.'}
-          </DialogDescription>
-        </DialogHeader>
-        <DialogForm onSubmit={form.handleSubmit(onSubmit)} noValidate>
-          <DialogBody className="space-y-5">
-            <FormError message={form.formState.errors.root?.message} />
+    <>
+      <WorkspaceHeader
+        title={editing ? 'Edit topic' : 'Log a topic'}
+        description={
+          editing
+            ? `${classNameOf(editing)} · ${subjectName(editing)}. Students see this update in their syllabus progress straight away.`
+            : 'Record what you covered so students can follow the syllabus.'
+        }
+        actions={
+          <Button size="sm" variant="outline" icon={<ArrowLeft />} onClick={cancel}>
+            Lessons
+          </Button>
+        }
+      />
 
-            {editing ? (
-              // Immutable on update, so shown as context rather than as
-              // controls that would silently do nothing.
-              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5">
-                <span className="text-xs text-muted-foreground">Logged against</span>
-                <Badge tone="accent" size="sm">
-                  {subjectName(editing)}
-                </Badge>
-                <Badge tone="outline" size="sm">
-                  {classNameOf(editing)}
-                </Badge>
-              </div>
-            ) : (
-              <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
-                <Field id="topic-class" label="Class" required error={form.formState.errors.class_id?.message}>
-                  <Combobox
-                    id="topic-class"
-                    value={form.watch('class_id') || null}
-                    onChange={(v) => {
-                      form.setValue('class_id', v, { shouldValidate: true })
-                      form.setValue('subject_id', '')
-                    }}
-                    placeholder="Select a class"
-                    options={selection.classes.map((c) => ({ value: String(c.id), label: c.name, hint: c.code }))}
-                  />
-                </Field>
+      <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
+        <Band className="border-b border-border">
+          <div className="grid gap-x-10 gap-y-6 py-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+            <div className="space-y-5">
+              <FormError message={form.formState.errors.root?.message} />
 
-                <Field id="topic-subject" label="Subject" required error={form.formState.errors.subject_id?.message}>
-                  <Combobox
-                    id="topic-subject"
-                    value={form.watch('subject_id') || null}
-                    onChange={(v) => form.setValue('subject_id', v, { shouldValidate: true })}
-                    disabled={!classId}
-                    placeholder={classId ? 'Select a subject' : 'Choose a class first'}
-                    options={subjects.map((s) => ({ value: String(s.id), label: s.name, hint: s.code }))}
-                  />
-                </Field>
-              </div>
-            )}
+              {!editing && (
+                <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
+                  <Field id="topic-class" label="Class" required error={form.formState.errors.class_id?.message}>
+                    <Combobox
+                      id="topic-class"
+                      value={form.watch('class_id') || null}
+                      onChange={(v) => {
+                        form.setValue('class_id', v, { shouldValidate: true, shouldDirty: true })
+                        form.setValue('subject_id', '')
+                      }}
+                      placeholder={mappingsQuery.isPending ? 'Loading your classes…' : 'Select a class'}
+                      options={classes.map((c) => ({ value: String(c.id), label: c.name, hint: c.code }))}
+                    />
+                  </Field>
 
-            <Field id="topic-title" label="Topic" required error={form.formState.errors.topic_title?.message}>
-              <Input id="topic-title" placeholder="Binary search trees" {...form.register('topic_title')} />
-            </Field>
+                  <Field id="topic-subject" label="Subject" required error={form.formState.errors.subject_id?.message}>
+                    <Combobox
+                      id="topic-subject"
+                      value={form.watch('subject_id') || null}
+                      onChange={(v) => form.setValue('subject_id', v, { shouldValidate: true, shouldDirty: true })}
+                      disabled={!classId}
+                      placeholder={classId ? 'Select a subject' : 'Choose a class first'}
+                      options={subjects.map((s) => ({ value: String(s.id), label: s.name, hint: s.code }))}
+                    />
+                  </Field>
+                </div>
+              )}
 
-            <Field id="topic-description" label="Description" error={form.formState.errors.description?.message}>
-              <Textarea
-                id="topic-description"
-                rows={3}
-                placeholder="Tree traversal and balancing"
-                {...form.register('description')}
-              />
-            </Field>
+              <Field id="topic-title" label="Topic" required error={form.formState.errors.topic_title?.message}>
+                <Input id="topic-title" autoFocus={!editing} placeholder="Binary search trees" {...form.register('topic_title')} />
+              </Field>
 
-            <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
+              <Field id="topic-description" label="Description" error={form.formState.errors.description?.message}>
+                <Textarea
+                  id="topic-description"
+                  rows={6}
+                  placeholder="What was covered: the pages, the examples, what to revise."
+                  className="lg:min-h-48"
+                  {...form.register('description')}
+                />
+              </Field>
+
+              <Field
+                id="topic-attachments"
+                label="Notes, images and voice"
+                hint="Students see these with the topic in their syllabus. Notes can be any document; a voice note is recorded right here."
+              >
+                <div className="space-y-3">
+                  {target && target.attachments.length > 0 && (
+                    <AttachmentList
+                      attachments={target.attachments}
+                      removingId={removingId}
+                      onRemove={(a) => void removeExisting(a.id)}
+                    />
+                  )}
+                  <AttachmentPicker value={pending} onChange={setPending} disabled={form.formState.isSubmitting} />
+                  {uploadNote && <p className="text-xs text-muted-foreground">{uploadNote}</p>}
+                </div>
+              </Field>
+            </div>
+
+            <div className="space-y-5 lg:border-l lg:border-border lg:pl-10">
               <Field id="topic-date" label="Date covered" required error={form.formState.errors.date_covered?.message}>
                 <DatePicker
                   id="topic-date"
                   value={form.watch('date_covered')}
-                  onChange={(v) => form.setValue('date_covered', v ?? todayApiDate(), { shouldValidate: true })}
+                  onChange={(v) => form.setValue('date_covered', v ?? todayApiDate(), { shouldValidate: true, shouldDirty: true })}
                   maxToday
                 />
               </Field>
@@ -309,6 +314,7 @@ export function TopicFormDialog({
               <Field
                 id="topic-completion"
                 label={`Completion — ${formatPercent(completion, 0)}`}
+                hint="How much of this topic is done. Below 100% if you will carry on with it next class."
                 error={form.formState.errors.completion_percentage?.message}
               >
                 {/* valueAsNumber matters: without it a range input yields a
@@ -324,31 +330,12 @@ export function TopicFormDialog({
                 />
               </Field>
             </div>
+          </div>
+        </Band>
 
-            <Field
-              id="topic-attachments"
-              label="Notes, images and voice"
-              hint="Students see these with the topic in their syllabus. Notes can be any document; a voice note is recorded right here."
-            >
-              <div className="space-y-3">
-                {target && target.attachments.length > 0 && (
-                  <AttachmentList
-                    attachments={target.attachments}
-                    removingId={removingId}
-                    onRemove={(a) => void removeExisting(a.id)}
-                  />
-                )}
-                <AttachmentPicker
-                  value={pending}
-                  onChange={setPending}
-                  disabled={form.formState.isSubmitting}
-                />
-                {uploadNote && <p className="text-xs text-muted-foreground">{uploadNote}</p>}
-              </div>
-            </Field>
-          </DialogBody>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+        <Band className="z-10 border-b border-border lg:sticky lg:bottom-0">
+          <div className="flex items-center justify-end gap-2 py-3">
+            <Button type="button" variant="outline" onClick={cancel}>
               {saved ? 'Done' : 'Cancel'}
             </Button>
             <Button type="submit" variant="primary" loading={form.formState.isSubmitting}>
@@ -360,9 +347,22 @@ export function TopicFormDialog({
                   ? `Log topic & upload ${pending.length} ${pending.length === 1 ? 'file' : 'files'}`
                   : 'Log topic'}
             </Button>
-          </DialogFooter>
-        </DialogForm>
-      </DialogContent>
-    </Dialog>
+          </div>
+        </Band>
+      </form>
+
+      <ConfirmDialog
+        open={leaving}
+        onOpenChange={setLeaving}
+        title="Leave without saving?"
+        description={editing ? 'Your changes to this topic have not been saved.' : 'This topic has not been logged yet.'}
+        confirmLabel="Leave without saving"
+        destructive
+        onConfirm={() => {
+          setLeaving(false)
+          onClose()
+        }}
+      />
+    </>
   )
 }
