@@ -422,6 +422,8 @@ export default function CallPage() {
   const resumeRef = React.useRef<{ mic: boolean; cam: boolean } | null>(null)
   // When the recent automatic rejoins happened, to stop trying after a few in a row.
   const rejoinsRef = React.useRef<number[]>([])
+  // A teacher's device that stalled: fewest live videos, effects off (useCallLoad's relieve).
+  const relieveRef = React.useRef<() => void>(() => undefined)
   const [reconnecting, setReconnecting] = React.useState(false)
   // Set after a reload in the middle of a call: the one tap that takes them back in with sound.
   const [tapToRejoin, setTapToRejoin] = React.useState<(() => void) | null>(null)
@@ -569,6 +571,55 @@ export default function CallPage() {
         }
       }
 
+      // A microphone that stops sending sound in the middle of a class (another app took it,
+      // or the device stalled) is silence for whoever is listening - for the whole class when
+      // it is the teacher's. The call only says so on screen; here it is started again by
+      // itself, by muting and unmuting, which asks the device for a fresh microphone. That
+      // happens at most three times in five minutes; after that the person is told what to
+      // check. On a teacher's device a stopped microphone or a frozen camera also means the
+      // device is past its limit, so their grid drops to the fewest live videos and their
+      // effects go off. Grade 2's teacher had both, every few minutes, 16-18 Nov.
+      let micFailing = false
+      let cameraFrozen = false
+      let micRestarts: number[] = []
+      let toldAboutMic = false
+      const restartMic = () => {
+        const now = Date.now()
+        micRestarts = micRestarts.filter((t) => now - t < 5 * 60_000)
+        if (micRestarts.length >= 3) {
+          if (!toldAboutMic) {
+            toldAboutMic = true
+            toast.warning(
+              'Your microphone keeps stopping, so the class may not hear you. Close other apps that use it (WhatsApp, Zoom, Google Meet), or plug in earphones with a microphone.',
+              { duration: 20_000 },
+            )
+          }
+          return
+        }
+        micRestarts.push(now)
+        void (async () => {
+          try {
+            await callAdapter.mute()
+            await callAdapter.unmute()
+          } catch (error) {
+            console.warn('The microphone could not be restarted', error)
+          }
+        })()
+      }
+      const watchDevices = (
+        media: Record<string, { value: number | boolean } | undefined> | undefined,
+        isMuted: boolean,
+      ) => {
+        const failingNow = media?.microphoneNotFunctioning?.value === true
+        const frozenNow = media?.cameraFreeze?.value === true
+        if (session.is_host && ((failingNow && !micFailing) || (frozenNow && !cameraFrozen))) relieveRef.current()
+        // Newly stopped, or still stopped a while after the last restart.
+        const lastRestart = micRestarts[micRestarts.length - 1] ?? 0
+        if (failingNow && !isMuted && (!micFailing || Date.now() - lastRestart > 15_000)) restartMic()
+        micFailing = failingNow
+        cameraFrozen = frozenNow
+      }
+
       let screenSharing = false
       adapter.onStateChange((state) => {
         setConnected(state.call?.state === 'Connected')
@@ -588,6 +639,9 @@ export default function CallPage() {
           const diagnostics = state.call.diagnostics
           report(diagnostics?.network.latest as Parameters<typeof report>[0])
           report(diagnostics?.media.latest as Parameters<typeof report>[0])
+          if (state.call.state === 'Connected') {
+            watchDevices(diagnostics?.media.latest as Parameters<typeof watchDevices>[0], state.call.isMuted)
+          }
         }
         // Sharing stopped from the call's own controls (or by the browser)
         // takes the board off the class's screens too.
@@ -725,8 +779,8 @@ export default function CallPage() {
     steerGrid: hosting && kind !== 'exam',
     // A student's device pauses videos when the sound breaks up; an exam's cameras stay on.
     saveData: phase.name === 'ready' && !hosting && kind !== 'exam',
-    onIssue: (name, value) => {
-      if (kind) void callsApi.issue(kind, entityId, name, value).catch(() => undefined)
+    onIssue: (name, value, detail) => {
+      if (kind) void callsApi.issue(kind, entityId, name, value, detail).catch(() => undefined)
     },
     onLowestLevelStrain: () => {
       if (!readyAdapter) return
@@ -737,6 +791,7 @@ export default function CallPage() {
       )
     },
   })
+  relieveRef.current = load.relieve
   const [openMicsSnoozedUntil, setOpenMicsSnoozedUntil] = React.useState(0)
   const showOpenMics = load.tooManyOpenMics && Date.now() > openMicsSnoozedUntil
   const [reactOpen, setReactOpen] = React.useState(false)

@@ -4,6 +4,7 @@ import * as React from 'react'
 
 import { DataSaver, type SaverLevel } from './data-saver'
 import { LEVELS, LiveVideoGovernor } from './live-video-governor'
+import { SoundWindow, soundSecond, WINDOW_SECONDS, type Health, type SoundReading } from './sound-window'
 
 /**
  * Keeps a full class's sound clear.
@@ -22,12 +23,13 @@ import { LEVELS, LiveVideoGovernor } from './live-video-governor'
  *  - The teacher's camera sends a picture sized for a face on a screen (540p), not full HD:
  *    it is the one video every student downloads all lesson. A shared screen or the
  *    whiteboard still goes out in full, so writing stays sharp.
- *  - Received sound is measured; poor sound goes to the office's Connection view. On a
- *    student's device, sound that keeps breaking up pauses the videos there (data-saver.ts).
+ *  - Received sound is judged ten seconds at a time (sound-window.ts); choppy sound goes to
+ *    the office's Connection view with its numbers. On a student's device, sound that keeps
+ *    breaking up pauses the videos there (data-saver.ts).
+ *  - A teacher's device that stalls (microphone stopped, camera frozen) drops to the fewest
+ *    live videos and loses its effects at once (`relieve`).
  *  - The teacher is told when several students have their microphones on at once.
  */
-
-export type Health = 'Good' | 'Poor' | 'Bad'
 
 const gallery = globalThis as {
   __H7_CLASS_VIDEOS__?: number
@@ -61,29 +63,18 @@ export function isStrongDevice(): boolean {
   return (navigator.hardwareConcurrency || 4) >= 8 && (deviceMemory() ?? 8) >= 8
 }
 
-/** Where the teacher's grid starts, from what this device can take. */
+/**
+ * Where the teacher's grid starts, from what this device can take. A step lower than the
+ * first version: until 18 Nov the grid was steered by a sound reading that counted every
+ * one-second blip as strain, which kept stepping it down. With the steadier reading it would
+ * climb higher than it has been running, so it starts a step lower.
+ */
 export function startingLiveVideos(): number {
   const cores = navigator.hardwareConcurrency || 4
   const memory = deviceMemory()
-  if (cores >= 8 && (memory === undefined || memory >= 8)) return 12
-  if (cores >= 4 && (memory === undefined || memory >= 4)) return 9
-  return 6
-}
-
-/** How the sound coming in is: lost packets and the share the call had to patch over. */
-function audioHealth(sample: MediaStatsReportSample): Health {
-  let worst: Health = 'Good'
-  for (const s of sample.audio.receive) {
-    const got = s.packetsPerSecond ?? 0
-    const lost = s.packetsLostPerSecond ?? 0
-    if (got + lost <= 0) continue
-    const loss = lost / (got + lost)
-    const healed = s.healedRatio ?? 0
-    const jitter = s.jitterInMs ?? 0
-    if (loss > 0.1 || healed > 0.2) return 'Bad'
-    if (loss > 0.03 || healed > 0.07 || jitter > 60) worst = 'Poor'
-  }
-  return worst
+  if (cores >= 8 && (memory === undefined || memory >= 8)) return 9
+  if (cores >= 4 && (memory === undefined || memory >= 4)) return 6
+  return 4
 }
 
 /** Pictures arriving faster than this device can draw them: its processor is full. */
@@ -95,6 +86,29 @@ function decodeLagging(sample: MediaStatsReportSample): boolean {
     decoded += s.frameRateDecoded ?? 0
   }
   return received > 10 && decoded < received * 0.75
+}
+
+/** Seconds in the last five that lagged before the device counts as falling behind. */
+const LAG_SECONDS = 3
+
+/** The numbers behind a choppy-sound record, for whoever looks into it: short, one line. */
+function describe(reading: SoundReading, sample: MediaStatsReportSample | null, paused: SaverLevel): string {
+  const pct = (x: number) => `${Math.round(x * 100)}%`
+  const connection = (navigator as Navigator & { connection?: { effectiveType?: string; downlink?: number } })
+    .connection
+  const parts = [
+    `patched ${pct(reading.patched)}`,
+    `lost ${pct(reading.loss)}`,
+    `jitter ${Math.round(reading.jitterMs)}ms`,
+  ]
+  if (reading.rttMs != null) parts.push(`rtt ${Math.round(reading.rttMs)}ms`)
+  if (sample) parts.push(`videos ${sample.video.receive.length + sample.screenShare.receive.length}`)
+  if (paused) parts.push(`paused ${paused}`)
+  parts.push(`cores ${navigator.hardwareConcurrency || '?'}`)
+  const memory = deviceMemory()
+  if (memory !== undefined) parts.push(`mem ${memory}`)
+  if (connection?.effectiveType) parts.push(`net ${connection.effectiveType}${connection.downlink ? ` ${connection.downlink}Mb` : ''}`)
+  return parts.join(' ')
 }
 
 export function useCallLoad({
@@ -112,8 +126,8 @@ export function useCallLoad({
   steerGrid: boolean
   /** A student in a class: pause videos on this device when the sound coming in breaks up. */
   saveData: boolean
-  /** A warning for the office's Connection view, as the call's own warnings are sent. */
-  onIssue: (name: string, value: string) => void
+  /** A warning for the office's Connection view, as the call's own warnings are sent, with its numbers. */
+  onIssue: (name: string, value: string, detail?: string) => void
   /** The teacher's grid is as small as it goes and the call still struggles. */
   onLowestLevelStrain: () => void
 }) {
@@ -122,6 +136,7 @@ export function useCallLoad({
   const [tooManyOpenMics, setTooManyOpenMics] = React.useState(false)
   const [videosPaused, setVideosPaused] = React.useState<SaverLevel>(0)
   const saverRef = React.useRef<DataSaver | null>(null)
+  const governorRef = React.useRef<LiveVideoGovernor | null>(null)
 
   // The latest callbacks, so a re-render does not restart the measuring.
   const onIssueRef = React.useRef(onIssue)
@@ -168,16 +183,30 @@ export function useCallLoad({
       setVideosPaused(level)
     }
 
+    // The call reports once a second; the sound is judged on ten seconds of it at a time
+    // (sound-window.ts), and the picture on three lagging seconds out of the last five.
+    const sound = new SoundWindow()
+    let seconds = 0
+    const lagged: boolean[] = []
     let collector: MediaStatsCollector | null = null
     const onSample = (sample: MediaStatsReportSample) => {
-      latestAudio = audioHealth(sample)
-      latestLag = decodeLagging(sample)
+      sound.add(soundSecond(sample.audio.receive))
+      lagged.push(decodeLagging(sample))
+      if (lagged.length > 5) lagged.shift()
+      latestLag = lagged.filter(Boolean).length >= LAG_SECONDS
+
+      seconds += 1
+      if (seconds % WINDOW_SECONDS !== 0) return
+      const reading = sound.reading()
+      sound.clear()
+      if (!reading) return
+      latestAudio = reading.health
       if (saver) applySaver(saver.reading(latestAudio !== 'Good', Date.now()))
       if (latestAudio !== 'Good') {
         const now = Date.now()
         if (now - (lastSent.get(latestAudio) ?? 0) > 60_000) {
           lastSent.set(latestAudio, now)
-          onIssueRef.current('audioReceiveQuality', latestAudio)
+          onIssueRef.current('audioReceiveQuality', latestAudio, describe(reading, sample, saver?.level ?? 0))
         }
       }
     }
@@ -208,6 +237,7 @@ export function useCallLoad({
     }
 
     const governor = new LiveVideoGovernor(startingLiveVideos(), Date.now())
+    governorRef.current = steerGrid ? governor : null
     const timer = window.setInterval(() => {
       if (!steerGrid) return
       const strained = latestAudio !== 'Good' || latestLag || pressure
@@ -219,6 +249,7 @@ export function useCallLoad({
     return () => {
       window.clearInterval(timer)
       observer?.disconnect()
+      if (governorRef.current === governor) governorRef.current = null
       if (saver) {
         saverRef.current = null
         delete gallery.__H7_VIDEO_ONLY_FOR__
@@ -279,5 +310,18 @@ export function useCallLoad({
     setVideosPaused(0)
   }, [])
 
-  return { liveVideos, openMics, tooManyOpenMics, videosPaused, showVideos }
+  /**
+   * The teacher's device stalled (its microphone stopped sending sound, or its camera froze):
+   * fewest live videos at once, and - the first time - its effects off. A stalled teacher's
+   * device is silence for the whole class, so this does not wait for the usual readings.
+   */
+  const relieve = React.useCallback(() => {
+    const governor = governorRef.current
+    if (!governor) return
+    if (governor.stalled(Date.now())) onStrainRef.current()
+    gallery.__H7_CLASS_VIDEOS__ = governor.liveVideos
+    setLiveVideos(governor.liveVideos)
+  }, [])
+
+  return { liveVideos, openMics, tooManyOpenMics, videosPaused, showVideos, relieve }
 }

@@ -6,6 +6,7 @@
  * Down a step after two strained readings in a row; up a step after a minute with none,
  * never above where the device started. At the lowest step, half a minute more of strain
  * says the device needs more help (load-control turns the teacher's effects off) - once.
+ * A device that stalls (microphone stopped, camera frozen) goes straight to the lowest step.
  *
  * Kept apart from the call so it can be tested on its own.
  */
@@ -60,5 +61,21 @@ export class LiveVideoGovernor {
       return true
     }
     return false
+  }
+
+  /**
+   * The device stalled outright: its microphone stopped sending sound, or its camera froze.
+   * That is a device past its limit, not a line having a bad moment, so the grid drops to the
+   * lowest step at once and climbs back the usual way. Returns true the one time the device
+   * needs its effects turned off.
+   */
+  stalled(now: number): boolean {
+    this.level = 0
+    this.strainedReadings = 0
+    this.calmSince = now
+    this.lowestStrainSince ??= now
+    if (this.gaveUpEffects) return false
+    this.gaveUpEffects = true
+    return true
   }
 }

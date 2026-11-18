@@ -78,9 +78,12 @@ export const callsApi = {
   left: (kind: CallKind, id: string, reason?: { code?: number; sub_code?: number }) =>
     post<{ ok: boolean }>(`${base(kind, id)}/left`, reason),
 
-  /** A problem on this person's side of the call, as ACS raised it: network, mic, camera. */
-  issue: (kind: CallKind, id: string, name: string, value: string) =>
-    post<{ ok: boolean }>(`${base(kind, id)}/issue`, { name, value }),
+  /**
+   * A problem on this person's side of the call, as ACS raised it: network, mic, camera.
+   * `detail` is the numbers behind it, where the page has them (choppy sound).
+   */
+  issue: (kind: CallKind, id: string, name: string, value: string, detail?: string) =>
+    post<{ ok: boolean }>(`${base(kind, id)}/issue`, detail ? { name, value, detail } : { name, value }),
 
   /** [Admin] Who had trouble in a class's calls on a day (today by default), worst first. */
   quality: (classId: number, day?: string) =>
