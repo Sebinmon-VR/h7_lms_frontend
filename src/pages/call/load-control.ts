@@ -4,6 +4,7 @@ import * as React from 'react'
 
 import { DataSaver, type SaverLevel } from './data-saver'
 import { LEVELS, LiveVideoGovernor } from './live-video-governor'
+import { browserLabel, describeStuck, ScreenShareWatch, type ShareStats, type ShareStream } from './screen-share-watch'
 import { SoundWindow, soundSecond, WINDOW_SECONDS, type Health, type SoundReading } from './sound-window'
 
 /**
@@ -29,6 +30,8 @@ import { SoundWindow, soundSecond, WINDOW_SECONDS, type Health, type SoundReadin
  *  - A teacher's device that stalls (microphone stopped, camera frozen) drops to the fewest
  *    live videos and loses its effects at once (`relieve`).
  *  - The teacher is told when several students have their microphones on at once.
+ *  - A shared screen that never appears on this device goes to the Connection view with
+ *    the numbers that say why (screen-share-watch.ts).
  */
 
 const gallery = globalThis as {
@@ -64,17 +67,18 @@ export function isStrongDevice(): boolean {
 }
 
 /**
- * Where the teacher's grid starts, from what this device can take. A step lower than the
- * first version: until 18 Nov the grid was steered by a sound reading that counted every
- * one-second blip as strain, which kept stepping it down. With the steadier reading it would
- * climb higher than it has been running, so it starts a step lower.
+ * Where the teacher's grid starts, from what this device can take - and the most it climbs
+ * back to. From 18 to 25 Nov these were a step lower (9 / 6 / 4), and a teacher on an ordinary
+ * four-core laptop saw only six of a KG class's nine or ten cameras at a time. Teachers need
+ * to see their class; the grid still steps down by itself when the sound or the pictures
+ * start to suffer (live-video-governor.ts).
  */
 export function startingLiveVideos(): number {
   const cores = navigator.hardwareConcurrency || 4
   const memory = deviceMemory()
-  if (cores >= 8 && (memory === undefined || memory >= 8)) return 9
-  if (cores >= 4 && (memory === undefined || memory >= 4)) return 6
-  return 4
+  if (cores >= 8 && (memory === undefined || memory >= 8)) return 12
+  if (cores >= 4 && (memory === undefined || memory >= 4)) return 9
+  return 6
 }
 
 /** Pictures arriving faster than this device can draw them: its processor is full. */
@@ -91,11 +95,20 @@ function decodeLagging(sample: MediaStatsReportSample): boolean {
 /** Seconds in the last five that lagged before the device counts as falling behind. */
 const LAG_SECONDS = 3
 
+/** This device and its connection, as the call records end: "cores 4 mem 2 net 4g 1.35Mb". */
+function deviceLine(): string {
+  const connection = (navigator as Navigator & { connection?: { effectiveType?: string; downlink?: number } })
+    .connection
+  const parts = [`cores ${navigator.hardwareConcurrency || '?'}`]
+  const memory = deviceMemory()
+  if (memory !== undefined) parts.push(`mem ${memory}`)
+  if (connection?.effectiveType) parts.push(`net ${connection.effectiveType}${connection.downlink ? ` ${connection.downlink}Mb` : ''}`)
+  return parts.join(' ')
+}
+
 /** The numbers behind a choppy-sound record, for whoever looks into it: short, one line. */
 function describe(reading: SoundReading, sample: MediaStatsReportSample | null, paused: SaverLevel): string {
   const pct = (x: number) => `${Math.round(x * 100)}%`
-  const connection = (navigator as Navigator & { connection?: { effectiveType?: string; downlink?: number } })
-    .connection
   const parts = [
     `patched ${pct(reading.patched)}`,
     `lost ${pct(reading.loss)}`,
@@ -104,10 +117,7 @@ function describe(reading: SoundReading, sample: MediaStatsReportSample | null, 
   if (reading.rttMs != null) parts.push(`rtt ${Math.round(reading.rttMs)}ms`)
   if (sample) parts.push(`videos ${sample.video.receive.length + sample.screenShare.receive.length}`)
   if (paused) parts.push(`paused ${paused}`)
-  parts.push(`cores ${navigator.hardwareConcurrency || '?'}`)
-  const memory = deviceMemory()
-  if (memory !== undefined) parts.push(`mem ${memory}`)
-  if (connection?.effectiveType) parts.push(`net ${connection.effectiveType}${connection.downlink ? ` ${connection.downlink}Mb` : ''}`)
+  parts.push(deviceLine())
   return parts.join(' ')
 }
 
@@ -186,6 +196,7 @@ export function useCallLoad({
     // The call reports once a second; the sound is judged on ten seconds of it at a time
     // (sound-window.ts), and the picture on three lagging seconds out of the last five.
     const sound = new SoundWindow()
+    const shareWatch = new ScreenShareWatch()
     let seconds = 0
     const lagged: boolean[] = []
     let collector: MediaStatsCollector | null = null
@@ -194,6 +205,21 @@ export function useCallLoad({
       lagged.push(decodeLagging(sample))
       if (lagged.length > 5) lagged.shift()
       latestLag = lagged.filter(Boolean).length >= LAG_SECONDS
+
+      const shares: ShareStream[] = []
+      for (const p of call.remoteParticipants) {
+        for (const v of p.videoStreams) {
+          if (v.mediaStreamType === 'ScreenSharing' && v.isAvailable) shares.push({ id: v.id, receiving: v.isReceiving })
+        }
+      }
+      const stuck = shareWatch.add(shares, sample.screenShare.receive as ShareStats[])
+      if (stuck) {
+        onIssueRef.current(
+          'screenShareNotLoading',
+          'yes',
+          describeStuck(stuck, sample.video.receive.length, `${browserLabel()} ${deviceLine()}`),
+        )
+      }
 
       seconds += 1
       if (seconds % WINDOW_SECONDS !== 0) return
